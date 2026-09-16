@@ -33,18 +33,20 @@ barely is one.
 
 ### What this repository contains today
 
-Build step 1 of six: the infrastructure. The stack creates the documents
-bucket, the vector bucket and index, the knowledge base with its service
-role, and a data source pointing at the documents. No application code and
-no documents yet — those are steps 2 and 3.
+Build steps 1 and 2 of six. The stack creates the documents bucket, the
+vector bucket and index, the knowledge base with its service role, and a
+data source pointing at the documents. A fill script loads a demo corpus of
+two fictional companies into it, and a retrieve script shows that a query in
+one company's workspace never returns the other's documents. No answering
+yet — that is step 3.
 
 ```
 infra/       the CDK app and the stack
-app/         the Lambda handler        (step 3)
-scripts/     ingest and operations     (step 2)
-knowledge/   the demo corpus           (step 2)
+app/         the Lambda handler                    (step 3)
+scripts/     ingest and retrieve
+knowledge/   the demo corpus: two fictional companies
 docs/        metadata convention
-tests/       assertions on the synthesised template
+tests/       stack template, fill script, retrieve script
 ```
 
 ## Deploy
@@ -101,16 +103,37 @@ ends in `DELETE_FAILED`.
 
 ### Filling it
 
-Upload documents under `workspaces/<workspace>/<layer>/`, each with its
-sidecar metadata file (see [docs/metadata.md](docs/metadata.md)), then start
-a sync:
+One command checks the local corpus, uploads it and syncs the knowledge
+base. It reads bucket and ids from the stack outputs and needs a valid AWS
+login (`aws login`):
 
 ```bash
-aws bedrock-agent start-ingestion-job \
-  --knowledge-base-id <KnowledgeBaseId> \
-  --data-source-id <DataSourceId> \
-  --region us-east-1
+python -m scripts.ingest
 ```
+
+The corpus in `knowledge/` belongs to two **fictional** companies invented
+for this demo: *Quillmoor Systems*, a software company with 33 documents
+across all three layers, and *Pellwick Joinery*, a joinery workshop with 4.
+Neither company, nor anything in their documents, is real. Details in
+[knowledge/README.md](knowledge/README.md).
+
+Every document carries a sidecar metadata file
+([docs/metadata.md](docs/metadata.md)); the script refuses to upload anything
+while one is missing or wrong. A rerun uploads only what changed. Options,
+output and exit codes: [scripts/README.md](scripts/README.md).
+
+The proof that workspaces stay apart:
+
+```bash
+python -m scripts.retrieve "How do I export project data?" --workspace quillmoor
+python -m scripts.retrieve "How do I export project data?" --workspace pellwick
+```
+
+The first returns Quillmoor chunks only — every hit prints
+`workspace=quillmoor`. The second returns Pellwick chunks or nothing, never
+a Quillmoor document, although Quillmoor's documents answer the question
+and Pellwick's do not. Add `--layer agent` to see only machine-written
+documents.
 
 ## Tests
 
@@ -118,9 +141,12 @@ aws bedrock-agent start-ingestion-job \
 pytest -q
 ```
 
-The tests render the stack to CloudFormation JSON and assert on it. They
-never call AWS, need no credentials, and finish in seconds — a broken stack
-shows up before a deploy spends ten minutes finding out.
+The stack tests render the stack to CloudFormation JSON and assert on it. The
+script tests check the corpus layout, the sidecars, the object keys and the
+counters, and drive upload, job wait and retrieval against small fake
+clients. None of them call AWS or need credentials, and they finish in
+seconds — a broken stack or a broken sidecar shows up before a deploy or a
+sync spends minutes finding out.
 
 ## What it costs
 
@@ -145,8 +171,8 @@ not what costs money; asking questions is, and barely.
 
 ## Roadmap
 
-1. **Infrastructure** — bucket, vector index, knowledge base, IAM. *(this step)*
-2. **Ingest** — a fill script and a fictional demo company, 20–40 documents.
+1. **Infrastructure** — bucket, vector index, knowledge base, IAM. *(done)*
+2. **Ingest** — a fill script and a fictional demo company, 20–40 documents. *(this step)*
 3. **Answering** — Lambda handler: question, retrieval, model, answer with
    sources and layer.
 4. **Web page** — a chat page on S3 behind a Function URL, one key per

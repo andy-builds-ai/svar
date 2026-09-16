@@ -12,6 +12,10 @@ license = { file = "LICENSE" }
 dependencies = [
     "aws-cdk-lib>=2.269.0",
     "constructs>=10.0.0,<11.0.0",
+    # Used by scripts/ only, and imported lazily there. Tested with 1.43.96.
+    # The crt extra is what lets botocore read the credentials `aws login`
+    # writes (login_session profiles); without it the scripts cannot sign in.
+    "boto3[crt]>=1.43.0",
 ]
 
 [project.optional-dependencies]

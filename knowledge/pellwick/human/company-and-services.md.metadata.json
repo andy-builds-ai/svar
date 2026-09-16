@@ -1,0 +1,32 @@
+{
+  "metadataAttributes": {
+    "workspace": {
+      "value": {
+        "type": "STRING",
+        "stringValue": "pellwick"
+      },
+      "includeForEmbedding": false
+    },
+    "layer": {
+      "value": {
+        "type": "STRING",
+        "stringValue": "human"
+      },
+      "includeForEmbedding": false
+    },
+    "source": {
+      "value": {
+        "type": "STRING",
+        "stringValue": "fictional"
+      },
+      "includeForEmbedding": false
+    },
+    "license": {
+      "value": {
+        "type": "STRING",
+        "stringValue": "CC0-1.0"
+      },
+      "includeForEmbedding": false
+    }
+  }
+}
