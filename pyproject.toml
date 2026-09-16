@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ask-andur"
+version = "0.1.0"
+description = "Andur — an internal knowledge assistant on AWS: Bedrock Knowledge Bases on S3 Vectors, one deployment, one workspace per company."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+    "aws-cdk-lib>=2.269.0",
+    "constructs>=10.0.0,<11.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools]
+packages = ["infra", "infra.stacks"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

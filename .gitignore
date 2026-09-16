@@ -1,0 +1,18 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Secrets — never commit local credential files
+.env
+.env.*
+
+# CDK: build output and the cached context (holds account IDs)
+cdk.out/
+cdk.context.json
+.cdk.staging/
+
+# Node
+node_modules/

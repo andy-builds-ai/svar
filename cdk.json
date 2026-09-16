@@ -1,0 +1,12 @@
+{
+  "app": "python infra/app.py",
+  "watch": {
+    "include": ["infra/**"],
+    "exclude": ["README.md", "cdk*.json", ".venv/**", "**/__pycache__", "tests/**"]
+  },
+  "context": {
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/core:target-partitions": ["aws"]
+  }
+}
