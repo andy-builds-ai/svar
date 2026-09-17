@@ -14,9 +14,13 @@ import aws_cdk as cdk
 import pytest
 from aws_cdk.assertions import Match, Template
 
-from app import handler
+from scripts import ask
+
+import aws  # app/aws.py, imported by its Lambda name (tests/conftest.py)
+import handler  # app/handler.py, likewise
 from infra.stacks.andur_stack import (
     ANSWER_FUNCTION_NAME,
+    ANSWER_MAX_CONCURRENCY,
     ANSWER_MEMORY_MB,
     ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
@@ -332,16 +336,43 @@ def test_role_may_only_invoke_the_embedding_model(stack: AndurStack, template: T
     assert model_arn_parts[-1] == f"::foundation-model/{EMBEDDING_MODEL_ID}"
 
 
-def test_the_only_wildcard_resource_is_model_listing(stack: AndurStack, template: Template) -> None:
-    """Listing models cannot be scoped; nothing else gets to use that excuse."""
+def all_policy_statements(template: Template) -> list[tuple[str, dict[str, Any]]]:
+    """Every statement of every inline role policy and every policy resource, with its owner."""
+    statements: list[tuple[str, dict[str, Any]]] = []
+    for logical_id, role in template.find_resources("AWS::IAM::Role").items():
+        for policy in role["Properties"].get("Policies", []):
+            statements += [(logical_id, statement) for statement in policy["PolicyDocument"]["Statement"]]
+    for logical_id, policy in template.find_resources("AWS::IAM::Policy").items():
+        statements += [(logical_id, statement) for statement in policy["Properties"]["PolicyDocument"]["Statement"]]
+    return statements
+
+
+def test_the_only_wildcard_resource_is_model_listing(template: Template) -> None:
+    """Listing models cannot be scoped; nothing else, in any role of the stack, gets to use that excuse."""
     wildcard_actions = [
-        statement["Action"]
-        for role in (stack.knowledge_base_role, stack.answer_role, stack.node.find_child("ApiKeyFunctionRole"))
-        for document in role_policies(stack, template, role).values()
-        for statement in document["Statement"]
-        if statement["Resource"] == "*"
+        statement["Action"] for _, statement in all_policy_statements(template) if statement["Resource"] == "*"
     ]
     assert wildcard_actions == ["bedrock:ListFoundationModels"]
+
+
+def test_only_the_cdk_provider_role_has_a_managed_policy(stack: AndurStack, template: Template) -> None:
+    """Known exception: the CDK provider framework gives its own role AWSLambdaBasicExecutionRole.
+
+    That role belongs to the function CDK generates to run the key generator
+    during a deploy; this stack does not create it and cannot narrow it
+    without replacing the framework. Every role the stack defines itself
+    carries inline policies only.
+    """
+    provider_role = stack.node.find_child("ApiKeyProvider").node.find_child("framework-onEvent").role
+    provider_role_id = stack.get_logical_id(provider_role.node.default_child)
+    with_managed = {
+        logical_id: role["Properties"]["ManagedPolicyArns"]
+        for logical_id, role in template.find_resources("AWS::IAM::Role").items()
+        if "ManagedPolicyArns" in role["Properties"]
+    }
+    assert list(with_managed) == [provider_role_id]
+    (managed_arn,) = with_managed[provider_role_id]
+    assert joined_last_part(managed_arn) == ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
 
 def test_role_may_only_touch_our_own_vector_index(stack: AndurStack, template: Template) -> None:
@@ -421,12 +452,20 @@ def test_answer_function_runs_the_handler_on_the_newest_runtime(stack: AndurStac
     assert properties["Timeout"] == ANSWER_TIMEOUT_SECONDS
 
 
-def test_answer_timeout_covers_the_handlers_worst_case() -> None:
-    """A hanging Bedrock call must end as the handler's 502, not as a Lambda timeout.
+def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
+    """Each layer waits longer than the one inside it.
 
-    And the whole call must fit into the 15 minutes a Function URL call may take.
+    A hanging Bedrock call ends as the handler's 502, not as a Lambda timeout;
+    the function ends before the 15 minutes a Function URL call may take; and
+    the ask script waits longer than the function, so it prints the 502.
     """
-    assert handler.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < 900
+    assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
+
+
+def test_answer_function_runs_at_most_a_few_requests_at_once(stack: AndurStack, template: Template) -> None:
+    """The public URL's hard cap on Lambda time and model calls."""
+    properties = resource_of(stack, template, stack.answer_function)["Properties"]
+    assert properties["ReservedConcurrentExecutions"] == ANSWER_MAX_CONCURRENCY == 5
 
 
 def test_answer_function_is_configured_only_through_its_environment(
@@ -444,8 +483,8 @@ def test_answer_function_is_configured_only_through_its_environment(
 
 
 def test_the_model_id_is_configuration_not_handler_code() -> None:
-    source = (REPOSITORY_ROOT / "app" / "handler.py").read_text(encoding="utf-8")
-    assert ANSWER_MODEL_ID not in source
+    for module in (REPOSITORY_ROOT / "app").glob("*.py"):
+        assert ANSWER_MODEL_ID not in module.read_text(encoding="utf-8"), module.name
 
 
 def test_answer_role_has_four_permissions_each_on_one_resource(stack: AndurStack, template: Template) -> None:

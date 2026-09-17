@@ -1,4 +1,5 @@
-"""The Andur answer function.
+"""The Andur answer function: handler.py and aws.py.
 
-Lambda runs handler.py as a module of its own; this file only lets the tests
-import it as ``app.handler``."""
+Neither Lambda nor the tests import this folder as a package: both import
+the modules by their plain names, handler and aws (tests/conftest.py). This
+file is not needed for that."""

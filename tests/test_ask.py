@@ -86,7 +86,36 @@ def test_send_wraps_a_body_that_is_not_json(monkeypatch: pytest.MonkeyPatch) -> 
         raise http_error(502, b"Internal Server Error")
 
     monkeypatch.setattr(urllib.request, "urlopen", gateway)
-    assert ask.send(ask.build_request("https://x", KEY, "How?", "quillmoor")) == (502, {"error": "Internal Server Error"})
+    assert ask.send(ask.build_request("https://x", KEY, "How?", "quillmoor")) == (
+        502,
+        {"error": "The response is not JSON: Internal Server Error"},
+    )
+
+
+def test_send_falls_back_to_the_reason_for_an_empty_error_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    def empty(*_: Any, **__: Any) -> Any:
+        raise http_error(429, b"")
+
+    monkeypatch.setattr(urllib.request, "urlopen", empty)
+    assert ask.send(ask.build_request("https://x", KEY, "How?", "quillmoor")) == (429, {"error": "reason"})
+
+
+class FakeResponse(io.BytesIO):
+    status = 200
+
+
+def test_send_reports_a_200_that_is_not_json_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_, **__: FakeResponse(b"<html>proxy page</html>"))
+    assert ask.send(ask.build_request("https://x", KEY, "How?", "quillmoor")) == (
+        200,
+        {"error": "The response is not JSON: <html>proxy page</html>"},
+    )
+
+
+def test_main_exits_1_on_a_200_without_an_answer(deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+    deployed["response"] = (200, {"error": "The response is not JSON: <html>proxy page</html>"})
+    assert ask.main(["How?", "--workspace", "quillmoor"]) == 1
+    assert "HTTP 200: The response is not JSON" in capsys.readouterr().err
 
 
 def test_an_unreachable_url_is_a_readable_problem(monkeypatch: pytest.MonkeyPatch) -> None:

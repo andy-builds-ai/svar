@@ -101,6 +101,28 @@ def test_delete_leaves_a_key_alone_that_this_resource_never_created() -> None:
 
 
 @pytest.mark.parametrize(
+    "properties",
+    [
+        {"ParameterName": "/other/quillmoor", "ParameterPath": PATH},
+        {"ParameterName": 5, "ParameterPath": PATH},
+        {"ParameterPath": PATH},
+        None,
+    ],
+    ids=["outside-the-path", "not-a-string", "no-name", "no-properties"],
+)
+def test_delete_with_invalid_properties_succeeds_and_deletes_nothing(properties: dict[str, Any] | None) -> None:
+    """Create would have failed on the same properties, so there is no key — and a failing Delete sticks a stack."""
+    ssm = FakeSSM()
+    handler.on_event(lifecycle("Create"), None, ssm)
+    event: dict[str, Any] = {"RequestType": "Delete", "PhysicalResourceId": f"{PATH}/quillmoor"}
+    if properties is not None:
+        event["ResourceProperties"] = properties
+
+    assert handler.on_event(event, None, ssm) == {"PhysicalResourceId": f"{PATH}/quillmoor"}
+    assert ssm.deleted == []
+
+
+@pytest.mark.parametrize(
     "name",
     ["/other/quillmoor", f"{PATH}/quill/moor", f"{PATH}X/quillmoor", PATH],
 )

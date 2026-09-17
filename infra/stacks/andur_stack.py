@@ -122,6 +122,13 @@ ANSWER_TIMEOUT_SECONDS = 180
 #: boto3 short, and a question takes a few seconds of it.
 ANSWER_MEMORY_MB = 512
 
+#: At most this many requests run at the same time; Lambda answers the rest
+#: with 429 before any code runs. The URL is public, so this is the hard cap on
+#: Lambda time and with it on model calls per second, whatever arrives —
+#: with a valid key or not. A limit per key comes with the guardrails
+#: (build step 5).
+ANSWER_MAX_CONCURRENCY = 5
+
 #: How long function logs are kept. Without a limit they are kept, and billed,
 #: forever.
 LOG_RETENTION = logs.RetentionDays.ONE_MONTH
@@ -615,6 +622,7 @@ class AndurStack(Stack):
             handler="handler.handler",
             timeout=Duration.seconds(ANSWER_TIMEOUT_SECONDS),
             memory_size=ANSWER_MEMORY_MB,
+            reserved_concurrent_executions=ANSWER_MAX_CONCURRENCY,
             role=role,
             log_group=log_group,
             environment={

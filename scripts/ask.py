@@ -26,8 +26,10 @@ from scripts.aws import REGION, STACK_NAME, AwsProblem, client, error_code, expl
 #: Set this to use a key you already have instead of reading Parameter Store.
 API_KEY_ENVIRONMENT_VARIABLE = "ANDUR_API_KEY"
 
-#: Longer than the function's own timeout (180 s), so a slow answer arrives
-#: as the function's 502, not as a timeout here.
+#: Longer than the function's own timeout (``ANSWER_TIMEOUT_SECONDS`` in the
+#: stack, 180 s), so a slow answer arrives as the function's 502, not as a
+#: timeout here. Not imported from the stack, because that would pull in the
+#: CDK; a test keeps the two in order.
 HTTP_TIMEOUT_SECONDS = 200
 
 
@@ -57,17 +59,25 @@ def build_request(url: str, key: str, question: str, workspace: str) -> urllib.r
     )
 
 
+def json_body(raw: str) -> dict[str, Any]:
+    """A response body as a JSON object, or an ``error`` saying what came instead."""
+    try:
+        body = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"error": f"The response is not JSON: {raw.strip()[:200] or '(empty)'}"}
+    if not isinstance(body, dict):
+        return {"error": f"The response is not a JSON object: {raw.strip()[:200]}"}
+    return body
+
+
 def send(request: urllib.request.Request) -> tuple[int, dict[str, Any]]:
     """Send the request; return the HTTP status and the JSON body, for errors too."""
     try:
         with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
+            return response.status, json_body(response.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as error:
         raw = error.read().decode("utf-8", errors="replace")
-        try:
-            return error.code, json.loads(raw)
-        except json.JSONDecodeError:
-            return error.code, {"error": raw.strip() or error.reason}
+        return error.code, json_body(raw) if raw.strip() else {"error": str(error.reason)}
     except (urllib.error.URLError, TimeoutError) as error:
         raise AwsProblem(f"The Function URL could not be reached: {error}") from error
 
@@ -128,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps(body, ensure_ascii=False, indent=2))
-    if status != 200:
+    if status != 200 or "answer" not in body:
         print(f"error: HTTP {status}: {body.get('error', body)}", file=sys.stderr)
         return 1
     if not args.json:

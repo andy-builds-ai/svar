@@ -66,15 +66,33 @@ def on_event(event: Mapping[str, Any], context: Any, ssm: Any = None) -> dict[st
     CloudFormation sends a Delete for the old id after the Update, so an old
     key does not stay behind. A Delete removes only the parameter this
     resource created, never whatever name the event claims.
-    """
-    if ssm is None:
-        import boto3
 
-        ssm = boto3.client("ssm")
-    name = parameter_name(event)
+    A Delete never fails. With properties that do not name a key under the
+    path, the Create would have failed the same check, so there is no key to
+    remove — and a failing Delete would leave the stack stuck in
+    DELETE_FAILED or a rollback unable to finish.
+    """
     if event["RequestType"] == "Delete":
-        if event.get("PhysicalResourceId") == name:
-            delete_key(ssm, name)
-        return {"PhysicalResourceId": event.get("PhysicalResourceId", name)}
-    ensure_key(ssm, name)
+        return on_delete(event, ssm)
+    name = parameter_name(event)
+    ensure_key(ssm or ssm_client(), name)
     return {"PhysicalResourceId": name}
+
+
+def on_delete(event: Mapping[str, Any], ssm: Any = None) -> dict[str, str]:
+    """Remove the key this resource created, if the event really names it."""
+    physical_id = event.get("PhysicalResourceId", "")
+    try:
+        name = parameter_name(event)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return {"PhysicalResourceId": physical_id}
+    if physical_id == name:
+        delete_key(ssm or ssm_client(), name)
+    return {"PhysicalResourceId": physical_id}
+
+
+def ssm_client() -> Any:
+    """A Parameter Store client from the runtime's boto3."""
+    import boto3
+
+    return boto3.client("ssm")

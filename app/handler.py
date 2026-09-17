@@ -7,7 +7,7 @@
 A request runs four steps, and each can end it with its own status code:
 
 1. Read the request and check that its key belongs to the workspace it names
-   (400, 401, 403).
+   (400, 401, 403, 405).
 2. Retrieve passages from the knowledge base, filtered to that workspace.
    No passage means no model call: a 200 that says so, and nothing to pay.
 3. Ask the answering model to answer from the numbered passages only (502 if
@@ -15,9 +15,10 @@ A request runs four steps, and each can end it with its own status code:
 4. Return the answer, every passage with its layer, the layers of the
    passages the answer cites, the model, the token usage and the latency.
 
-Errors come back as ``{"error": "<one sentence>"}`` — never a traceback. Every
-request is logged as one JSON line with its workspace. The question itself is
-never logged.
+Errors come back as ``{"error": "<one sentence>"}`` — never a traceback, and
+for a broken configuration only a fixed sentence; the cause goes to the log.
+Every request is logged as one JSON line with its workspace. The question
+itself is never logged.
 
 `LLMError`, `extract_answer` with its stopReason check and the botocore catch
 come from the learning chatbot (rag_chatbot.py); `load_settings` does there
@@ -25,9 +26,9 @@ what `check_provider` did: check the configuration before any network call.
 Adapted to Lambda: an error ends the request with an HTTP status instead of a
 console line.
 
-The file stands alone — only the standard library and boto3 — because Lambda
-runs it as a single module. boto3 is imported lazily, so the tests run
-without it; in Lambda the runtime provides it.
+Lambda packages this whole folder and imports its modules by their plain
+names, ``handler`` and ``aws``; the tests do the same (tests/conftest.py).
+AWS clients, timeouts and error causes live in aws.py.
 """
 
 import base64
@@ -39,9 +40,12 @@ import logging
 import os
 import re
 import time
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+import traceback
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
+
+import aws
 
 logger = logging.getLogger("andur")
 logger.setLevel(logging.INFO)
@@ -63,39 +67,41 @@ MAX_ANSWER_TOKENS = 1024
 #: How much of each passage the response carries as its excerpt.
 EXCERPT_CHARACTERS = 300
 
+#: How much of one passage goes into the prompt. A hit is a section of at
+#: most 450 words or a chunk of one; the longest section with a table, which
+#: retrieve returns whole, has 2,874 characters (measured 17.09.2026). The
+#: limit only stops an outlier from pulling pages into the prompt.
+MAX_SOURCE_CHARACTERS = 3000
+
 #: Upper bound for the number of passages a deployment may configure.
 MAX_RESULTS = 100
 
-#: Timeouts per AWS service, in seconds: (connect, read). Every client makes at
-#: most `MAX_ATTEMPTS` attempts ("standard" retry mode: throttling, timeouts and
-#: 5xx are retried once). The read timeout for the model is the longest, since
-#: a non-streaming answer arrives in one piece at the end.
-CLIENT_TIMEOUTS = {
-    "ssm": (3, 5),
-    "bedrock-agent-runtime": (3, 10),
-    "bedrock-runtime": (3, 40),
-}
-MAX_ATTEMPTS = 2
+#: How long a warm function trusts the keys it has read. A deleted or
+#: replaced key stops working at the latest after this long.
+KEY_CACHE_SECONDS = 300
 
-#: The longest pause botocore makes before a retry: up to 1 second of jittered
-#: backoff, plus up to 5 seconds more when AWS sends a retry-after header.
-RETRY_DELAY_SECONDS = 6
+#: An unknown key makes the function read the keys again, so that a key
+#: created a moment ago works at once — but not more often than this, so a
+#: flood of wrong keys cannot become a flood of Parameter Store reads.
+KEY_RELOAD_MIN_SECONDS = 10
 
-#: Wording of the two answers that do not come from sources.
+#: What the handler answers itself when retrieval finds no passage.
 NO_SOURCES_ANSWER = "No sources in this workspace match the question."
+
+#: The sentence the prompt tells the model to answer with when the sources do
+#: not answer the question. The handler only writes it into the prompt; it
+#: does not check whether the model used it.
 NOT_IN_SOURCES_ANSWER = "The sources do not answer this question."
 
+#: The only thing a caller learns about a broken configuration.
+NOT_CONFIGURED_MESSAGE = "The service is not configured."
 
-def worst_case_seconds() -> int:
-    """How long one request can take when every AWS call runs into every timeout.
-
-    The Lambda timeout must be longer than this, so that a hanging Bedrock call
-    ends as a 502 with a reason and not as the Function URL's bare timeout.
-    """
-    return sum(
-        MAX_ATTEMPTS * (connect + read) + (MAX_ATTEMPTS - 1) * RETRY_DELAY_SECONDS
-        for connect, read in CLIENT_TIMEOUTS.values()
-    )
+#: Notes added to an answer the model did not finish on its own.
+STOP_NOTES = {
+    "max_tokens": f"[Answer cut off: the limit of {MAX_ANSWER_TOKENS} tokens was reached.]",
+    "content_filtered": "[Answer stopped: the model's content filter intervened.]",
+    "guardrail_intervened": "[Answer stopped: a guardrail intervened.]",
+}
 
 
 # --- Errors --------------------------------------------------------------
@@ -105,6 +111,13 @@ class HandlerError(Exception):
     """Ends a request with an HTTP status; the message is one plain sentence."""
 
     status = 500
+    #: Extra response headers this status needs.
+    headers: Mapping[str, str] = {}
+
+    @property
+    def public_message(self) -> str:
+        """What the caller reads. The full message always goes to the log."""
+        return str(self)
 
 
 class BadRequest(HandlerError):
@@ -113,6 +126,7 @@ class BadRequest(HandlerError):
 
 class Unauthorized(HandlerError):
     status = 401
+    headers = {"WWW-Authenticate": "Bearer"}
 
 
 class Forbidden(HandlerError):
@@ -121,12 +135,17 @@ class Forbidden(HandlerError):
 
 class MethodNotAllowed(HandlerError):
     status = 405
+    headers = {"Allow": "POST"}
 
 
 class ConfigurationError(HandlerError):
     """The function itself is set up wrong: an environment variable, the keys."""
 
     status = 500
+
+    @property
+    def public_message(self) -> str:
+        return NOT_CONFIGURED_MESSAGE
 
 
 class RetrievalError(HandlerError):
@@ -169,14 +188,14 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
     """Read and check the settings; no network call.
 
     Raises `ConfigurationError` naming the first variable that is missing or
-    wrong, so a broken deployment says what to fix.
+    wrong, so the log says what to fix.
     """
     values: dict[str, str] = {}
-    for field, variable in ENVIRONMENT_VARIABLES.items():
+    for name, variable in ENVIRONMENT_VARIABLES.items():
         value = environ.get(variable, "").strip()
         if not value:
             raise ConfigurationError(f"The environment variable {variable} is not set.")
-        values[field] = value
+        values[name] = value
 
     results_text = values["number_of_results"]
     if not results_text.isdigit() or not 1 <= int(results_text) <= MAX_RESULTS:
@@ -261,25 +280,15 @@ def bearer_key(headers: Mapping[str, str] | None) -> str:
     return key.strip()
 
 
-# --- AWS clients and errors ----------------------------------------------
+# --- Logging -------------------------------------------------------------
 
 
-@functools.cache
-def aws_client(service: str, region: str) -> Any:
-    """A boto3 client with this module's timeouts and retries, made once per cold start."""
-    try:
-        import boto3
-        from botocore.config import Config
-    except ImportError as exc:
-        raise ConfigurationError("boto3 is not available to the function.") from exc
-    log_sdk_versions()
-    connect, read = CLIENT_TIMEOUTS[service]
-    config = Config(
-        connect_timeout=connect,
-        read_timeout=read,
-        retries={"mode": "standard", "total_max_attempts": MAX_ATTEMPTS},
-    )
-    return boto3.client(service, region_name=region, config=config)
+def log_event(event: str, **fields: Any) -> None:
+    """Write one JSON line to the function's log."""
+    logger.info(json.dumps({"event": event, **fields}, ensure_ascii=False, default=str))
+
+
+# --- AWS clients ---------------------------------------------------------
 
 
 @functools.cache
@@ -289,58 +298,17 @@ def log_sdk_versions() -> None:
     The function does not package its own boto3, so this line is where a
     runtime too old for an API it calls would show.
     """
-    import boto3
-    import botocore
-
-    log_event("cold-start", boto3=boto3.__version__, botocore=botocore.__version__)
+    log_event("cold-start", **aws.sdk_versions())
 
 
-def botocore_errors() -> tuple[type[BaseException], ...]:
-    """The two botocore base exceptions: service errors and client-side errors."""
-    from botocore.exceptions import BotoCoreError, ClientError
-
-    return BotoCoreError, ClientError
-
-
-def aws_error_code(exc: BaseException) -> str | None:
-    """The AWS error code of a `ClientError`, or None for anything else."""
-    response = getattr(exc, "response", None)
-    if not isinstance(response, Mapping):
-        return None
-    return response.get("Error", {}).get("Code")
-
-
-_THROTTLING_CODES = {
-    "ThrottlingException",
-    "Throttling",
-    "TooManyRequestsException",
-    "ServiceQuotaExceededException",
-}
-_UNAVAILABLE_CODES = {"ServiceUnavailableException", "InternalServerException", "ModelNotReadyException"}
-
-
-def aws_error_cause(exc: BaseException) -> str:
-    """A short cause for a botocore exception, safe to send to the caller.
-
-    AWS error messages can carry ARNs, and ARNs carry the account id, so the
-    message itself is never used here — only the error code or the class name.
-    The full exception goes to the log.
-    """
-    code = aws_error_code(exc)
-    name = type(exc).__name__
-    if code in _THROTTLING_CODES:
-        return "too many requests right now (throttled), try again in a moment"
-    if code in {"AccessDeniedException", "AccessDenied"}:
-        return "access denied"
-    if code == "ResourceNotFoundException":
-        return "not found"
-    if code in _UNAVAILABLE_CODES:
-        return f"the service is unavailable ({code})"
-    if name in {"ReadTimeoutError", "ConnectTimeoutError"}:
-        return "no response within the timeout"
-    if name == "EndpointConnectionError":
-        return "the service could not be reached"
-    return code or name
+def client(service: str, region: str) -> Any:
+    """An AWS client for the handler; a missing boto3 is a configuration error."""
+    try:
+        made = aws.client(service, region)
+        log_sdk_versions()
+    except ImportError as exc:
+        raise ConfigurationError("boto3 is not available to the function.") from exc
+    return made
 
 
 # --- Keys ----------------------------------------------------------------
@@ -361,27 +329,77 @@ def keys_by_workspace(parameters: Sequence[Mapping[str, Any]], path: str) -> dic
     return keys
 
 
-@functools.cache
-def workspace_keys(path: str, region: str) -> dict[str, str]:
-    """Every workspace key, read and decrypted from Parameter Store once per cold start.
+def shared_key_workspaces(keys: Mapping[str, str]) -> set[str]:
+    """The workspaces whose key is also the key of another workspace."""
+    owners: dict[str, list[str]] = {}
+    for workspace, key in keys.items():
+        owners.setdefault(key, []).append(workspace)
+    return {workspace for workspaces in owners.values() if len(workspaces) > 1 for workspace in workspaces}
 
-    A key created or rotated later takes effect when the function next starts
-    cold. Nothing is cached when reading fails, so the next request tries again.
+
+def read_workspace_keys(path: str, region: str) -> dict[str, str]:
+    """Every usable workspace key, read and decrypted from Parameter Store.
+
+    A key stored for two workspaces could not tell them apart, so it opens
+    neither; the log names both.
     """
-    ssm = aws_client("ssm", region)
+    ssm = client("ssm", region)
     parameters: list[Mapping[str, Any]] = []
     try:
         for page in ssm.get_paginator("get_parameters_by_path").paginate(
             Path=path, Recursive=False, WithDecryption=True
         ):
             parameters.extend(page.get("Parameters", []))
-    except botocore_errors() as exc:
+    except aws.botocore_errors() as exc:
         log_event("keys-unreadable", detail=repr(exc))
-        raise ConfigurationError(f"The workspace keys could not be read: {aws_error_cause(exc)}.") from exc
+        raise ConfigurationError(f"The workspace keys could not be read: {aws.error_cause(exc)}.") from exc
+
     keys = keys_by_workspace(parameters, path)
+    shared = shared_key_workspaces(keys)
+    if shared:
+        log_event("duplicate-key", workspaces=sorted(shared))
+        keys = {workspace: key for workspace, key in keys.items() if workspace not in shared}
     if not keys:
-        raise ConfigurationError(f"No workspace keys are stored under {path}.")
+        raise ConfigurationError(f"No usable workspace keys are stored under {path}.")
     return keys
+
+
+@dataclass
+class KeyCache:
+    """The keys a warm function instance has read, and when."""
+
+    keys: dict[str, str] = field(default_factory=dict)
+    #: When the keys were last read successfully; None before the first read.
+    read_at: float | None = None
+    #: When a read was last attempted, successful or not.
+    tried_at: float | None = None
+
+
+_key_cache = KeyCache()
+
+#: The clock the key cache runs on. Monotonic, so a changed system time does
+#: not age the keys; tests replace it.
+clock: Callable[[], float] = time.monotonic
+
+
+def reload_workspace_keys(path: str, region: str) -> dict[str, str]:
+    """Read the keys now and keep them. When reading fails, nothing is kept."""
+    _key_cache.tried_at = clock()
+    keys = read_workspace_keys(path, region)
+    _key_cache.keys, _key_cache.read_at = keys, clock()
+    return keys
+
+
+def workspace_keys(path: str, region: str) -> dict[str, str]:
+    """The workspace keys, read again once they are `KEY_CACHE_SECONDS` old."""
+    if _key_cache.read_at is None or clock() - _key_cache.read_at >= KEY_CACHE_SECONDS:
+        return reload_workspace_keys(path, region)
+    return _key_cache.keys
+
+
+def may_reload_keys() -> bool:
+    """Whether the last attempt to read the keys is `KEY_RELOAD_MIN_SECONDS` ago."""
+    return _key_cache.tried_at is None or clock() - _key_cache.tried_at >= KEY_RELOAD_MIN_SECONDS
 
 
 def workspace_for_key(presented: str, keys: Mapping[str, str]) -> str | None:
@@ -407,12 +425,21 @@ def check_access(key: str, workspace: str, keys: Mapping[str, str]) -> None:
         raise Forbidden(f"This key does not open the workspace {workspace}.")
 
 
-# --- Logging -------------------------------------------------------------
+def authorize(key: str, workspace: str, settings: Settings) -> None:
+    """Check the key against the keys; an unknown key has them read again first.
 
-
-def log_event(event: str, **fields: Any) -> None:
-    """Write one JSON line to the function's log."""
-    logger.info(json.dumps({"event": event, **fields}, ensure_ascii=False, default=str))
+    The reread happens at most once per request, and not when the keys were
+    just read. If it fails, the keys already read still decide: an unknown key
+    gets its 401, not a 500.
+    """
+    path, region = settings.key_parameter_path, settings.region
+    keys = workspace_keys(path, region)
+    if workspace_for_key(key, keys) is None and may_reload_keys():
+        try:
+            keys = reload_workspace_keys(path, region)
+        except ConfigurationError as error:
+            log_event("keys-reload-failed", error=str(error))
+    check_access(key, workspace, keys)
 
 
 # --- Retrieval -----------------------------------------------------------
@@ -438,10 +465,20 @@ def retrieve_passages(
                 }
             },
         )
-    except botocore_errors() as exc:
+    except aws.botocore_errors() as exc:
         log_event("retrieve-failed", workspace=workspace, detail=repr(exc))
-        raise RetrievalError(f"The knowledge base could not be searched: {aws_error_cause(exc)}.") from exc
+        raise RetrievalError(f"The knowledge base could not be searched: {aws.error_cause(exc)}.") from exc
     return response.get("retrievalResults", [])
+
+
+def keep_workspace(results: Sequence[Mapping[str, Any]], workspace: str) -> tuple[list[Mapping[str, Any]], int]:
+    """Drop every passage whose workspace is not the requested one; return what is left and how many went.
+
+    The retrieval filter already keeps workspaces apart. This is the second
+    lock behind it: a passage from another company never reaches the model.
+    """
+    kept = [result for result in results if result.get("metadata", {}).get("workspace") == workspace]
+    return kept, len(results) - len(kept)
 
 
 def passage_text(result: Mapping[str, Any]) -> str:
@@ -504,11 +541,19 @@ Rules:
 # counted as cited.
 
 
+def capped(text: str) -> str:
+    """The text, cut at a word boundary after `MAX_SOURCE_CHARACTERS`, with a note when cut."""
+    if len(text) <= MAX_SOURCE_CHARACTERS:
+        return text
+    cut = text[:MAX_SOURCE_CHARACTERS].rsplit(" ", 1)[0]
+    return f"{cut} [... cut: the passage is longer than {MAX_SOURCE_CHARACTERS} characters]"
+
+
 def build_prompt(question: str, results: Sequence[Mapping[str, Any]]) -> str:
     """The user message: every passage under its number, layer and file, then the question."""
     blocks = [
         f"[{number}] layer: {result.get('metadata', {}).get('layer', 'unknown')} | file: {file_name(result)}\n"
-        f"{passage_text(result)}"
+        f"{capped(passage_text(result))}"
         for number, result in enumerate(results, start=1)
     ]
     sources = "\n\n".join(blocks)
@@ -527,25 +572,27 @@ def ask_model(bedrock_runtime: Any, model_id: str, prompt: str) -> dict[str, Any
             messages=[{"role": "user", "content": [{"text": prompt}]}],
             inferenceConfig={"maxTokens": MAX_ANSWER_TOKENS},
         )
-    except botocore_errors() as exc:
+    except aws.botocore_errors() as exc:
         log_event("converse-failed", model=model_id, detail=repr(exc))
-        cause = aws_error_cause(exc)
-        if aws_error_code(exc) in {"AccessDeniedException", "AccessDenied"}:
+        cause = aws.error_cause(exc)
+        if aws.error_code(exc) in {"AccessDeniedException", "AccessDenied"}:
             cause += " — the model may not be enabled for this account"
         raise LLMError(f"The model {model_id} could not answer: {cause}.") from exc
 
 
 def extract_answer(response: Mapping[str, Any]) -> str:
-    """Pick the first content block that carries text, not blindly the first one."""
+    """Pick the first content block that carries text, not blindly the first one.
+
+    An answer that is empty or only whitespace is no answer. One the model did
+    not finish on its own gets a note saying why.
+    """
     blocks = response.get("output", {}).get("message", {}).get("content", [])
     text = next((block["text"] for block in blocks if "text" in block), None)
-    if text is None:
-        raise LLMError(
-            f"The model returned no text (stopReason {response.get('stopReason', 'unknown')})."
-        )
-    if response.get("stopReason") == "max_tokens":
-        text += f"\n\n[Answer cut off: the limit of {MAX_ANSWER_TOKENS} tokens was reached.]"
-    return text
+    stop_reason = response.get("stopReason", "unknown")
+    if text is None or not text.strip():
+        raise LLMError(f"The model returned no text (stopReason {stop_reason}).")
+    note = STOP_NOTES.get(stop_reason)
+    return f"{text}\n\n{note}" if note else text
 
 
 def read_usage(response: Mapping[str, Any]) -> dict[str, int]:
@@ -557,19 +604,28 @@ def read_usage(response: Mapping[str, Any]) -> dict[str, int]:
     }
 
 
-_CITATION = re.compile(r"\[\s*(\d+(?:\s*,\s*\d+)*)\s*\]")
+_DASH = "-–—"
+_PART = rf"\d+(?:\s*[{_DASH}]\s*\d+)?"
+_CITATION = re.compile(rf"\[\s*({_PART}(?:\s*[,;]\s*{_PART})*)\s*\]")
+_RANGE = re.compile(rf"(\d+)\s*[{_DASH}]\s*(\d+)")
 
 
 def cited_numbers(answer: str, number_of_sources: int) -> set[int]:
-    """The source numbers an answer cites: ``[2]``, ``[2][3]`` or ``[2, 3]``.
+    """The source numbers an answer cites.
 
-    Numbers outside 1..number_of_sources are ignored — a model can invent one.
+    Understands ``[2]``, ``[2][3]``, ``[2, 3]``, ``[2; 3]`` and ranges ``[1-3]``
+    with a hyphen, en dash or em dash. Numbers outside 1..number_of_sources are
+    ignored — a model can invent one, and a date is no citation.
     """
-    numbers = {
-        int(part)
-        for match in _CITATION.finditer(answer)
-        for part in match.group(1).split(",")
-    }
+    numbers: set[int] = set()
+    for match in _CITATION.finditer(answer):
+        for part in re.split(r"[,;]", match.group(1)):
+            span = _RANGE.fullmatch(part.strip())
+            if span:
+                first, last = int(span.group(1)), int(span.group(2))
+                numbers.update(range(max(first, 1), min(last, number_of_sources) + 1))
+            else:
+                numbers.add(int(part))
     return {number for number in numbers if 1 <= number <= number_of_sources}
 
 
@@ -583,15 +639,25 @@ def cited_layers(sources: Sequence[Mapping[str, Any]]) -> list[str]:
 # --- One question, start to finish ---------------------------------------
 
 
-def answer_question(settings: Settings, workspace: str, question: str) -> dict[str, Any]:
+@dataclass
+class RequestRecord:
+    """What the log line of a request says, filled in while the request runs."""
+
+    workspace: str | None = None
+    #: Passages retrieve returned for another workspace and the handler dropped.
+    dropped: int = 0
+
+
+def answer_question(settings: Settings, workspace: str, question: str, record: RequestRecord) -> dict[str, Any]:
     """Retrieve, ask the model, and build the response body — without latency."""
-    results = retrieve_passages(
-        aws_client("bedrock-agent-runtime", settings.region),
+    retrieved = retrieve_passages(
+        client("bedrock-agent-runtime", settings.region),
         settings.knowledge_base_id,
         question,
         workspace,
         settings.number_of_results,
     )
+    results, record.dropped = keep_workspace(retrieved, workspace)
     if not results:
         return {
             "answer": NO_SOURCES_ANSWER,
@@ -603,7 +669,7 @@ def answer_question(settings: Settings, workspace: str, question: str) -> dict[s
         }
 
     response = ask_model(
-        aws_client("bedrock-runtime", settings.region), settings.model_id, build_prompt(question, results)
+        client("bedrock-runtime", settings.region), settings.model_id, build_prompt(question, results)
     )
     answer = extract_answer(response)
     sources = [to_source(number, result) for number, result in enumerate(results, start=1)]
@@ -623,20 +689,13 @@ def answer_question(settings: Settings, workspace: str, question: str) -> dict[s
 # --- HTTP ----------------------------------------------------------------
 
 
-def http_response(status: int, body: Mapping[str, Any]) -> dict[str, Any]:
+def http_response(status: int, body: Mapping[str, Any], headers: Mapping[str, str] | None = None) -> dict[str, Any]:
     """A Function URL response with a JSON body."""
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json; charset=utf-8"},
+        "headers": {"Content-Type": "application/json; charset=utf-8", **(headers or {})},
         "body": json.dumps(body, ensure_ascii=False),
     }
-
-
-@dataclass
-class RequestRecord:
-    """What the log line of a request says, filled in while the request runs."""
-
-    workspace: str | None = None
 
 
 def handle(event: Mapping[str, Any], record: RequestRecord) -> dict[str, Any]:
@@ -653,10 +712,10 @@ def handle(event: Mapping[str, Any], record: RequestRecord) -> dict[str, Any]:
 
     settings = load_settings(os.environ)
     key = bearer_key(event.get("headers"))
-    check_access(key, workspace, workspace_keys(settings.key_parameter_path, settings.region))
+    authorize(key, workspace, settings)
 
     question = requested_question(body)
-    return answer_question(settings, workspace, question)
+    return answer_question(settings, workspace, question, record)
 
 
 def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
@@ -673,10 +732,11 @@ def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
             error=str(error),
             latency_ms=round((time.perf_counter() - started) * 1000),
         )
-        return http_response(error.status, {"error": str(error)})
+        return http_response(error.status, {"error": error.public_message}, error.headers)
     except Exception:
-        # A bug, not a request problem. The traceback goes to the log only.
-        logger.exception(json.dumps({"event": "crashed", "status": 500, "workspace": record.workspace}))
+        # A bug, not a request problem. The traceback goes to the log only,
+        # as a field, so the log line stays one line.
+        log_event("crashed", status=500, workspace=record.workspace, traceback=traceback.format_exc())
         return http_response(500, {"error": "The function failed unexpectedly; the details are in its log."})
 
     body["latency_ms"] = round((time.perf_counter() - started) * 1000)
@@ -688,6 +748,7 @@ def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         input_tokens=body["usage"]["input_tokens"],
         output_tokens=body["usage"]["output_tokens"],
         hits=len(body["sources"]),
+        dropped=record.dropped,
         cited=sum(1 for source in body["sources"] if source["cited"]),
         latency_ms=body["latency_ms"],
     )

@@ -278,6 +278,14 @@ documents bucket is a handful of megabytes, and nothing else is running.
 | Question embedding, vector query, Lambda | < 0.0001 USD |
 | **Total** | **~0.001 USD — about 1 USD per 1,000 questions** |
 
+**The cap:** the Function URL is public, so the answer function runs at most
+5 requests at the same time and Lambda turns the rest away with HTTP 429
+before any code runs. A request without a valid key never reaches the model.
+With a valid key, at about 2 seconds per answer, five in flight are roughly
+9,000 answers an hour — about 5 USD an hour at the model price above. That is
+a ceiling on a leaked key, not a limit on it; a limit per key comes with the
+guardrails.
+
 **Filling it:** 40 documents of 2,000 words is roughly 110,000 tokens of
 embedding at 0.02 USD per million — about 0.002 USD. Embedding a corpus is
 not what costs money; asking questions is, and barely.
