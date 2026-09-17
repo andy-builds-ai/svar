@@ -51,12 +51,16 @@ DISTANCE_METRIC = "cosine"
 #: whole prefix; a query narrows it down with a ``workspace`` filter.
 WORKSPACE_PREFIX = "workspaces/"
 
-#: Fixed-size chunking, sized so that a hit is about a paragraph, not a page.
-#: At 800 tokens the demo documents of 540 to 1,014 words came back whole, one
-#: chunk each (measured 17.09.2026), and the answering model would be handed
-#: entire documents. Bedrock takes the overlap as a percentage, not a token
-#: count: 13 % of 300 is about 39 tokens, a sentence or two, enough that a
-#: statement cut at a chunk border still appears whole in one of the two.
+#: Fixed-size chunking, sized so that a stored chunk is about a paragraph.
+#: Bedrock takes the overlap as a percentage, not a token count: 13 % of 300 is
+#: about 39 tokens, a sentence or two, enough that a statement cut at a chunk
+#: border still appears whole in one of the two.
+#:
+#: Chunk size alone does not decide what retrieve returns. For documents with
+#: Markdown tables Bedrock returned the whole document, under fixed-size and
+#: hierarchical chunking alike (measured 17.09.2026). The fill script therefore
+#: uploads each Markdown document split into sections; see scripts/ingest.py
+#: and "Retrieval findings" in the README.
 CHUNKING_STRATEGY = "FIXED_SIZE"
 CHUNK_MAX_TOKENS = 300
 CHUNK_OVERLAP_PERCENT = 13

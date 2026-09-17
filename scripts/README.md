@@ -43,19 +43,48 @@ It runs three steps and stops at the first that fails.
    the folders. File types the knowledge base cannot read are rejected. All
    problems are listed at once, and **nothing is uploaded** while there is
    one.
-2. **Upload.** Every document and sidecar goes to
-   `s3://<bucket>/workspaces/<workspace>/<layer>/<file>`. Files whose content
-   is already in the bucket are skipped, so a rerun writes nothing new: no
-   duplicates and no extra object versions in the versioned bucket. A changed
-   file replaces the old one under the same key.
+2. **Upload.** Markdown documents go up split into sections (below); other
+   file types go up whole. Everything lands in
+   `s3://<bucket>/workspaces/<workspace>/<layer>/`, each file with its
+   sidecar. Objects whose content is already in the bucket are skipped, so a
+   rerun writes nothing new: no duplicates and no extra object versions in
+   the versioned bucket. A changed section replaces the old one under the
+   same key.
 3. **Sync.** Starts an ingestion job and waits until it is `COMPLETE`,
    `FAILED` or `STOPPED` (polling every 5 seconds, giving up after 30
    minutes — the job itself keeps running in AWS).
 
-Output, in order: documents per workspace and layer, files uploaded and
-skipped, then the job's statistics — documents scanned, metadata files
-scanned, new and modified documents indexed, documents deleted, documents
-failed, and any failure reasons.
+Output, in order: documents and sections per workspace and layer (also with
+`--check`), files uploaded and skipped, then the job's statistics —
+documents scanned, metadata files scanned, new and modified documents
+indexed, documents deleted, documents failed, and any failure reasons. The
+job counts section files as documents.
+
+```
+37 documents checked in knowledge:
+  pellwick: 4 documents -> 17 sections (human 4 -> 17, agent 0 -> 0, inbox 0 -> 0)
+  quillmoor: 33 documents -> 130 sections (human 25 -> 102, agent 5 -> 23, inbox 3 -> 5)
+```
+
+### Sections
+
+Bedrock returned whole documents from retrieve for every demo document with
+a Markdown table, whatever the chunking (see "Retrieval findings" in the
+[README](../README.md#retrieval-findings)). Splitting before the upload keeps
+a hit at most a section long, whatever the reason:
+
+1. Cut at every `## ` heading; headings inside code fences do not count.
+2. A section under 80 words is joined to the one before it; a short intro,
+   which has none before it, to the one after.
+3. A section over 450 words is cut again at its `### ` headings, with the
+   same joining rule. Without `### ` headings it stays as it is.
+4. Every section starts with the document's `# ` title, and pieces from step
+   3 also with their `## ` heading.
+
+A document without `## ` headings becomes one section. Section files are
+named `<document>--<nn>-<heading>.md`, for example
+`faq--03-projects-and-exports.md`, and each gets an exact copy of the
+document's sidecar. The files in `knowledge/` stay whole.
 
 | Exit code | Meaning |
 |---|---|
@@ -67,7 +96,10 @@ failed, and any failure reasons.
 Two things it deliberately does not do:
 
 - **Delete.** A file removed locally stays in the bucket and in the index.
-  Remove it from the bucket by hand, then rerun; the sync drops its vectors.
+  The same happens to sections: renaming, adding or removing a `## `
+  heading can change section names, and the sections under the old names
+  stay. Remove them from the bucket by hand (`aws s3 rm` on the document's
+  `<document>--` files), then rerun; the sync drops their vectors.
 - **Sync one workspace only.** `--workspace` limits the upload. The ingestion
   job always covers the whole data source.
 
@@ -83,21 +115,21 @@ python -m scripts.retrieve "What changed in the recent releases?" --workspace qu
 here. `--layer` narrows further; `--results` sets the number of hits
 (default 5).
 
-Each hit prints as two lines — score, `workspace`, `layer`, file name, then
-the start of the chunk. The shape, with made-up values:
+Each hit prints as two lines — score, `workspace`, `layer`, section file,
+then the start of the hit's text. A hit is a whole section or a chunk of one;
+measured on the demo corpus, 18 to 440 words. For example (17.09.2026):
 
 ```
-1. score 0.612  workspace=quillmoor  layer=human  faq.md
-   ## Projects and exports **How do I export project data?** Open the project ...
+2. score 0.815  workspace=quillmoor  layer=human  faq--03-projects-and-exports.md
+   # Haldrum — Frequently Asked Questions ## Projects and exports **How do I export project data?** Open the project ...
 ```
 
 What to expect from the three commands above:
 
 1. Hits only with `workspace=quillmoor`.
 2. The same question in `pellwick`: hits only with `workspace=pellwick`, or
-   none. The filter is applied inside the vector search, so a joinery
-   workshop's price list may come back as a weak match — a Quillmoor
-   document never does.
+   none. A joinery workshop's price list may come back as a weak match — a
+   Quillmoor document never does.
 3. Hits only with `layer=agent`, all from `quillmoor`.
 
 This is retrieval only; no model writes an answer. That comes in build step

@@ -14,10 +14,11 @@ Three steps, each stopping the run if it fails:
 1. **Check** every document and its sidecar locally (docs/metadata.md). One
    bad file stops the run before anything is uploaded, so the bucket never
    holds half a corpus.
-2. **Upload** each document and sidecar to
-   ``s3://<bucket>/workspaces/<workspace>/<layer>/``. A file whose content is
-   already in the bucket is skipped, so a rerun creates no new object
-   versions and nothing twice.
+2. **Upload** to ``s3://<bucket>/workspaces/<workspace>/<layer>/``. Markdown
+   documents go up split into sections, one file per section with a copy of
+   the document's sidecar (see `split_markdown` for why and how); other file
+   types go up whole. An object whose content is already in the bucket is
+   skipped, so a rerun creates no new object versions and nothing twice.
 3. **Sync**: start an ingestion job and wait until it is finished.
 
 Exit codes: 0 done, 1 the local folder has problems, 2 an AWS step failed,
@@ -97,13 +98,187 @@ class Document:
     def sidecar(self) -> Path:
         return self.path.with_name(self.path.name + SIDECAR_SUFFIX)
 
-    @property
-    def key(self) -> str:
-        return object_key(self.workspace, self.layer, self.path.name)
 
-    @property
-    def sidecar_key(self) -> str:
-        return self.key + SIDECAR_SUFFIX
+# --- Splitting Markdown into sections ------------------------------------
+#
+# Bedrock returned whole documents from retrieve for every demo document that
+# contains a Markdown table — with fixed-size and with hierarchical chunking,
+# whatever the chunk size (measured 17.09.2026, see "Retrieval findings" in
+# the README). The cause is not documented. Splitting before the upload does
+# not depend on it: if Bedrock hands back a whole file, the file is a section.
+
+#: A section shorter than this is joined to its neighbour: a lone heading or a
+#: two-line paragraph is not worth a hit of its own.
+MIN_SECTION_WORDS = 80
+
+#: A section longer than this is split again at its ``### `` headings, so that
+#: a section Bedrock returns whole is still about a page at most.
+MAX_SECTION_WORDS = 450
+
+#: Separates the original file stem from the section part of the name:
+#: ``faq.md`` becomes ``faq--01-accounts-and-access.md``.
+SECTION_SEPARATOR = "--"
+
+_SLUG_MAX_CHARACTERS = 40
+
+
+def _words(text: str) -> int:
+    return len(text.split())
+
+
+def _split_at(lines: list[str], prefix: str) -> list[list[str]]:
+    """Cut lines into blocks, each starting at a heading with ``prefix``.
+
+    Lines inside fenced code blocks are never headings: an API example with a
+    ``## `` comment must not split a section.
+    """
+    blocks: list[list[str]] = [[]]
+    in_fence = False
+    for line in lines:
+        if line.startswith("```"):
+            in_fence = not in_fence
+        if not in_fence and line.startswith(prefix) and blocks[-1]:
+            blocks.append([])
+        blocks[-1].append(line)
+    return [block for block in blocks if "".join(block).strip()]
+
+
+def _join_short(blocks: list[list[str]]) -> list[list[str]]:
+    """Join blocks under `MIN_SECTION_WORDS` to their predecessor.
+
+    The first block has no predecessor; if it is short, it goes in front of
+    the block after it instead.
+    """
+    joined: list[list[str]] = []
+    carried: list[str] = []
+    for block in blocks:
+        block = carried + block
+        carried = []
+        if _words("\n".join(block)) >= MIN_SECTION_WORDS:
+            joined.append(block)
+        elif joined:
+            joined[-1] = joined[-1] + block
+        else:
+            carried = block
+    if carried:
+        joined.append(carried)
+    return joined
+
+
+def slugify(heading: str) -> str:
+    """A short, lowercase file-name part from a heading."""
+    slug = re.sub(r"[^a-z0-9]+", "-", heading.lstrip("#").lower()).strip("-")
+    if len(slug) > _SLUG_MAX_CHARACTERS:
+        slug = slug[:_SLUG_MAX_CHARACTERS].rsplit("-", 1)[0]
+    return slug or "section"
+
+
+def _naming_heading(lines: list[str]) -> str | None:
+    """The heading a section is named after.
+
+    The ``## `` or ``### `` heading the block opens with; else the first ``## ``
+    in it (a short intro joined in front of a section); else the ``# `` title.
+    A ``### `` further down never names the block.
+    """
+    first = next((line for line in lines if line.strip()), "")
+    if first.startswith(("## ", "### ")):
+        return first
+    for prefix in ("## ", "# "):
+        for line in lines:
+            if line.startswith(prefix):
+                return line
+    return None
+
+
+def _with_context(block: list[str], context: list[str]) -> str:
+    """The block's text, preceded by the context lines it does not already contain.
+
+    A context line found anywhere in the block is left out, not only one at
+    its start: a short intro joined in front of a section carries the title
+    first and the section heading after it, and prepending the heading again
+    would put it above the title.
+    """
+    missing = [line for line in context if line not in block]
+    head = "\n\n".join(missing)
+    body = "\n".join(block).strip("\n")
+    return f"{head}\n\n{body}\n" if head else f"{body}\n"
+
+
+def split_markdown(text: str) -> list[tuple[str, str]]:
+    """Split a Markdown document into ``(slug, text)`` sections.
+
+    1. Cut at every ``## `` heading outside code fences.
+    2. Join sections under `MIN_SECTION_WORDS` to the one before (the first
+       to the one after).
+    3. Cut sections over `MAX_SECTION_WORDS` again at ``### `` and join short
+       pieces the same way. A section with no ``### `` stays as it is.
+    4. Start every section with the document's ``# `` title — and pieces of
+       step 3 also with their ``## `` heading — so a hit read on its own still
+       says where it comes from.
+
+    A document without ``## `` headings is one section.
+    """
+    lines = text.splitlines()
+    title = next((line for line in lines if line.startswith("# ")), None)
+    title_context = [title] if title else []
+
+    sections: list[tuple[str, str]] = []
+    for block in _join_short(_split_at(lines, "## ")):
+        pieces = [block]
+        parent = next((line for line in block if line.startswith("## ")), None)
+        if _words("\n".join(block)) > MAX_SECTION_WORDS:
+            pieces = _join_short(_split_at(block, "### "))
+        for piece in pieces:
+            context = title_context + ([parent] if parent and len(pieces) > 1 else [])
+            heading = _naming_heading(piece)
+            slug = slugify(heading) if heading else "document"
+            sections.append((slug, _with_context(piece, context)))
+    return sections
+
+
+def section_filename(stem: str, number: int, slug: str) -> str:
+    return f"{stem}{SECTION_SEPARATOR}{number:02d}-{slug}.md"
+
+
+@dataclass(frozen=True)
+class UploadItem:
+    """One object to put into the bucket."""
+
+    key: str
+    body: bytes
+    content_type: str
+
+
+def upload_items(document: Document) -> list[UploadItem]:
+    """What a document becomes in the bucket: sections or the whole file, each with its sidecar.
+
+    Every section carries an exact copy of the document's sidecar, so its
+    workspace, layer, source and licence are the document's.
+    """
+    sidecar = document.sidecar.read_bytes()
+    suffix = document.path.suffix.lower()
+    if suffix != ".md":
+        key = object_key(document.workspace, document.layer, document.path.name)
+        parts = [(key, document.path.read_bytes(), CONTENT_TYPES[suffix])]
+    else:
+        sections = split_markdown(document.path.read_text(encoding="utf-8"))
+        parts = [
+            (
+                object_key(
+                    document.workspace,
+                    document.layer,
+                    section_filename(document.path.stem, number, slug),
+                ),
+                text.encode("utf-8"),
+                CONTENT_TYPES[".md"],
+            )
+            for number, (slug, text) in enumerate(sections, start=1)
+        ]
+    items = []
+    for key, body, content_type in parts:
+        items.append(UploadItem(key, body, content_type))
+        items.append(UploadItem(key + SIDECAR_SUFFIX, sidecar, SIDECAR_CONTENT_TYPE))
+    return items
 
 
 # --- Step 1: check the local folder --------------------------------------
@@ -241,13 +416,30 @@ def count_documents(documents: Iterable[Document]) -> Counter[tuple[str, str]]:
     return Counter((document.workspace, document.layer) for document in documents)
 
 
-def format_counts(counts: Counter[tuple[str, str]]) -> list[str]:
-    """One line per workspace: total and the count per layer, in layer order."""
+def count_sections(documents: Iterable[Document]) -> Counter[tuple[str, str]]:
+    """Number of uploaded document files per (workspace, layer), sidecars not counted."""
+    counts: Counter[tuple[str, str]] = Counter()
+    for document in documents:
+        files = [item for item in upload_items(document) if not item.key.endswith(SIDECAR_SUFFIX)]
+        counts[(document.workspace, document.layer)] += len(files)
+    return counts
+
+
+def format_counts(
+    documents: Counter[tuple[str, str]], sections: Counter[tuple[str, str]]
+) -> list[str]:
+    """One line per workspace: documents and sections, in total and per layer."""
     lines = []
-    for workspace in sorted({workspace for workspace, _ in counts}):
-        per_layer = ", ".join(f"{layer} {counts[(workspace, layer)]}" for layer in LAYERS)
-        total = sum(counts[(workspace, layer)] for layer in LAYERS)
-        lines.append(f"  {workspace}: {total} documents ({per_layer})")
+    for workspace in sorted({workspace for workspace, _ in documents}):
+        per_layer = ", ".join(
+            f"{layer} {documents[(workspace, layer)]} -> {sections[(workspace, layer)]}"
+            for layer in LAYERS
+        )
+        total_documents = sum(documents[(workspace, layer)] for layer in LAYERS)
+        total_sections = sum(sections[(workspace, layer)] for layer in LAYERS)
+        lines.append(
+            f"  {workspace}: {total_documents} documents -> {total_sections} sections ({per_layer})"
+        )
     return lines
 
 
@@ -279,21 +471,19 @@ def _remote_md5(s3: Any, bucket: str, key: str) -> str | None:
 def upload(
     s3: Any, bucket: str, documents: Iterable[Document], log: Callable[[str], None] = print
 ) -> UploadCounts:
-    """Put every document and sidecar into the bucket, skipping unchanged ones."""
+    """Put every section or document and its sidecar into the bucket, skipping unchanged ones."""
     counts = UploadCounts()
     for document in documents:
-        for local, key, content_type in (
-            (document.path, document.key, CONTENT_TYPES[document.path.suffix.lower()]),
-            (document.sidecar, document.sidecar_key, SIDECAR_CONTENT_TYPE),
-        ):
-            body = local.read_bytes()
-            if _remote_md5(s3, bucket, key) == hashlib.md5(body).hexdigest():
+        for item in upload_items(document):
+            if _remote_md5(s3, bucket, item.key) == hashlib.md5(item.body).hexdigest():
                 counts.unchanged += 1
                 continue
-            with explained(f"Uploading {local} to s3://{bucket}/{key}"):
-                s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
+            with explained(f"Uploading {document.path} to s3://{bucket}/{item.key}"):
+                s3.put_object(
+                    Bucket=bucket, Key=item.key, Body=item.body, ContentType=item.content_type
+                )
             counts.uploaded += 1
-            log(f"  uploaded {key}")
+            log(f"  uploaded {item.key}")
     return counts
 
 
@@ -404,7 +594,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"{len(documents)} documents checked in {args.source}:")
-    for line in format_counts(count_documents(documents)):
+    for line in format_counts(count_documents(documents), count_sections(documents)):
         print(line)
     if args.check:
         return 0
