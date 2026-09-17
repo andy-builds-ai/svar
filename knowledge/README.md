@@ -44,9 +44,15 @@ folder names, `source` set to `fictional`, `license` set to `CC0-1.0`.
 | **Total** | 29 | 5 | 3 | **37** |
 
 About 28,700 words; every document is between 540 and 1,020 words. With the
-data source's fixed-size chunking of 800 tokens, most documents still end up
-as a single chunk — the first sync on 17.09.2026 returned whole documents of
-up to 976 words as one chunk.
+data source's fixed-size chunking of 300 tokens the corpus becomes 249
+chunks in the index, 4 to 19 per document and at most 246 words each
+(measured 17.09.2026).
+
+What `retrieve` returns is not always that chunk. For 28 of the 37
+documents, Bedrock stores the whole document next to each chunk and returns
+the whole document, once per document, however many of its chunks matched.
+For the other 9 it returns the chunk itself. Why a document falls on one side
+or the other is not yet known; length is not it.
 
 The three layers in `quillmoor` show what each means:
 
