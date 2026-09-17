@@ -104,7 +104,8 @@ class Document:
 # Bedrock returned whole documents from retrieve for every demo document that
 # contains a Markdown table — with fixed-size and with hierarchical chunking,
 # whatever the chunk size (measured 17.09.2026, see "Retrieval findings" in
-# the README). The cause is not documented. Splitting before the upload does
+# the README). The cause is not documented, and the foundation-model parser
+# does not remove it (measured the same day). Splitting before the upload does
 # not depend on it: if Bedrock hands back a whole file, the file is a section.
 
 #: A section shorter than this is joined to its neighbour: a lone heading or a

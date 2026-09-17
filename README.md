@@ -168,7 +168,7 @@ and how to get a key for curl or a web page: [app/README.md](app/README.md).
 ## Retrieval findings
 
 A hit should be a passage, not a page: the answering model in build step 3
-gets what retrieve returns. Getting there took four configurations, all
+gets what retrieve returns. Getting there took five configurations, all
 measured on 17.09.2026 against the demo corpus (37 Markdown documents,
 540 to 1,014 words each). Word counts are whitespace-separated words.
 
@@ -180,6 +180,7 @@ measured on 17.09.2026 against the demo corpus (37 Markdown documents,
 | Fixed-size, 300 tokens | 249 chunks of 2 to 246 words | For 28 of 37 documents the whole document, once per document; for the other 9 the chunk. A request for 10 hits returned 7, each from a different document. |
 | Hierarchical, parents 500 / children 200 tokens, overlap 30 | 328 vectors | For `release-notes-4.1.md`, one of the 9 documents without the effect, parent chunks of 260 and 280 words, as documented. For the same 28 documents as above, still the whole document: 67 of 91 hits in a sample of 12 queries. |
 | Fixed-size, 300 tokens, documents uploaded as sections | 304 vectors from 147 section files | 185 hits over 12 queries: 18 to 440 words, median 165. No hit was a whole document, none exceeded 450 words. |
+| Fixed-size, 300 tokens, whole documents, foundation-model parser (Amazon Nova Lite), as a second data source | 249 chunks; every chunk of the same 28 documents carries `parentText`. The chunk texts match the default parser's: a table chunk of `support-process.md` is character for character the same in both data sources. | `support-process.md` whole (976 words) in 4 of 4 queries; `release-notes-4.1.md` a chunk of 198 words. Requests for 10 hits over 4 queries returned 3 to 7, 14 of 17 of them whole documents. |
 
 Reading the vectors directly (`s3vectors list-vectors`) showed where the
 whole documents come from. Every chunk of the 28 affected documents carries
@@ -208,7 +209,18 @@ the 9 unaffected ones contain none. That is an observed correlation across
   ([Retrieve returns the full parent document instead of the matched chunk](https://repost.aws/questions/QUjFWDQ_XRRNCAU5WefBWTPA/))
   describes the same behaviour on S3 Vectors with Markdown sources. The
   suggested fix, declaring fixed-size chunking explicitly, did not change it
-  according to the person asking. No cause is given there either.
+  according to the person asking. No cause is given there either. A later
+  answer there suggests setting the data source's parser explicitly to a
+  foundation model (`parsingConfiguration` with `BEDROCK_FOUNDATION_MODEL`).
+  Measured as the fifth row above, it changed nothing: same chunks, same
+  `parentText`, same whole documents.
+- The [parsing options](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-advanced-parsing.html)
+  page describes the foundation-model and Data Automation parsers for `.pdf`,
+  `.jpeg` and `.png` files; `.md` is listed only under the default parser. The
+  [ParsingConfiguration](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent_ParsingConfiguration.html)
+  reference adds that Bedrock falls back to the default parser when the chosen
+  one fails on a file. Identical chunk texts fit both readings: Markdown files
+  still go through the default parser.
 
 ### What was chosen
 

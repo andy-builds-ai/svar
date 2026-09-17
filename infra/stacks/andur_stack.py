@@ -68,7 +68,8 @@ WORKSPACE_PREFIX = "workspaces/"
 #: Markdown tables Bedrock returned the whole document, under fixed-size and
 #: hierarchical chunking alike (measured 17.09.2026). The fill script therefore
 #: uploads each Markdown document split into sections; see scripts/ingest.py
-#: and "Retrieval findings" in the README.
+#: and "Retrieval findings" in the README. Setting the foundation-model parser
+#: on the data source was measured too and changed nothing for Markdown.
 CHUNKING_STRATEGY = "FIXED_SIZE"
 CHUNK_MAX_TOKENS = 300
 CHUNK_OVERLAP_PERCENT = 13
