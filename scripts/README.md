@@ -1,11 +1,12 @@
 # scripts — operating the knowledge base
 
-Two commands, both run from the repository root:
+Three commands, all run from the repository root:
 
 | Command | Does |
 |---|---|
 | `python -m scripts.ingest` | Checks a local folder, uploads it to the documents bucket, syncs the knowledge base. |
 | `python -m scripts.retrieve` | Asks the knowledge base a question inside one workspace and prints the hits. |
+| `python -m scripts.ask` | Asks the deployed answer function a question and prints the answer with its sources. |
 
 ## What they need
 
@@ -15,12 +16,12 @@ Two commands, both run from the repository root:
 - A valid AWS login for the account the stack is deployed in. When it has
   run out, both scripts stop with a message that says so; sign in with
   `aws login` and rerun.
-- The deployed stack. Bucket, knowledge base id and data source id are read
-  from the outputs of `AndurStack` in `us-east-1`. The region is pinned like
-  in `infra/app.py`, so a shell profile pointing elsewhere does not matter.
-  Each value can be passed by hand instead: `--bucket`,
-  `--knowledge-base-id`, `--data-source-id`, and `--stack-name` / `--region`
-  for another stack.
+- The deployed stack. Bucket, knowledge base id, data source id, Function URL
+  and key path are read from the outputs of `AndurStack` in `us-east-1`. The
+  region is pinned like in `infra/app.py`, so a shell profile pointing
+  elsewhere does not matter. Each value can be passed by hand instead:
+  `--bucket`, `--knowledge-base-id`, `--data-source-id`, `--url`, and
+  `--stack-name` / `--region` for another stack.
 
 ## ingest
 
@@ -132,5 +133,50 @@ What to expect from the three commands above:
    Quillmoor document never does.
 3. Hits only with `layer=agent`, all from `quillmoor`.
 
-This is retrieval only; no model writes an answer. That comes in build step
-3.
+This is retrieval only; no model writes an answer. For an answer, use `ask`.
+
+## ask — the proof that answering works
+
+```bash
+python -m scripts.ask "How do I export project data?" --workspace quillmoor
+python -m scripts.ask "How do I export project data?" --workspace pellwick
+python -m scripts.ask "How will the bulk export of all projects work?" --workspace quillmoor --json
+```
+
+It sends what any client sends: a `POST` to the Function URL with the
+workspace key as `Authorization: Bearer <key>`. The key comes from Parameter
+Store (`/andur/api-keys/<workspace>`, decrypted) and is never printed. To use
+a key you already have, set `ANDUR_API_KEY`; with `--url` as well, the script
+needs no AWS access at all.
+
+Output: the answer, the layers of the sources it cites, one line per source
+— number, `cited` or blank, layer, score, words, workspace and file — and
+then model, tokens in and out, and latency. For example (17.09.2026):
+
+```
+Answer (quillmoor):
+
+Administrators and the Organisation Owner can export all projects in one step via a background job, ... as noted in the draft release notes. [5]
+
+Layers cited: inbox
+Sources:
+  [1]        inbox  score 0.7937   22 words  quillmoor/draft-release-notes-4.4--01-new.md
+  [2]        agent  score 0.751  131 words  quillmoor/overview-api-endpoints--01-plan-availability-at-a-glance.md
+  [3]        human  score 0.7385  190 words  quillmoor/manual-02-projects--04-2-7-exporting-a-project.md
+  [4]        human  score 0.7261  156 words  quillmoor/faq--03-projects-and-exports.md
+  [5] cited  inbox  score 0.7162  192 words  quillmoor/draft-release-notes-4.4--01-new.md
+  [6]        human  score 0.7051  336 words  quillmoor/manual-06-reports-and-exports--02-6-2-built-in-reports.md
+nvidia.nemotron-super-3-120b · 1850 tokens in, 93 out · 2732 ms
+```
+
+`Layers cited: inbox` is the warning: the answer rests on a draft nobody has
+confirmed.
+
+`--json` prints the function's response unchanged; its fields are described
+in [app/README.md](../app/README.md).
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Answered. |
+| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 403 key of another workspace, 400 bad question, 502 Bedrock failed). |
+| 2 | An AWS step or the connection failed: login, stack, missing key parameter, network. |

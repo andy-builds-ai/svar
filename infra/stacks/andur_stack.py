@@ -1,31 +1,39 @@
 """The Andur infrastructure stack.
 
-One stack holds everything the retrieval side of Andur needs:
+One stack holds everything Andur needs:
 
 * an S3 bucket for the source documents, one prefix per workspace,
 * an S3 Vectors bucket and index that hold the embeddings,
 * a Bedrock knowledge base that ties the two together, plus the service
   role it assumes,
-* a data source that tells the knowledge base which prefix to crawl.
+* a data source that tells the knowledge base which prefix to crawl,
+* one key per workspace in Parameter Store, generated during the deploy,
+* the answer function (app/handler.py) behind a Function URL.
 
-No compute lives here. The Lambda handler and the web page arrive in later
-build steps and will read the stack outputs defined at the bottom.
+Nothing here runs while nobody asks: the function runs only while a question
+is in flight, and the keys are free standard parameters. What an idle month
+costs is storage, in cents.
 """
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from aws_cdk import (
     Aws,
     CfnOutput,
+    CustomResource,
     Duration,
     RemovalPolicy,
     Stack,
     aws_bedrock as bedrock,
     aws_iam as iam,
+    aws_lambda as lambda_,
+    aws_logs as logs,
     aws_s3 as s3,
     aws_s3vectors as s3vectors,
+    custom_resources as cr,
 )
 from constructs import Construct
 
@@ -80,6 +88,51 @@ NON_FILTERABLE_METADATA_KEYS = [
 #: How long an overwritten or deleted document stays recoverable. Versioning
 #: without an expiry would keep every old version, and bill for it, forever.
 NONCURRENT_VERSION_RETENTION_DAYS = 30
+
+# --- Answering (build step 3) ----------------------------------------------
+
+#: The answering model: Nemotron 3 Super (model choice 15.09.2026). This is the
+#: one place that names it; the handler reads it from its environment.
+ANSWER_MODEL_ID = "nvidia.nemotron-super-3-120b"
+
+#: How many passages retrieve hands to the model per question.
+NUMBER_OF_RESULTS = 6
+
+#: Every workspace that gets a key. A workspace without a key cannot be asked,
+#: so adding a company means adding it here and deploying.
+WORKSPACES = ("quillmoor", "pellwick")
+
+#: Parameter Store path of the keys: one SecureString per workspace, named
+#: ``<path>/<workspace>``.
+API_KEY_PARAMETER_PATH = "/andur/api-keys"
+
+#: The newest Python runtime this CDK version offers.
+LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_14
+
+#: Fixed, so that its log group has a name a person can type. Changing it
+#: replaces the function under the new name, which does not collide.
+ANSWER_FUNCTION_NAME = "andur-answer"
+
+#: Longer than the handler's worst case (``worst_case_seconds`` in
+#: app/handler.py, checked by a test), so a hanging Bedrock call ends as a 502
+#: with a reason. Far below the 15 minutes a Function URL call may take.
+ANSWER_TIMEOUT_SECONDS = 180
+
+#: Lambda gives CPU in proportion to memory; 512 MB keeps the cold start with
+#: boto3 short, and a question takes a few seconds of it.
+ANSWER_MEMORY_MB = 512
+
+#: How long function logs are kept. Without a limit they are kept, and billed,
+#: forever.
+LOG_RETENTION = logs.RetentionDays.ONE_MONTH
+
+#: The repository root; function code is packaged from folders below it.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+
+#: Left out of every function package. Without this, a test run that leaves
+#: ``__pycache__`` behind would change the package and make `cdk diff` report a
+#: code change that is none.
+ASSET_EXCLUDES = ["**/__pycache__", "*.pyc", "README.md"]
 
 
 def replacement_safe_name(
@@ -138,6 +191,16 @@ class AndurStack(Stack):
             self.vector_index, self.knowledge_base_role
         )
         self.data_source = self._create_data_source(self.knowledge_base, self.documents_bucket)
+
+        self.api_keys = self._create_api_keys()
+        self.answer_log_group = self._create_log_group(
+            "AnswerFunctionLogs", f"/aws/lambda/{ANSWER_FUNCTION_NAME}"
+        )
+        self.answer_role = self._create_answer_role(self.knowledge_base, self.answer_log_group)
+        self.answer_function = self._create_answer_function(
+            self.knowledge_base, self.answer_role, self.answer_log_group
+        )
+        self.function_url = self._create_function_url(self.answer_function, self.api_keys)
 
         self._create_outputs()
 
@@ -375,6 +438,209 @@ class AndurStack(Stack):
             ),
         )
 
+    # --- Logs ------------------------------------------------------------
+
+    def _create_log_group(self, construct_id: str, name: str | None = None) -> logs.LogGroup:
+        """A log group with a retention, deleted with the stack.
+
+        Created by the stack rather than by Lambda on first use: a log group
+        Lambda creates has no retention and outlives ``cdk destroy``.
+        """
+        return logs.LogGroup(
+            self,
+            construct_id,
+            log_group_name=name,
+            retention=LOG_RETENTION,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+    # --- Workspace keys --------------------------------------------------
+
+    def _create_api_keys(self) -> list[CustomResource]:
+        """One key per workspace, generated inside AWS while the stack deploys.
+
+        CloudFormation cannot create SecureString parameters, and a key typed
+        into the template would sit in cdk.out and in CloudFormation. So a
+        small function (infra/api_keys/handler.py) generates each key and
+        stores it; the CDK provider framework runs it as a custom resource and
+        reports back to CloudFormation. An existing key survives every deploy.
+        """
+        log_group = self._create_log_group("ApiKeyFunctionLogs")
+        role = iam.Role(
+            self,
+            "ApiKeyFunctionRole",
+            description="Lets the Andur key function create and delete workspace keys.",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            inline_policies={
+                "ManageApiKeys": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            sid="PutAndDeleteWorkspaceKeys",
+                            actions=["ssm:PutParameter", "ssm:DeleteParameter"],
+                            resources=[f"{self.api_key_path_arn}/*"],
+                        )
+                    ]
+                ),
+                "WriteLogs": self._write_logs_policy(log_group),
+            },
+        )
+        function = lambda_.Function(
+            self,
+            "ApiKeyFunction",
+            description="Generates Andur workspace keys during cdk deploy.",
+            runtime=LAMBDA_RUNTIME,
+            architecture=lambda_.Architecture.ARM_64,
+            code=lambda_.Code.from_asset(
+                str(REPOSITORY_ROOT / "infra" / "api_keys"), exclude=ASSET_EXCLUDES
+            ),
+            handler="handler.on_event",
+            timeout=Duration.minutes(1),
+            role=role,
+            log_group=log_group,
+        )
+        provider = cr.Provider(
+            self,
+            "ApiKeyProvider",
+            on_event_handler=function,
+            log_group=self._create_log_group("ApiKeyProviderLogs"),
+        )
+        return [
+            CustomResource(
+                self,
+                f"ApiKey-{workspace}",
+                service_token=provider.service_token,
+                resource_type="Custom::AndurApiKey",
+                properties={
+                    "ParameterName": f"{API_KEY_PARAMETER_PATH}/{workspace}",
+                    "ParameterPath": API_KEY_PARAMETER_PATH,
+                },
+                # CloudFormation otherwise waits an hour for a custom resource
+                # that never answers.
+                service_timeout=Duration.minutes(5),
+            )
+            for workspace in WORKSPACES
+        ]
+
+    @property
+    def api_key_path_arn(self) -> str:
+        """The ARN of the key path; a key is this plus ``/<workspace>``."""
+        return f"arn:{Aws.PARTITION}:ssm:{Aws.REGION}:{Aws.ACCOUNT_ID}:parameter{API_KEY_PARAMETER_PATH}"
+
+    @staticmethod
+    def _write_logs_policy(log_group: logs.LogGroup) -> iam.PolicyDocument:
+        """Write to one log group — instead of the managed policy's logs on every group."""
+        return iam.PolicyDocument(
+            statements=[
+                iam.PolicyStatement(
+                    sid="WriteOwnLogGroup",
+                    actions=["logs:CreateLogStream", "logs:PutLogEvents"],
+                    resources=[log_group.log_group_arn],
+                )
+            ]
+        )
+
+    # --- Answer function -------------------------------------------------
+
+    @property
+    def answer_model_arn(self) -> str:
+        return f"arn:{Aws.PARTITION}:bedrock:{Aws.REGION}::foundation-model/{ANSWER_MODEL_ID}"
+
+    def _create_answer_role(
+        self, knowledge_base: bedrock.CfnKnowledgeBase, log_group: logs.LogGroup
+    ) -> iam.Role:
+        """The execution role of the answer function: four things, each on one resource.
+
+        Read the workspace keys, retrieve from this knowledge base, invoke the
+        answering model (``converse`` is authorised as ``InvokeModel``), write
+        its own log. The keys use the AWS managed key ``aws/ssm``, whose key
+        policy already lets this account decrypt through Parameter Store, so
+        no KMS statement is needed — the deploy of 17.09.2026 read the keys
+        with exactly these four policies.
+        """
+        return iam.Role(
+            self,
+            "AnswerFunctionRole",
+            description="Lets the Andur answer function read keys, retrieve, invoke the model and log.",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            inline_policies={
+                "ReadApiKeys": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            sid="ReadWorkspaceKeys",
+                            actions=["ssm:GetParametersByPath"],
+                            resources=[self.api_key_path_arn],
+                        )
+                    ]
+                ),
+                "RetrieveFromKnowledgeBase": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            sid="RetrieveStatement",
+                            actions=["bedrock:Retrieve"],
+                            resources=[knowledge_base.attr_knowledge_base_arn],
+                        )
+                    ]
+                ),
+                "InvokeAnswerModel": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            sid="InvokeAnswerModelStatement",
+                            actions=["bedrock:InvokeModel"],
+                            resources=[self.answer_model_arn],
+                        )
+                    ]
+                ),
+                "WriteLogs": self._write_logs_policy(log_group),
+            },
+        )
+
+    def _create_answer_function(
+        self, knowledge_base: bedrock.CfnKnowledgeBase, role: iam.Role, log_group: logs.LogGroup
+    ) -> lambda_.Function:
+        """The question handler from app/, configured entirely through its environment.
+
+        boto3 is not packaged: the Lambda runtime brings it. The handler logs
+        the version on every cold start, so a runtime too old for
+        ``bedrock-agent-runtime`` would show there (measured after the deploy
+        of 17.09.2026, see app/README.md).
+        """
+        return lambda_.Function(
+            self,
+            "AnswerFunction",
+            function_name=ANSWER_FUNCTION_NAME,
+            description="Andur: answers a question from one workspace's documents.",
+            runtime=LAMBDA_RUNTIME,
+            architecture=lambda_.Architecture.ARM_64,
+            code=lambda_.Code.from_asset(str(REPOSITORY_ROOT / "app"), exclude=ASSET_EXCLUDES),
+            handler="handler.handler",
+            timeout=Duration.seconds(ANSWER_TIMEOUT_SECONDS),
+            memory_size=ANSWER_MEMORY_MB,
+            role=role,
+            log_group=log_group,
+            environment={
+                "KNOWLEDGE_BASE_ID": knowledge_base.attr_knowledge_base_id,
+                "MODEL_ID": ANSWER_MODEL_ID,
+                "REGION": Aws.REGION,
+                "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
+                "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,
+            },
+        )
+
+    def _create_function_url(
+        self, function: lambda_.Function, api_keys: list[CustomResource]
+    ) -> lambda_.FunctionUrl:
+        """A public HTTPS address for the function; the key check in the handler is the lock.
+
+        ``NONE`` rather than ``AWS_IAM``: IAM auth would need every request
+        signed with AWS credentials, which the people asking do not have. The
+        URL is created only after every key exists, so it is never reachable
+        without one.
+        """
+        url = function.add_function_url(auth_type=lambda_.FunctionUrlAuthType.NONE)
+        for api_key in api_keys:
+            url.node.add_dependency(api_key)
+        return url
+
     # --- Outputs ---------------------------------------------------------
 
     def _create_outputs(self) -> None:
@@ -419,4 +685,16 @@ class AndurStack(Stack):
             "KnowledgeBaseRoleArn",
             value=self.knowledge_base_role.role_arn,
             description="Service role assumed by Bedrock Knowledge Bases.",
+        )
+        CfnOutput(
+            self,
+            "FunctionUrl",
+            value=self.function_url.url,
+            description="POST a question here with Authorization: Bearer <workspace key>.",
+        )
+        CfnOutput(
+            self,
+            "ApiKeyParameterPath",
+            value=API_KEY_PARAMETER_PATH,
+            description="Parameter Store path of the workspace keys: <path>/<workspace>, SecureString.",
         )

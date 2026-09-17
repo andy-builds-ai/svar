@@ -1,0 +1,141 @@
+"""Ask Andur a question through its Function URL and print the answer with its sources.
+
+    python -m scripts.ask "How do I export project data?" --workspace quillmoor
+    python -m scripts.ask "How will the bulk export work?" --workspace quillmoor --json
+
+It sends exactly what a web page or curl would send: a POST to the Function
+URL with the workspace key in the Authorization header. The URL comes from the
+stack outputs; the key from Parameter Store, or from the environment variable
+ANDUR_API_KEY when that is set. The key is never printed.
+
+Exit codes: 0 answered, 1 the function refused or failed (status and reason
+are printed), 2 an AWS step or the connection failed.
+"""
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from typing import Any
+
+from scripts import utf8_output
+from scripts.aws import REGION, STACK_NAME, AwsProblem, client, error_code, explained, read_stack_outputs, resolve
+
+#: Set this to use a key you already have instead of reading Parameter Store.
+API_KEY_ENVIRONMENT_VARIABLE = "ANDUR_API_KEY"
+
+#: Longer than the function's own timeout (180 s), so a slow answer arrives
+#: as the function's 502, not as a timeout here.
+HTTP_TIMEOUT_SECONDS = 200
+
+
+def read_key(ssm: Any, key_path: str, workspace: str) -> str:
+    """The workspace key from Parameter Store, decrypted."""
+    name = f"{key_path}/{workspace}"
+    try:
+        with explained(f"Reading the key {name}"):
+            response = ssm.get_parameter(Name=name, WithDecryption=True)
+    except AwsProblem as problem:
+        if error_code(problem.__cause__) == "ParameterNotFound":
+            raise AwsProblem(
+                f"There is no key {name}. Is {workspace!r} listed in WORKSPACES in the stack, "
+                "and has it been deployed since?"
+            ) from problem.__cause__
+        raise
+    return response["Parameter"]["Value"]
+
+
+def build_request(url: str, key: str, question: str, workspace: str) -> urllib.request.Request:
+    """The POST request the Function URL expects."""
+    return urllib.request.Request(
+        url,
+        data=json.dumps({"question": question, "workspace": workspace}).encode("utf-8"),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+
+
+def send(request: urllib.request.Request) -> tuple[int, dict[str, Any]]:
+    """Send the request; return the HTTP status and the JSON body, for errors too."""
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        raw = error.read().decode("utf-8", errors="replace")
+        try:
+            return error.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return error.code, {"error": raw.strip() or error.reason}
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise AwsProblem(f"The Function URL could not be reached: {error}") from error
+
+
+def format_answer(workspace: str, body: dict[str, Any]) -> list[str]:
+    """The answer, the cited layers, one line per source, then model, tokens and latency."""
+    lines = [f"Answer ({workspace}):", "", body["answer"], ""]
+    lines.append(f"Layers cited: {', '.join(body['layers']) or 'none'}")
+    if body["sources"]:
+        lines.append("Sources:")
+    else:
+        lines.append("Sources: none")
+    for source in body["sources"]:
+        lines.append(
+            f"  [{source['number']}] {'cited' if source['cited'] else '     '}  "
+            f"{source['layer']:<5}  score {source['score']}  {source['words']:>3} words  "
+            f"{source['workspace']}/{source['file']}"
+        )
+    usage = body["usage"]
+    lines.append(
+        f"{body['model'] or 'no model call'} · {usage['input_tokens']} tokens in, "
+        f"{usage['output_tokens']} out · {body['latency_ms']} ms"
+    )
+    return lines
+
+
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="python -m scripts.ask",
+        description="Ask the deployed Andur function a question in one workspace.",
+    )
+    parser.add_argument("question")
+    parser.add_argument("--workspace", required=True, help="the workspace to ask in")
+    parser.add_argument("--json", action="store_true", help="print the raw JSON response")
+    parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
+    parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
+    parser.add_argument("--url", help="default: stack output FunctionUrl")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    utf8_output()
+    args = parse_args(argv)
+    given_key = os.environ.get(API_KEY_ENVIRONMENT_VARIABLE)
+    # The key path is only needed when the key has to come from Parameter Store.
+    wanted: dict[str, str | None] = {"FunctionUrl": args.url}
+    if not given_key:
+        wanted["ApiKeyParameterPath"] = None
+    try:
+        settings = resolve(
+            wanted, lambda: read_stack_outputs(client("cloudformation", args.region), args.stack_name)
+        )
+        key = given_key or read_key(client("ssm", args.region), settings["ApiKeyParameterPath"], args.workspace)
+        status, body = send(build_request(settings["FunctionUrl"], key, args.question, args.workspace))
+    except AwsProblem as problem:
+        print(f"error: {problem}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(body, ensure_ascii=False, indent=2))
+    if status != 200:
+        print(f"error: HTTP {status}: {body.get('error', body)}", file=sys.stderr)
+        return 1
+    if not args.json:
+        for line in format_answer(args.workspace, body):
+            print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
