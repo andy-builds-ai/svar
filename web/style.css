@@ -1,0 +1,229 @@
+/* Ask Andur — one stylesheet, no framework, no font from anywhere else.
+   The type stack is whatever the reader's system already has. */
+
+:root {
+  --ink: #1b1d1f;
+  --ink-soft: #5b6167;
+  --paper: #fbfaf8;
+  --panel: #ffffff;
+  --line: #ddd8d0;
+  --accent: #2f5d50;
+  --warn: #7a5a12;
+  --error: #8c2f22;
+  --human: #2f5d50;
+  --agent: #3c5a7a;
+  --inbox: #8a5a1e;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 2rem 1rem 4rem;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+}
+
+h1 {
+  margin: 0 0 .4rem;
+  font-size: 1.9rem;
+  letter-spacing: -.01em;
+}
+
+h2 {
+  margin: 0 0 .6rem;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--ink-soft);
+}
+
+h3 {
+  margin: 1.4rem 0 .5rem;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--ink-soft);
+}
+
+.lead {
+  margin: 0 0 1.8rem;
+  color: var(--ink-soft);
+  max-width: 40rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1.2rem;
+}
+
+.note {
+  color: var(--ink-soft);
+  font-size: .87rem;
+  margin: .4rem 0 0;
+}
+
+/* --- Workspace and key --- */
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .8rem;
+  align-items: flex-end;
+  margin-top: .8rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  margin: 0;
+  flex: 1 1 12rem;
+}
+
+.field--button { flex: 0 0 auto; }
+
+label {
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--ink-soft);
+}
+
+input, textarea {
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: .5rem .6rem;
+  width: 100%;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 4.5rem;
+}
+
+input:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+button {
+  font: inherit;
+  padding: .5rem 1.1rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:hover { filter: brightness(1.1); }
+
+button:disabled {
+  cursor: default;
+  filter: grayscale(.6) brightness(1.25);
+}
+
+#forget {
+  background: transparent;
+  color: var(--accent);
+}
+
+/* --- Asking --- */
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: .7rem;
+}
+
+.actions .note { margin: 0; }
+
+/* --- Messages --- */
+
+.message {
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 4px;
+  padding: .7rem .9rem;
+  margin: 0 0 1.2rem;
+  background: var(--panel);
+}
+
+.message--warn { border-left-color: var(--warn); }
+.message--error { border-left-color: var(--error); }
+
+/* --- The answer --- */
+
+.answer {
+  margin: 0 0 .8rem;
+  white-space: pre-wrap;
+  font-size: 1.05rem;
+}
+
+.layers {
+  margin: 0;
+  font-size: .9rem;
+  color: var(--ink-soft);
+}
+
+.sources {
+  margin: 0;
+  padding-left: 1.6rem;
+}
+
+.source {
+  margin-bottom: .9rem;
+  color: var(--ink-soft);
+}
+
+.source--cited { color: var(--ink); }
+
+.source > span { margin-right: .6rem; }
+
+.layer {
+  display: inline-block;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  padding: .1rem .45rem;
+  border-radius: 3px;
+  color: #fff;
+  background: var(--ink-soft);
+}
+
+.layer--human { background: var(--human); }
+.layer--agent { background: var(--agent); }
+.layer--inbox { background: var(--inbox); }
+
+.file {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .85rem;
+  word-break: break-all;
+}
+
+.excerpt {
+  margin: .3rem 0 0;
+  font-size: .87rem;
+  border-left: 2px solid var(--line);
+  padding-left: .7rem;
+}
+
+.cost { margin-top: 1.2rem; }

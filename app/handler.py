@@ -1,7 +1,7 @@
 """The Andur question handler: one Lambda function behind a Function URL.
 
-    POST <function url>
-    Authorization: Bearer <workspace key>
+    POST <web url>/ask
+    X-Andur-Key: <workspace key>
     {"question": "How do I export project data?", "workspace": "quillmoor"}
 
 A request runs five steps, and each can end it with its own status code:
@@ -75,6 +75,14 @@ MAX_WORKSPACE_CHARACTERS = 64
 
 #: A question longer than this is refused before anything is paid for.
 MAX_QUESTION_CHARACTERS = 1000
+
+#: Where the workspace key travels. Not ``Authorization``: CloudFront signs
+#: every request it forwards to the function URL (origin access control,
+#: signing behaviour ``always``) and overwrites the caller's ``Authorization``
+#: header with its own SigV4 signature. A key sent there would never arrive.
+#: Matched in lowercase — HTTP header names are case-insensitive, and a
+#: Function URL hands them over lowercased.
+KEY_HEADER = "X-Andur-Key"
 
 #: Answers are a few sentences; this only stops a runaway answer.
 MAX_ANSWER_TOKENS = 1024
@@ -157,8 +165,15 @@ class BadRequest(HandlerError):
 
 
 class Unauthorized(HandlerError):
+    """No key, or a key that belongs to no workspace.
+
+    No ``WWW-Authenticate`` header: that names an HTTP authentication scheme
+    for the ``Authorization`` header, and the key does not travel there
+    (`KEY_HEADER`). Announcing ``Bearer`` would send a browser to a login
+    prompt for a header nothing reads.
+    """
+
     status = 401
-    headers = {"WWW-Authenticate": "Bearer"}
 
 
 class Forbidden(HandlerError):
@@ -355,13 +370,19 @@ def requested_question(body: Mapping[str, Any]) -> str:
     return question
 
 
-def bearer_key(headers: Mapping[str, str] | None) -> str:
-    """The key from an ``Authorization: Bearer <key>`` header."""
+def request_key(headers: Mapping[str, str] | None) -> str:
+    """The workspace key from the `KEY_HEADER` header.
+
+    The value is taken as it stands, minus surrounding whitespace: it is a
+    key, not a scheme and a token. Two headers of the same name arrive joined
+    by a comma, which no key contains, so such a value is simply not a key
+    and ends as 401 in `authorize`.
+    """
     lowered = {name.lower(): value for name, value in (headers or {}).items()}
-    scheme, _, key = lowered.get("authorization", "").strip().partition(" ")
-    if scheme.lower() != "bearer" or not key.strip():
-        raise Unauthorized("A key is required: send it as Authorization: Bearer <key>.")
-    return key.strip()
+    key = lowered.get(KEY_HEADER.lower(), "").strip()
+    if not key:
+        raise Unauthorized(f"A key is required: send it as the header {KEY_HEADER}.")
+    return key
 
 
 # --- Logging -------------------------------------------------------------
@@ -966,7 +987,7 @@ def handle(event: Mapping[str, Any], record: RequestRecord) -> dict[str, Any]:
     record.workspace = workspace
 
     settings = load_settings(os.environ)
-    key = bearer_key(event.get("headers"))
+    key = request_key(event.get("headers"))
     authorize(key, workspace, settings)
 
     question = requested_question(body)

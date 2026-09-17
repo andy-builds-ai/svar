@@ -26,6 +26,7 @@ import pytest
 import handler  # app/handler.py
 from handler import (
     BUDGET_SPENT_MESSAGE,
+    KEY_HEADER,
     MAX_ANSWER_TOKENS,
     MAX_QUESTION_CHARACTERS,
     MAX_SOURCE_CHARACTERS,
@@ -302,9 +303,10 @@ def event(
     """A Function URL event (payload format 2.0)."""
     if body is None:
         body = {"question": "How do I export project data?", "workspace": "quillmoor"}
+    # Lowercase: that is how a Function URL hands header names over.
     headers = {"content-type": "application/json"}
     if key is not None:
-        headers["authorization"] = f"Bearer {key}"
+        headers[KEY_HEADER.lower()] = key
     return {
         "version": "2.0",
         "requestContext": {"http": {"method": method}},
@@ -471,18 +473,30 @@ def test_question_is_stripped_and_limited() -> None:
             handler.requested_question(body)
 
 
-def test_bearer_key_is_read_from_the_authorization_header_in_any_case() -> None:
-    assert handler.bearer_key({"authorization": "Bearer abc"}) == "abc"
-    assert handler.bearer_key({"Authorization": "bearer  abc "}) == "abc"
+def test_the_key_is_read_from_its_own_header_in_any_case() -> None:
+    assert handler.request_key({KEY_HEADER.lower(): "abc"}) == "abc"
+    assert handler.request_key({KEY_HEADER.upper(): "  abc "}) == "abc"
+    assert handler.request_key({"X-aNdUr-KeY": "abc"}) == "abc"
+
+
+def test_a_key_in_the_authorization_header_is_not_a_key() -> None:
+    """CloudFront overwrites that header on its way to the function; nothing may read it."""
+    with pytest.raises(Unauthorized):
+        handler.request_key({"authorization": "Bearer abc"})
 
 
 @pytest.mark.parametrize(
     "headers",
-    [None, {}, {"x-api-key": "abc"}, {"authorization": "Bearer "}, {"authorization": "Basic abc"}, {"authorization": "abc"}],
+    [None, {}, {"x-api-key": "abc"}, {KEY_HEADER.lower(): ""}, {KEY_HEADER.lower(): "   "}],
 )
-def test_no_bearer_key_is_unauthorized(headers: dict[str, str] | None) -> None:
+def test_no_key_header_is_unauthorized(headers: dict[str, str] | None) -> None:
     with pytest.raises(Unauthorized):
-        handler.bearer_key(headers)
+        handler.request_key(headers)
+
+
+def test_the_401_does_not_announce_an_authentication_scheme() -> None:
+    """``WWW-Authenticate`` names a scheme for a header the key does not travel in."""
+    assert Unauthorized.headers == {}
 
 
 # --- Keys ----------------------------------------------------------------
@@ -1232,7 +1246,7 @@ def test_only_foreign_hits_count_as_no_hits(aws: dict[str, Any]) -> None:
     [
         (event(key="wrong-key"), 401),
         (event(key=None), 401),
-        (event(key="quillmoor-key-0001, Bearer pellwick-key-0002"), 401),
+        (event(key="quillmoor-key-0001, pellwick-key-0002"), 401),
         (event({"question": "How?", "workspace": "pellwick"}), 403),
         (event({"question": "", "workspace": "quillmoor"}), 400),
         (event({"question": "x" * (MAX_QUESTION_CHARACTERS + 1), "workspace": "quillmoor"}), 400),
@@ -1261,17 +1275,20 @@ def test_an_event_without_headers_is_401(aws: dict[str, Any]) -> None:
     assert call(request)[0] == 401
 
 
-def test_401_names_the_bearer_scheme_and_405_the_allowed_method(aws: dict[str, Any]) -> None:
+def test_the_401_carries_no_scheme_and_the_405_the_allowed_method(aws: dict[str, Any]) -> None:
     unauthorized = respond(event(key="wrong-key"))
     assert unauthorized["statusCode"] == 401
-    assert unauthorized["headers"]["WWW-Authenticate"] == "Bearer"
+    assert "WWW-Authenticate" not in unauthorized["headers"]
+
+    # Without any key the sentence names the header to send it in.
+    assert KEY_HEADER in respond(event(key=None))["body"]
 
     not_allowed = respond(event(method="PUT"))
     assert not_allowed["statusCode"] == 405
     assert not_allowed["headers"]["Allow"] == "POST"
 
     answered = respond(event())
-    assert "WWW-Authenticate" not in answered["headers"] and "Allow" not in answered["headers"]
+    assert "Allow" not in answered["headers"]
 
 
 def test_the_key_is_checked_before_the_question(aws: dict[str, Any]) -> None:

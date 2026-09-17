@@ -1,5 +1,6 @@
 """Tests for the ask script, without AWS and without the network."""
 
+import hashlib
 import io
 import json
 import urllib.error
@@ -12,6 +13,9 @@ from scripts import ask
 from scripts.aws import AwsProblem
 
 KEY = "a-secret-workspace-key-that-must-never-be-printed"
+
+WEB_URL = "https://d111111abcdef8.cloudfront.net"
+ASK_URL = WEB_URL + "/ask"
 
 ANSWER = {
     "answer": "Open Settings > Export [1].",
@@ -49,13 +53,28 @@ class FakeSSM:
         return {"Parameter": {"Value": KEY}}
 
 
-def test_request_is_a_json_post_with_the_bearer_key() -> None:
-    request = ask.build_request("https://example.lambda-url.us-east-1.on.aws/", KEY, "How?", "quillmoor")
+def test_request_is_a_json_post_with_the_key_in_its_own_header() -> None:
+    request = ask.build_request(ASK_URL, KEY, "How?", "quillmoor")
     assert request.get_method() == "POST"
-    assert request.get_header("Authorization") == f"Bearer {KEY}"
+    assert request.get_header(ask.KEY_HEADER.capitalize()) == KEY
+    assert request.get_header("Authorization") is None
     assert request.get_header("Content-type") == "application/json"
     assert isinstance(request.data, bytes)
     assert json.loads(request.data) == {"question": "How?", "workspace": "quillmoor"}
+
+
+def test_the_body_hash_header_is_the_hash_of_the_body_that_is_sent() -> None:
+    """CloudFront signs the request, and a signed call to a function URL needs the hash."""
+    request = ask.build_request(ASK_URL, KEY, "How?", "quillmoor")
+    assert isinstance(request.data, bytes)
+    expected = hashlib.sha256(request.data).hexdigest()
+    assert len(expected) == 64
+    assert request.get_header(ask.BODY_HASH_HEADER.capitalize()) == expected
+
+
+@pytest.mark.parametrize("given", [WEB_URL, WEB_URL + "/"])
+def test_the_ask_path_is_appended_with_exactly_one_slash(given: str) -> None:
+    assert ask.ask_url(given) == ASK_URL
 
 
 def test_key_is_read_decrypted_from_the_workspace_parameter() -> None:
@@ -78,7 +97,18 @@ def test_send_returns_the_error_body_of_a_refused_request(monkeypatch: pytest.Mo
         raise http_error(401, b'{"error": "The key is not valid."}')
 
     monkeypatch.setattr(urllib.request, "urlopen", refuse)
-    assert ask.send(ask.build_request("https://x", KEY, "How?", "quillmoor")) == (401, {"error": "The key is not valid."})
+    assert ask.send(ask.build_request(ASK_URL, KEY, "How?", "quillmoor")) == (401, {"error": "The key is not valid."})
+
+
+def test_a_cloudfront_error_page_is_reported_as_what_came_instead(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 403 or 504 from CloudFront never passed through the function, so it has no sentence."""
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise http_error(504, b"<!DOCTYPE HTML><html><head><title>ERROR</title>")
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    status, body = ask.send(ask.build_request(ASK_URL, KEY, "How?", "quillmoor"))
+    assert status == 504
+    assert body["error"].startswith("The response is not JSON:")
 
 
 def test_send_wraps_a_body_that_is_not_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,7 +154,7 @@ def test_an_unreachable_url_is_a_readable_problem(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(urllib.request, "urlopen", offline)
     with pytest.raises(AwsProblem, match="could not be reached"):
-        ask.send(ask.build_request("https://x", KEY, "How?", "quillmoor"))
+        ask.send(ask.build_request(ASK_URL, KEY, "How?", "quillmoor"))
 
 
 def test_answer_is_printed_with_layers_sources_and_usage() -> None:
@@ -146,7 +176,7 @@ def test_an_answer_without_sources_says_so() -> None:
 
 @pytest.fixture
 def deployed(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Stack outputs, Parameter Store and the Function URL, all faked."""
+    """Stack outputs, Parameter Store and the web address, all faked."""
     seen: dict[str, Any] = {"services": [], "requests": []}
     ssm = FakeSSM()
 
@@ -160,23 +190,30 @@ def deployed(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     monkeypatch.setattr(ask, "client", fake_client)
     monkeypatch.setattr(ask, "read_stack_outputs", lambda cloudformation, stack: {
-        "FunctionUrl": "https://example.lambda-url.us-east-1.on.aws/", "ApiKeyParameterPath": "/andur/api-keys",
+        ask.WEB_URL_OUTPUT: WEB_URL, "ApiKeyParameterPath": "/andur/api-keys",
     })
     monkeypatch.setattr(ask, "send", fake_send)
     monkeypatch.delenv(ask.API_KEY_ENVIRONMENT_VARIABLE, raising=False)
     return seen
 
 
-def test_main_reads_url_and_key_and_never_prints_the_key(
+def test_main_asks_the_web_address_and_never_prints_the_key(
     deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert ask.main(["How do I export?", "--workspace", "quillmoor"]) == 0
     (request,) = deployed["requests"]
-    assert request.full_url == "https://example.lambda-url.us-east-1.on.aws/"
-    assert request.get_header("Authorization") == f"Bearer {KEY}"
+    assert request.full_url == ASK_URL
+    assert request.get_header(ask.KEY_HEADER.capitalize()) == KEY
     output = capsys.readouterr()
     assert "Open Settings > Export [1]." in output.out
     assert KEY not in output.out + output.err
+
+
+def test_the_function_url_output_is_not_what_the_script_asks(deployed: dict[str, Any]) -> None:
+    """The function URL answers 403 to everyone but CloudFront; the script must not go there."""
+    assert ask.main(["How?", "--workspace", "quillmoor"]) == 0
+    (request,) = deployed["requests"]
+    assert "lambda-url" not in request.full_url
 
 
 def test_main_json_prints_the_raw_response(deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
@@ -197,7 +234,8 @@ def test_key_from_the_environment_skips_parameter_store_and_stack(
     assert ask.main(["How?", "--workspace", "quillmoor", "--url", "https://given.example/"]) == 0
     assert deployed["services"] == []
     (request,) = deployed["requests"]
-    assert request.get_header("Authorization") == "Bearer key-from-env"
+    assert request.full_url == "https://given.example/ask"
+    assert request.get_header(ask.KEY_HEADER.capitalize()) == "key-from-env"
 
 
 def test_main_exits_2_when_an_aws_step_fails(deployed: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:

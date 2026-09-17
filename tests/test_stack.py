@@ -7,7 +7,9 @@ deploy spends ten minutes finding out.
 """
 
 import json
+import re
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -30,6 +32,7 @@ from infra.stacks.andur_stack import (
     ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
     API_KEY_PARAMETER_PATH,
+    ASK_PATH,
     BUDGET_KEY_ATTRIBUTE,
     BUDGET_TABLE_NAME,
     BUDGET_TTL_ATTRIBUTE,
@@ -46,9 +49,12 @@ from infra.stacks.andur_stack import (
     NON_FILTERABLE_METADATA_KEYS,
     NONCURRENT_VERSION_RETENTION_DAYS,
     NUMBER_OF_RESULTS,
+    ORIGIN_RESPONSE_TIMEOUT_SECONDS,
     REPOSITORY_ROOT,
+    SITE_ROOT_DOCUMENT,
     VECTOR_DATA_TYPE,
     VECTOR_INDEX_NAME,
+    WEB_FOLDER,
     WORKSPACE_PREFIX,
     WORKSPACES,
     AndurStack,
@@ -143,10 +149,23 @@ def test_old_document_versions_expire(template: Template) -> None:
 # --- What survives cdk destroy, and what does not ------------------------
 
 
-def test_documents_and_their_policy_survive_stack_deletion(template: Template) -> None:
+def test_documents_and_their_policy_survive_stack_deletion(
+    stack: AndurStack, template: Template
+) -> None:
     """Documents are the one thing that cannot be rebuilt — nor their SSL-only rule."""
-    assert only_resource(template, "AWS::S3::Bucket")["DeletionPolicy"] == "Retain"
-    assert only_resource(template, "AWS::S3::BucketPolicy")["DeletionPolicy"] == "Retain"
+    bucket = resource_of(stack, template, stack.documents_bucket)
+    policy = resource_of(stack, template, stack.documents_bucket.policy)
+    assert bucket["DeletionPolicy"] == "Retain"
+    assert policy["DeletionPolicy"] == "Retain"
+
+
+def test_the_page_and_its_bucket_go_with_the_stack(stack: AndurStack, template: Template) -> None:
+    """Every file in it is a copy of web/ in the repository, so nothing is lost."""
+    assert resource_of(stack, template, stack.site_bucket)["DeletionPolicy"] == "Delete"
+    # Without this the bucket would still hold the page and refuse to be deleted.
+    copier = only_resource(template, "Custom::CDKBucketDeployment")
+    assert copier["Properties"]["RetainOnDelete"] is False
+    assert copier["Properties"]["Prune"] is True
 
 
 def test_derived_data_is_deleted_with_the_stack(template: Template) -> None:
@@ -358,32 +377,50 @@ def all_policy_statements(template: Template) -> list[tuple[str, dict[str, Any]]
     return statements
 
 
-def test_the_only_wildcard_resource_is_model_listing(template: Template) -> None:
-    """Listing models cannot be scoped; nothing else, in any role of the stack, gets to use that excuse."""
+def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(template: Template) -> None:
+    """Two actions that cannot be scoped; nothing else gets to use that excuse.
+
+    ``bedrock:ListFoundationModels`` takes no resource at all. CloudFront
+    invalidation is CDK's: the file copier clears the caches after an upload,
+    and the role that does it is built by the construct, which grants the two
+    invalidation actions on ``*``. Narrowing that would mean replacing the
+    construct. Nothing in this stack's own roles is on a wildcard.
+    """
     wildcard_actions = [
         statement["Action"] for _, statement in all_policy_statements(template) if statement["Resource"] == "*"
     ]
-    assert wildcard_actions == ["bedrock:ListFoundationModels"]
+    assert wildcard_actions == [
+        "bedrock:ListFoundationModels",
+        ["cloudfront:GetInvalidation", "cloudfront:CreateInvalidation"],
+    ]
 
 
-def test_only_the_cdk_provider_role_has_a_managed_policy(stack: AndurStack, template: Template) -> None:
-    """Known exception: the CDK provider framework gives its own role AWSLambdaBasicExecutionRole.
+def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
+    stack: AndurStack, template: Template
+) -> None:
+    """Known exceptions: both belong to functions CDK generates for a deploy.
 
-    That role belongs to the function CDK generates to run the key generator
-    during a deploy; this stack does not create it and cannot narrow it
-    without replacing the framework. Every role the stack defines itself
-    carries inline policies only.
+    One runs the key generator, the other copies web/ into the site bucket.
+    Each gets AWSLambdaBasicExecutionRole from its construct; this stack does
+    not create either role and cannot narrow them without replacing the
+    constructs. Every role the stack defines itself carries inline policies
+    only, and both of these run during a deploy and never afterwards.
     """
     provider_role = stack.node.find_child("ApiKeyProvider").node.find_child("framework-onEvent").role
-    provider_role_id = stack.get_logical_id(provider_role.node.default_child)
+    copier_role = stack.site_files.handler_role
+    expected = {
+        stack.get_logical_id(provider_role.node.default_child),
+        stack.get_logical_id(copier_role.node.default_child),
+    }
     with_managed = {
         logical_id: role["Properties"]["ManagedPolicyArns"]
         for logical_id, role in template.find_resources("AWS::IAM::Role").items()
         if "ManagedPolicyArns" in role["Properties"]
     }
-    assert list(with_managed) == [provider_role_id]
-    (managed_arn,) = with_managed[provider_role_id]
-    assert joined_last_part(managed_arn) == ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+    assert set(with_managed) == expected
+    for managed_arns in with_managed.values():
+        (managed_arn,) = managed_arns
+        assert joined_last_part(managed_arn) == ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
 
 def test_role_may_only_touch_our_own_vector_index(stack: AndurStack, template: Template) -> None:
@@ -412,14 +449,16 @@ def test_role_can_only_be_assumed_by_bedrock_in_this_account(stack: AndurStack, 
     assert {"Ref": "AWS::AccountId"} in source_arn_parts
 
 
-def test_the_only_compute_is_the_answer_function_and_the_key_generator(
+def test_the_only_compute_that_runs_between_deploys_is_the_answer_function(
     stack: AndurStack, template: Template
 ) -> None:
-    """Three functions: the answer function, the key generator, and the CDK framework that runs it.
+    """Four functions, and three of them only ever run during a deploy.
 
-    Nothing else runs, so nothing else can cost money while nobody asks.
+    The answer function, the key generator with the CDK framework that runs
+    it, and CDK's file copier that puts web/ into the site bucket. Nothing
+    else runs, so nothing else can cost money while nobody asks.
     """
-    template.resource_count_is("AWS::Lambda::Function", 3)
+    template.resource_count_is("AWS::Lambda::Function", 4)
     functions = template.find_resources("AWS::Lambda::Function")
     assert stack.get_logical_id(stack.answer_function.node.default_child) in functions
 
@@ -438,6 +477,7 @@ def test_stack_publishes_what_later_steps_need(template: Template) -> None:
         "VectorIndexArn",
         "KnowledgeBaseRoleArn",
         "FunctionUrl",
+        "WebUrl",
         "ApiKeyParameterPath",
         "BudgetTableName",
     } <= set(outputs)
@@ -477,8 +517,22 @@ def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
     assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
 
 
+def test_cloudfront_gives_up_before_the_function_does() -> None:
+    """The one layer that does not nest, and knowingly so.
+
+    CloudFront may wait 120 seconds without an approved quota increase, and
+    the function may run 180. An answer between the two reaches the browser as
+    CloudFront's 504 while the function runs it to the end and charges the
+    question. Today an answer takes 0.7 to 3 seconds, so the gap is a corner,
+    not a case — and the alternative, a shorter function timeout, would cut
+    off answers that are merely slow.
+    """
+    assert ORIGIN_RESPONSE_TIMEOUT_SECONDS < ANSWER_TIMEOUT_SECONDS
+    assert ORIGIN_RESPONSE_TIMEOUT_SECONDS < aws.worst_case_seconds()
+
+
 def test_answer_function_runs_at_most_a_few_requests_at_once(stack: AndurStack, template: Template) -> None:
-    """The public URL's hard cap on Lambda time and model calls."""
+    """The hard cap on Lambda time and model calls behind an address anyone may find."""
     properties = resource_of(stack, template, stack.answer_function)["Properties"]
     assert properties["ReservedConcurrentExecutions"] == ANSWER_MAX_CONCURRENCY == 5
 
@@ -542,11 +596,15 @@ def test_answer_role_has_no_managed_policy(stack: AndurStack, template: Template
     assert "ManagedPolicyArns" not in resource_of(stack, template, stack.answer_role)["Properties"]
 
 
-def test_function_url_is_open_only_behind_the_keys(stack: AndurStack, template: Template) -> None:
-    """AuthType NONE, so the key check in the handler is the lock — and every key exists first."""
+def test_the_function_url_needs_signed_requests(stack: AndurStack, template: Template) -> None:
+    """AuthType AWS_IAM: the URL is not a way in, and origin access control demands it.
+
+    No CORS configuration either — the page is served from the same address,
+    so there is no cross-origin request to allow.
+    """
     template.resource_count_is("AWS::Lambda::Url", 1)
     url = resource_of(stack, template, stack.function_url)
-    assert url["Properties"]["AuthType"] == "NONE"
+    assert url["Properties"]["AuthType"] == "AWS_IAM"
     assert "Cors" not in url["Properties"]
     key_ids = {stack.get_logical_id(key.node.default_child) for key in stack.api_keys}
     assert key_ids <= set(url["DependsOn"])
@@ -561,6 +619,179 @@ def test_exactly_one_output_is_a_function_url(stack: AndurStack, template: Templ
     assert template.find_outputs("FunctionUrl")["FunctionUrl"]["Value"] == get_att(
         stack, stack.function_url.node.default_child, "FunctionUrl"
     )
+
+
+# --- The page, and the one address in front of everything ----------------
+
+
+def distribution_config(stack: AndurStack, template: Template) -> Mapping[str, Any]:
+    return resource_of(stack, template, stack.distribution)["Properties"]["DistributionConfig"]
+
+
+def test_only_cloudfront_may_invoke_the_function_and_only_this_distribution(
+    stack: AndurStack, template: Template
+) -> None:
+    """Both permissions the documentation asks for, both bound to this distribution.
+
+    One is added by the origin access control construct, the other by the
+    stack. Without the source condition any distribution in any account could
+    invoke the function.
+    """
+    distribution_arn_parts = [
+        "arn:",
+        {"Ref": "AWS::Partition"},
+        ":cloudfront::",
+        {"Ref": "AWS::AccountId"},
+        ":distribution/",
+        {"Ref": stack.get_logical_id(stack.distribution.node.default_child)},
+    ]
+    permissions = template.find_resources("AWS::Lambda::Permission")
+    assert len(permissions) == 2
+    actions = set()
+    for permission in permissions.values():
+        properties = permission["Properties"]
+        assert properties["Principal"] == "cloudfront.amazonaws.com"
+        assert properties["SourceArn"]["Fn::Join"] == ["", distribution_arn_parts]
+        actions.add(properties["Action"])
+    assert actions == {"lambda:InvokeFunctionUrl", "lambda:InvokeFunction"}
+
+
+def test_the_site_bucket_is_private_and_no_website(stack: AndurStack, template: Template) -> None:
+    """An S3 website endpoint serves plain HTTP only, so the bucket is never one."""
+    properties = resource_of(stack, template, stack.site_bucket)["Properties"]
+    assert properties["PublicAccessBlockConfiguration"] == {
+        "BlockPublicAcls": True,
+        "BlockPublicPolicy": True,
+        "IgnorePublicAcls": True,
+        "RestrictPublicBuckets": True,
+    }
+    assert "WebsiteConfiguration" not in properties
+    assert "VersioningConfiguration" not in properties
+
+
+def test_the_site_bucket_opens_only_for_this_distribution(
+    stack: AndurStack, template: Template
+) -> None:
+    policy = resource_of(stack, template, stack.site_bucket.policy)["Properties"]["PolicyDocument"]
+    (read,) = [s for s in policy["Statement"] if s["Effect"] == "Allow"]
+    assert read["Action"] == "s3:GetObject"
+    assert read["Principal"] == {"Service": "cloudfront.amazonaws.com"}
+    source_arn = read["Condition"]["StringEquals"]["AWS:SourceArn"]["Fn::Join"][1]
+    assert {"Ref": stack.get_logical_id(stack.distribution.node.default_child)} in source_arn
+
+
+def test_both_origins_are_reached_through_an_origin_access_control(
+    stack: AndurStack, template: Template
+) -> None:
+    """Neither the bucket nor the function URL is reachable beside the distribution."""
+    origins = distribution_config(stack, template)["Origins"]
+    assert len(origins) == 2
+    for origin in origins:
+        assert "OriginAccessControlId" in origin
+
+    controls = template.find_resources("AWS::CloudFront::OriginAccessControl")
+    assert len(controls) == 2
+    kinds = set()
+    for control in controls.values():
+        config = control["Properties"]["OriginAccessControlConfig"]
+        assert config["SigningBehavior"] == "always"
+        assert config["SigningProtocol"] == "sigv4"
+        kinds.add(config["OriginAccessControlOriginType"])
+    assert kinds == {"s3", "lambda"}
+
+
+def test_the_page_is_served_over_https_only(stack: AndurStack, template: Template) -> None:
+    config = distribution_config(stack, template)
+    assert config["DefaultRootObject"] == SITE_ROOT_DOCUMENT
+    assert config["DefaultCacheBehavior"]["ViewerProtocolPolicy"] == "redirect-to-https"
+    assert config["DefaultCacheBehavior"]["AllowedMethods"] == ["GET", "HEAD"]
+    for behavior in config["CacheBehaviors"]:
+        assert behavior["ViewerProtocolPolicy"] == "https-only"
+
+
+def test_the_ask_path_posts_to_the_function_and_is_never_cached(
+    stack: AndurStack, template: Template
+) -> None:
+    """An answer differs per question and per key; a cached one would be the wrong answer."""
+    (behavior,) = distribution_config(stack, template)["CacheBehaviors"]
+    assert behavior["PathPattern"] == ASK_PATH
+    assert "POST" in behavior["AllowedMethods"]
+    # CachingDisabled and AllViewerExceptHostHeader, the two managed policies.
+    assert behavior["CachePolicyId"] == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+    assert behavior["OriginRequestPolicyId"] == "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+
+    function_origin = [o for o in distribution_config(stack, template)["Origins"] if "CustomOriginConfig" in o]
+    (origin,) = function_origin
+    assert behavior["TargetOriginId"] == origin["Id"]
+    assert origin["CustomOriginConfig"]["OriginProtocolPolicy"] == "https-only"
+
+
+def test_cloudfront_waits_as_long_as_an_account_may_without_asking(
+    stack: AndurStack, template: Template
+) -> None:
+    """The response-timeout quota is 1-120 seconds; more needs an approved increase."""
+    (origin,) = [o for o in distribution_config(stack, template)["Origins"] if "CustomOriginConfig" in o]
+    assert origin["CustomOriginConfig"]["OriginReadTimeout"] == ORIGIN_RESPONSE_TIMEOUT_SECONDS == 120
+
+
+def test_the_web_address_is_the_distribution(stack: AndurStack, template: Template) -> None:
+    value = template.find_outputs("WebUrl")["WebUrl"]["Value"]
+    assert value["Fn::Join"][1] == [
+        "https://",
+        get_att(stack, stack.distribution.node.default_child, "DomainName"),
+    ]
+
+
+# --- The page's own files ------------------------------------------------
+
+
+def web_files() -> list[Path]:
+    return sorted(p for p in WEB_FOLDER.iterdir() if p.is_file())
+
+
+def test_the_page_loads_nothing_from_anywhere_else() -> None:
+    """No framework, no font, no script from a server that is not this one."""
+    markup = (WEB_FOLDER / SITE_ROOT_DOCUMENT).read_text(encoding="utf-8")
+    referenced = re.findall(r'(?:src|href)="([^"]*)"', markup)
+    assert referenced, "the page should reference its script and its stylesheet"
+    names = {path.name for path in web_files()}
+    for reference in referenced:
+        # A data: URI fetches nothing; everything else must be a file of ours.
+        assert reference.startswith("data:") or reference in names, reference
+    assert {"app.js", "style.css"} <= set(referenced)
+
+
+def test_no_file_of_the_page_names_an_address_of_its_own() -> None:
+    """The page calls /ask relatively; an address in it would be one to keep in step."""
+    for path in web_files():
+        if path.suffix == ".md":
+            continue
+        content = path.read_text(encoding="utf-8")
+        for forbidden in ("lambda-url", "amazonaws", "cloudfront.net"):
+            assert forbidden not in content, f"{path.name} names {forbidden}"
+
+
+#: What a workspace key looks like: 43 URL-safe characters from
+#: ``secrets.token_urlsafe(32)``. Mixed case and a digit, so that a long
+#: ordinary word cannot be mistaken for one.
+KEY_SHAPED = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43,}(?![A-Za-z0-9_-])")
+
+
+def test_no_key_is_in_the_page() -> None:
+    for path in web_files():
+        for candidate in KEY_SHAPED.findall(path.read_text(encoding="utf-8")):
+            looks_like_a_key = (
+                any(c.isdigit() for c in candidate)
+                and any(c.islower() for c in candidate)
+                and any(c.isupper() for c in candidate)
+            )
+            assert not looks_like_a_key, f"{path.name} carries something key-shaped"
+
+
+def test_the_page_never_prints_the_key() -> None:
+    """Not to the console, and not into the address — the key goes into one header."""
+    script = (WEB_FOLDER / "app.js").read_text(encoding="utf-8")
+    assert "console." not in script
 
 
 # --- Key budgets ---------------------------------------------------------
@@ -660,7 +891,7 @@ def test_key_function_may_only_write_keys_under_the_path(stack: AndurStack, temp
 
 def test_every_log_group_has_a_retention_and_goes_with_the_stack(template: Template) -> None:
     log_groups = template.find_resources("AWS::Logs::LogGroup")
-    assert len(log_groups) == 3
+    assert len(log_groups) == 4
     for log_group in log_groups.values():
         assert log_group["Properties"]["RetentionInDays"] == 30
         assert log_group["DeletionPolicy"] == "Delete"

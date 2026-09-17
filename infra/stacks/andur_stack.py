@@ -9,11 +9,21 @@ One stack holds everything Andur needs:
 * a data source that tells the knowledge base which prefix to crawl,
 * one key per workspace in Parameter Store, generated during the deploy,
 * a DynamoDB table that counts what each key has spent of its budget,
-* the answer function (app/handler.py) behind a Function URL.
+* the answer function (app/handler.py) behind a Function URL,
+* a second, private bucket holding the page from web/,
+* one CloudFront distribution that serves both: the page from the bucket, and
+  /ask from the function URL.
+
+One address for everything. The page and the answer function sit behind the
+same distribution, so the page calls /ask on its own origin and there is no
+cross-origin request to allow. The function URL is set to AWS_IAM and is
+unreachable on its own: only CloudFront holds the permission to invoke it,
+and only for this distribution.
 
 Nothing here runs while nobody asks: the function runs only while a question
-is in flight, the keys are free standard parameters, and the budget table is
-billed per request. What an idle month costs is storage, in cents.
+is in flight, the keys are free standard parameters, the budget table is
+billed per request, and CloudFront's permanent free tier covers a demo's
+traffic many times over. What an idle month costs is storage, in cents.
 """
 
 import hashlib
@@ -29,11 +39,14 @@ from aws_cdk import (
     RemovalPolicy,
     Stack,
     aws_bedrock as bedrock,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
     aws_dynamodb as dynamodb,
     aws_iam as iam,
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_s3 as s3,
+    aws_s3_deployment as s3_deployment,
     aws_s3vectors as s3vectors,
     custom_resources as cr,
 )
@@ -157,16 +170,18 @@ ANSWER_TIMEOUT_SECONDS = 180
 ANSWER_MEMORY_MB = 512
 
 #: At most this many requests run at the same time; Lambda answers the rest
-#: with 429 before any code runs. The URL is public, so this is the hard cap on
-#: Lambda time and with it on model calls per second, whatever arrives —
-#: with a valid key or not. What one key may spend in total is the budget
-#: below; this is only the rate at which anything at all can arrive.
+#: with 429 before any code runs. The page is open to anyone who finds it, so
+#: this is the hard cap on Lambda time and with it on model calls per second,
+#: whatever arrives — with a valid key or not. What one key may spend in total
+#: is the budget below; this is only the rate at which anything at all can
+#: arrive.
 #:
 #: The price is that five concurrent calls from a stranger hold the service
 #: up: Lambda answers everyone else with 429, and a demo that costs nothing
 #: is unavailable until they stop. Taken on purpose — capping the bill matters
-#: more here than keeping a demo reachable, and a WAF in front of the URL is
-#: the answer if it ever becomes a real problem.
+#: more here than keeping a demo reachable, and a WAF on the distribution is
+#: the answer if it ever becomes a real problem. One distribution in front of
+#: everything is what makes that a single place to add it.
 ANSWER_MAX_CONCURRENCY = 5
 
 #: How long function logs are kept. Without a limit they are kept, and billed,
@@ -180,6 +195,33 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 #: ``__pycache__`` behind would change the package and make `cdk diff` report a
 #: code change that is none.
 ASSET_EXCLUDES = ["**/__pycache__", "*.pyc", "README.md"]
+
+# --- The page (build step 5) -----------------------------------------------
+# One address for everything: CloudFront serves the page out of a private
+# bucket and forwards one path to the answer function. Same origin for both,
+# so the page needs no cross-origin permission, and the function URL needs no
+# way in of its own.
+
+#: The folder whose files are the page. Everything in it is uploaded to the
+#: site bucket during a deploy, minus `ASSET_EXCLUDES` — so web/README.md is
+#: documentation, not a published file.
+WEB_FOLDER = REPOSITORY_ROOT / "web"
+
+#: The one path CloudFront does not answer from the bucket. A page loaded
+#: from the distribution reaches the function by posting to this path.
+ASK_PATH = "/ask"
+
+#: The file CloudFront serves for the bare address.
+SITE_ROOT_DOCUMENT = "index.html"
+
+#: How long CloudFront waits for the answer function before it gives the
+#: browser a 504 of its own. The quota "Response timeout per origin" is
+#: 1-120 seconds and anything above needs an approved increase (CloudFront
+#: quotas page, read 17.09.2026), so this is the whole of what an account
+#: has without asking. It is shorter than the function's own 180 seconds:
+#: an answer that took longer would reach the browser as a 504 while the
+#: function ran it to the end. Answers take 0.7 to 3 seconds today.
+ORIGIN_RESPONSE_TIMEOUT_SECONDS = 120
 
 
 def replacement_safe_name(
@@ -251,6 +293,13 @@ class AndurStack(Stack):
             self.knowledge_base, self.budget_table, self.answer_role, self.answer_log_group
         )
         self.function_url = self._create_function_url(self.answer_function, self.api_keys)
+
+        self.site_bucket = self._create_site_bucket()
+        self.distribution = self._create_distribution(self.site_bucket, self.function_url)
+        self.invoke_permission = self._allow_cloudfront_to_invoke(
+            self.answer_function, self.distribution
+        )
+        self.site_files = self._upload_the_page(self.site_bucket, self.distribution)
 
         self._create_outputs()
 
@@ -741,17 +790,159 @@ class AndurStack(Stack):
     def _create_function_url(
         self, function: lambda_.Function, api_keys: list[CustomResource]
     ) -> lambda_.FunctionUrl:
-        """A public HTTPS address for the function; the key check in the handler is the lock.
+        """The function's own HTTPS address — reachable for CloudFront alone.
 
-        ``NONE`` rather than ``AWS_IAM``: IAM auth would need every request
-        signed with AWS credentials, which the people asking do not have. The
-        URL is created only after every key exists, so it is never reachable
-        without one.
+        ``AWS_IAM`` and not ``NONE``: every request must be signed with AWS
+        credentials, and the only holder of a permission to invoke this URL is
+        the CloudFront service principal, restricted to this stack's
+        distribution (`_allow_cloudfront_to_invoke`, and the permission the
+        origin access control adds). Called directly the URL answers 403,
+        whatever key the call carries. Origin access control requires
+        ``AWS_IAM``: "To use OAC, you must specify AWS_IAM as the value for
+        the AuthType parameter" (CloudFront developer guide, "Restrict access
+        to an AWS Lambda function URL origin", read 17.09.2026).
+
+        The workspace key is no weaker for it — it is still the whole of what
+        decides which workspace a question may read. It only travels one layer
+        further in, in a header of its own (`KEY_HEADER` in app/handler.py).
+
+        The URL is created only after every key exists, so no question can
+        arrive before the workspace it names has a key.
         """
-        url = function.add_function_url(auth_type=lambda_.FunctionUrlAuthType.NONE)
+        url = function.add_function_url(auth_type=lambda_.FunctionUrlAuthType.AWS_IAM)
         for api_key in api_keys:
             url.node.add_dependency(api_key)
         return url
+
+    # --- The page --------------------------------------------------------
+
+    def _create_site_bucket(self) -> s3.Bucket:
+        """The bucket the page is served from — private, and reachable only through CloudFront.
+
+        The same shape as the documents bucket minus the two things that only
+        matter for documents: no versioning, because every file here is a copy
+        of what is in web/ in the repository, and ``DESTROY`` rather than
+        ``RETAIN``, because nothing in it is a source of truth. No website
+        configuration either: "Amazon S3 website endpoints do not support
+        HTTPS or access points" (S3 user guide, "Website endpoints", read
+        17.09.2026), and they serve only publicly readable content. So the
+        bucket stays a plain private bucket and CloudFront reads it through
+        an origin access control.
+        """
+        return s3.Bucket(
+            self,
+            "SiteBucket",
+            bucket_name=f"andur-site-{Aws.ACCOUNT_ID}-{Aws.REGION}",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            enforce_ssl=True,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+    def _create_distribution(
+        self, site_bucket: s3.Bucket, function_url: lambda_.FunctionUrl
+    ) -> cloudfront.Distribution:
+        """One address for everything: the page from the bucket, `ASK_PATH` from the function.
+
+        Two origins, each with an origin access control of its own, so neither
+        the bucket nor the function URL is reachable without going through
+        this distribution. Everything is HTTPS: the page redirects a plain
+        HTTP request, `ASK_PATH` refuses one, because a redirect would turn a
+        browser's POST into a GET and lose the question with it.
+
+        The `ASK_PATH` behaviour keeps nothing and forwards everything:
+        answers differ per question and per key, so caching them would be
+        wrong before it was useful, and the request policy has to carry
+        ``X-Andur-Key``, ``Content-Type`` and ``x-amz-content-sha256`` through
+        to the function. ``ALL_VIEWER_EXCEPT_HOST_HEADER`` is the managed
+        policy that passes every viewer header but ``Host`` — which must stay
+        CloudFront's own, because the origin access control signs the request
+        for the function URL's host.
+        """
+        return cloudfront.Distribution(
+            self,
+            "SiteDistribution",
+            comment="Andur: the page, and /ask on its way to the answer function.",
+            default_root_object=SITE_ROOT_DOCUMENT,
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.S3BucketOrigin.with_origin_access_control(site_bucket),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+            ),
+            additional_behaviors={
+                ASK_PATH: cloudfront.BehaviorOptions(
+                    origin=origins.FunctionUrlOrigin.with_origin_access_control(
+                        function_url,
+                        read_timeout=Duration.seconds(ORIGIN_RESPONSE_TIMEOUT_SECONDS),
+                    ),
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                    origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                )
+            },
+        )
+
+    def _allow_cloudfront_to_invoke(
+        self, function: lambda_.Function, distribution: cloudfront.Distribution
+    ) -> lambda_.CfnPermission:
+        """The second of the two permissions the CloudFront documentation asks for.
+
+        Its "Restrict access to an AWS Lambda function URL origin" page grants
+        the CloudFront service principal both ``lambda:InvokeFunctionUrl`` and
+        ``lambda:InvokeFunction``, each with the distribution as
+        ``source-arn``. The origin access control construct adds the first by
+        itself (``InvokeFromApiFor<origin>`` in the template); this is the
+        second. Both are bound to this one distribution, so no other
+        distribution — in this account or any other — can reach the function.
+
+        Created after the distribution and pointing at it: the distribution
+        needs only the function URL's domain name, never this permission, so
+        there is no cycle.
+        """
+        return lambda_.CfnPermission(
+            self,
+            "InvokeFunctionFromCloudFront",
+            action="lambda:InvokeFunction",
+            function_name=function.function_arn,
+            principal="cloudfront.amazonaws.com",
+            source_arn=(
+                f"arn:{Aws.PARTITION}:cloudfront::{Aws.ACCOUNT_ID}:"
+                f"distribution/{distribution.distribution_id}"
+            ),
+        )
+
+    def _upload_the_page(
+        self, site_bucket: s3.Bucket, distribution: cloudfront.Distribution
+    ) -> s3_deployment.BucketDeployment:
+        """Put web/ into the site bucket as part of the deploy, and clear the caches.
+
+        Without the invalidation a changed page would keep being served from
+        the edge caches until they expired on their own. One invalidation per
+        deploy of ``/*`` is one path against the 1,000 a month that cost
+        nothing.
+
+        ``retain_on_delete=False`` is what lets ``cdk destroy`` work: the
+        bucket is emptied when this resource goes, and CloudFormation deletes
+        it before the bucket it depends on. Without it the bucket would still
+        hold the page and its deletion would fail. ``prune`` then also removes
+        a file that is no longer in web/.
+
+        The copying is done by a function CDK brings with the construct. Like
+        the key generator, it runs during a deploy and never afterwards, so it
+        adds nothing to what an idle month costs.
+        """
+        return s3_deployment.BucketDeployment(
+            self,
+            "SiteFiles",
+            sources=[s3_deployment.Source.asset(str(WEB_FOLDER), exclude=ASSET_EXCLUDES)],
+            destination_bucket=site_bucket,
+            distribution=distribution,
+            distribution_paths=["/*"],
+            prune=True,
+            retain_on_delete=False,
+            log_group=self._create_log_group("SiteFilesLogs"),
+        )
 
     # --- Outputs ---------------------------------------------------------
 
@@ -800,9 +991,21 @@ class AndurStack(Stack):
         )
         CfnOutput(
             self,
+            "WebUrl",
+            value=f"https://{self.distribution.distribution_domain_name}",
+            description=(
+                f"The page. Questions go to <WebUrl>{ASK_PATH} with the header X-Andur-Key "
+                "and the SHA-256 of the body in x-amz-content-sha256."
+            ),
+        )
+        CfnOutput(
+            self,
             "FunctionUrl",
             value=self.function_url.url,
-            description="POST a question here with Authorization: Bearer <workspace key>.",
+            description=(
+                "The function's own address. Not a way in: it is set to AWS_IAM and only "
+                f"CloudFront may invoke it. Ask through <WebUrl>{ASK_PATH}."
+            ),
         )
         CfnOutput(
             self,

@@ -24,25 +24,59 @@ removes it.
 | Embeddings | Titan Text Embeddings V2 | Turns text into the 1024-dimension vectors the index stores. |
 | Separation | Metadata filter | `workspace` on every chunk. The filter, not a separate deployment, is what keeps companies apart. |
 | Answering | Nemotron 3 Super on Bedrock, behind a Lambda function | Answers from the retrieved passages only and cites them. No idle cost; the function only runs while a question is in flight. |
-| Access | Function URL, one key per workspace | The key decides the workspace. Keys are generated during the deploy and kept as SecureString parameters, which cost nothing. |
+| Access | One key per workspace | The key decides the workspace. Keys are generated during the deploy and kept as SecureString parameters, which cost nothing. |
 | Budget | DynamoDB, one item per key | A key is an allowance, not a password: 10 questions and 48 hours from the first one. Billed per request, so an idle month costs nothing. |
-| Web page | *(build step 4)* static page on S3 | A chat box. Cheap enough to ignore. |
+| Page | Static files on S3, private | Three files, no framework, nothing loaded from another server. |
+| The way in | CloudFront, one distribution | One https address for the page and for questions. Its permanent free tier is 1 TB and 10 million requests a month — a demo never leaves it. |
 
 What is missing from that list is as deliberate as what is in it: no
 OpenSearch cluster, no NAT gateway, no container service, nothing with a
 monthly base fee. The bill follows use, and when nobody uses it, there
 barely is one.
 
+### One address for everything
+
+The page and the answer function sit behind the same CloudFront
+distribution. The page comes from a private S3 bucket; the single path
+`/ask` goes to the answer function instead. Both origins are reached through
+an origin access control, which means neither is reachable on its own: the
+bucket blocks all public access, and the function URL is set to `AWS_IAM`, so
+it answers 403 to everyone but CloudFront, and only for this distribution.
+
+That shape buys three things. The page calls `/ask` as a relative path, so it
+never has to know its own address and there is no configuration file to keep
+in step. Page and function share an origin, so there is no cross-origin
+request and nothing to allow with CORS. And there is one place in front of
+everything — the place a WAF would go if the demo ever needed one.
+
+It costs two things, both in the request and both worth knowing before
+reading the curl examples below:
+
+- **The key travels in `X-Andur-Key`, not in `Authorization`.** CloudFront
+  signs every request it forwards to the function URL and puts its own
+  signature into `Authorization`, so a key sent there would be overwritten on
+  the way.
+- **Every request carries the SHA-256 of its body in `x-amz-content-sha256`.**
+  A signed request to a Lambda function URL may not have an unsigned payload,
+  so the caller computes the hash. A browser has `crypto.subtle` for it, a
+  shell has `sha256sum`, and `scripts/ask.py` uses `hashlib`.
+
+One more consequence, in the [app README](app/README.md): CloudFront waits
+120 seconds for the function, which may run 180. An answer between the two
+arrives as a 504 while the function finishes it anyway. Answers take 0.7 to 3
+seconds today.
+
 ### What this repository contains today
 
-Build steps 1 to 3 of six. The stack creates the documents bucket, the
+Build steps 1 to 5 of seven. The stack creates the documents bucket, the
 vector bucket and index, the knowledge base with its service role, a data
 source pointing at the documents, one key per workspace, the table that
-holds each key's budget, and the answer function behind a Function URL. A
-fill script loads a demo corpus of two fictional companies into it, a
-retrieve script shows that a query in one company's workspace never returns
-the other's documents, and an ask script puts a question to the deployed
-function. No web page yet — that is step 4.
+holds each key's budget, the answer function, the bucket holding the page,
+and the CloudFront distribution that serves both. A fill script loads a demo
+corpus of two fictional companies into it, a retrieve script shows that a
+query in one company's workspace never returns the other's documents, and an
+ask script puts a question to the deployed address. The page itself is three
+files in `web/` — no framework, no build step, nothing from another server.
 
 Every key carries a budget: ten questions, and 48 hours from the first of
 them. The handler counts a question against the key that asked before it
@@ -54,11 +88,12 @@ costs, how to set it and how to reset it is in
 
 ```
 infra/       the CDK app, the stack, and the key generator it runs during a deploy
-app/         the answer function behind the Function URL
+app/         the answer function behind /ask
+web/         the page: index.html, app.js, style.css
 scripts/     ingest, retrieve and ask
 knowledge/   the demo corpus: two fictional companies
 docs/        metadata convention
-tests/       stack template, answer function, key generator, scripts
+tests/       stack template, answer function, key generator, scripts, page
 ```
 
 ## Deploy
@@ -77,19 +112,25 @@ cdk destroy                               # removes it again
 ```
 
 `cdk deploy` prints the knowledge base id, the data source id, the bucket
-names, the Function URL and the Parameter Store path of the workspace keys.
-The scripts read them from there.
+names, the web address (`WebUrl`) and the Parameter Store path of the
+workspace keys. The scripts read them from there. It also uploads `web/` into
+the site bucket and clears the CloudFront caches, so the page is whatever is
+in `web/` at the moment of the deploy.
+
+The first deploy of the distribution takes a few minutes longer than the
+others: CloudFront rolls a new configuration out to its edge locations before
+the stack reports success.
 
 The deploy also creates one key per workspace listed in `WORKSPACES` in
 `infra/stacks/andur_stack.py`. A small function generates each key inside AWS
 and stores it as a SecureString parameter; CloudFormation cannot create those
 itself, and a key written into the template would end up in `cdk.out`. An
-existing key survives every later deploy. The Function URL is created only
-after the keys, so it is never reachable without one.
+existing key survives every later deploy. The function's URL is created only
+after the keys, so the function never exists without one.
 
 Resource names are mostly not generated by CloudFormation. The documents
-bucket, the vector bucket, the knowledge base role, the answer function
-(`andur-answer`) and its log group have fixed names. The index, the knowledge
+bucket, the site bucket, the vector bucket, the knowledge base role, the
+answer function (`andur-answer`) and its log group have fixed names. The index, the knowledge
 base and the data source carry a short digest of the settings that force a
 replacement, so a changed setting gives the replacement a new name instead
 of an "already exists" failure. Either way the stack is one instance per
@@ -124,6 +165,11 @@ ends in `DELETE_FAILED`.
 
 `cdk destroy` deletes the workspace keys and the function logs with the
 stack. The next deploy generates new keys.
+
+The site bucket and the distribution go with the stack too. The bucket is
+emptied first — the file copier removes what it uploaded — so the deletion
+does not stop at a bucket that is not empty. A new distribution has a new
+address, so `WebUrl` changes with every rebuild.
 
 ### Filling it
 
@@ -173,7 +219,35 @@ with its layer and whether the answer cites it, then tokens and latency. The
 second answers *The sources do not answer this question.* from Pellwick's
 documents. The script fetches the workspace key from Parameter Store itself;
 the key never appears on screen. Request format, answer fields, status codes
-and how to get a key for curl or a web page: [app/README.md](app/README.md).
+and how to get a key for curl or the page: [app/README.md](app/README.md).
+
+#### In the browser
+
+Open the stack output `WebUrl`. The page asks once for a workspace and its
+key, keeps both in the browser, and shows the answer with its sources, the
+layers it rests on and what it cost. **Forget key** removes the key again.
+The key is never part of the address. What the page does with each status,
+and why it has no configuration file: [web/README.md](web/README.md).
+
+#### With curl
+
+```bash
+WEB_URL=$(aws cloudformation describe-stacks --region us-east-1 --stack-name AndurStack \
+  --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text)
+BODY='{"question": "How do I export project data?", "workspace": "quillmoor"}'
+
+curl -s -X POST "$WEB_URL/ask" \
+  -H "X-Andur-Key: $KEY" \
+  -H "Content-Type: application/json" \
+  -H "x-amz-content-sha256: $(printf '%s' "$BODY" | sha256sum | cut -d' ' -f1)" \
+  -d "$BODY"
+```
+
+`$KEY` is the workspace key ([app/README.md](app/README.md#getting-a-key)).
+`printf '%s'` and not `echo`: a trailing newline would go into the hash but
+not into the body, and the request would be refused. The stack output
+`FunctionUrl` is not an address to send this to — it answers 403 to everyone
+but CloudFront.
 
 ## Retrieval findings
 
@@ -274,16 +348,20 @@ section split keeps hits bounded either way.
 pytest -q
 ```
 
-The stack tests render the stack to CloudFormation JSON and assert on it. The
-handler tests drive the answer function through every status code against
-fake Bedrock, Parameter Store and DynamoDB clients; the budget fake runs the
-handler's own update and condition strings, so a wrong attribute name fails
-there rather than in AWS. The script tests check the corpus
-layout, the sidecars, the object keys and the counters, and drive upload,
-job wait, retrieval and asking against small fake clients. None of them call
-AWS or need credentials, and they finish in
-seconds — a broken stack or a broken sidecar shows up before a deploy or a
-sync spends minutes finding out.
+The stack tests render the stack to CloudFormation JSON and assert on it,
+including the way in: the function URL on `AWS_IAM`, both invoke permissions
+bound to this distribution alone, the private site bucket, and the `/ask`
+behaviour with its methods, its disabled cache and its response timeout. Four
+of them read `web/` itself, to keep the page from growing an address of its
+own, a key, a `console.log` or a file from another server. The handler tests
+drive the answer function through every status code against fake Bedrock,
+Parameter Store and DynamoDB clients; the budget fake runs the handler's own
+update and condition strings, so a wrong attribute name fails there rather
+than in AWS. The script tests check the corpus layout, the sidecars, the
+object keys and the counters, and drive upload, job wait, retrieval and
+asking against small fake clients. None of them call AWS or need credentials,
+and they finish in seconds — a broken stack or a broken sidecar shows up
+before a deploy or a sync spends minutes finding out.
 
 ## What it costs
 
@@ -323,16 +401,29 @@ provision for and a throttled counter would refuse honest questions.
 embedding at 0.02 USD per million — about 0.002 USD. Embedding a corpus is
 not what costs money; asking questions is, and barely.
 
+**Serving the page:** nothing worth counting. CloudFront's permanent free
+tier is 1 TB of data transfer out and 10 million requests per month; the page
+is a few kilobytes and a demo month is a few thousand requests, so a month of
+it stays inside the free tier several thousand times over. Beyond it the
+prices are 0.085 USD per GB and 0.010 USD (United States) or 0.012 USD
+(Europe) per 10,000 HTTPS requests. Fetching from an AWS origin is free.
+Cache invalidation is free for the first 1,000 paths a month, and a deploy
+uses one. The site bucket holds a few kilobytes at 0.023 USD per GB-month.
+(CloudFront and S3 pricing pages, read 17.09.2026.)
+
 ## Roadmap
 
 1. **Infrastructure** — bucket, vector index, knowledge base, IAM. *(done)*
 2. **Ingest** — a fill script and a fictional demo company, 20–40 documents. *(done)*
-3. **Answering** — Lambda handler behind a Function URL with one key per
-   workspace: question, budget per key, retrieval, model, answer with sources
-   and layer, token counts per answer in the log. *(this step)*
-4. **Web page** — a chat page on S3 that calls the Function URL.
-5. **Guardrails** — topic, PII and hallucination filters.
-6. **Release** — screenshots, a walkthrough, a tagged version.
+3. **Answering** — Lambda handler with one key per workspace: question,
+   retrieval, model, answer with sources and layer, token counts per answer
+   in the log. *(done)*
+4. **Key budgets** — a key is an allowance: ten questions and 48 hours,
+   counted in DynamoDB. *(done)*
+5. **The page** — a page behind CloudFront, with the answer function on the
+   same address. *(this step)*
+6. **Guardrails** — topic, PII and hallucination filters.
+7. **Release** — screenshots, a walkthrough, a tagged version.
 
 ## Licence
 

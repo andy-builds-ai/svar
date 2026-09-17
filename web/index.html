@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask Andur</title>
+<!-- An empty icon, so the browser does not ask the bucket for a favicon it
+     does not hold and log the 403 that comes back. -->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Ask Andur</h1>
+  <p class="lead">
+    A demo with two <strong>fictional</strong> companies. Each keeps its handbooks, notes and
+    drafts in a vault of its own, and Andur answers from one vault at a time. Every answer
+    comes with the passages it was built from, and every passage says which layer it came
+    from: written by a person, produced by a machine, or merely arrived and not yet sorted.
+  </p>
+</header>
+
+<section class="panel" aria-labelledby="access-heading">
+  <h2 id="access-heading">Workspace and key</h2>
+  <p class="note">
+    A key opens one workspace and carries an allowance: ten questions, and 48 hours from the
+    first of them. It stays in this browser and is never part of the address.
+  </p>
+  <div class="fields">
+    <p class="field">
+      <label for="workspace">Workspace</label>
+      <input id="workspace" name="workspace" type="text" autocomplete="off"
+             spellcheck="false" placeholder="quillmoor">
+    </p>
+    <p class="field">
+      <label for="key">Key</label>
+      <input id="key" name="key" type="password" autocomplete="off"
+             spellcheck="false" placeholder="paste the workspace key">
+    </p>
+    <p class="field field--button">
+      <button id="forget" type="button">Forget key</button>
+    </p>
+  </div>
+</section>
+
+<form id="ask-form" class="panel" autocomplete="off">
+  <h2><label for="question">Question</label></h2>
+  <textarea id="question" name="question" rows="3" maxlength="1000"
+            placeholder="How do I export project data?"></textarea>
+  <div class="actions">
+    <span id="counter" class="note">0 / 1000</span>
+    <button id="ask" type="submit">Ask</button>
+  </div>
+  <p class="note">Enter asks. Shift + Enter starts a new line.</p>
+</form>
+
+<p id="message" class="message" hidden></p>
+
+<section id="result" class="panel" hidden aria-live="polite">
+  <h2>Answer</h2>
+  <p id="answer" class="answer"></p>
+  <p id="layers" class="layers"></p>
+  <h3>Sources</h3>
+  <p id="no-sources" class="note" hidden>None — no passage in this workspace matched.</p>
+  <ol id="sources" class="sources"></ol>
+  <p id="cost" class="note cost"></p>
+</section>
+
+</main>
+<script src="app.js"></script>
+</body>
+</html>

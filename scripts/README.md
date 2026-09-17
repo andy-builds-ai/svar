@@ -16,12 +16,13 @@ Three commands, all run from the repository root:
 - A valid AWS login for the account the stack is deployed in. When it has
   run out, both scripts stop with a message that says so; sign in with
   `aws login` and rerun.
-- The deployed stack. Bucket, knowledge base id, data source id, Function URL
+- The deployed stack. Bucket, knowledge base id, data source id, web address
   and key path are read from the outputs of `AndurStack` in `us-east-1`. The
   region is pinned like in `infra/app.py`, so a shell profile pointing
   elsewhere does not matter. Each value can be passed by hand instead:
   `--bucket`, `--knowledge-base-id`, `--data-source-id`, `--url`, and
-  `--stack-name` / `--region` for another stack.
+  `--stack-name` / `--region` for another stack. `--url` takes the web
+  address, not the function URL — `ask` appends `/ask` to it itself.
 
 ## ingest
 
@@ -143,11 +144,17 @@ python -m scripts.ask "How do I export project data?" --workspace pellwick
 python -m scripts.ask "How will the bulk export of all projects work?" --workspace quillmoor --json
 ```
 
-It sends what any client sends: a `POST` to the Function URL with the
-workspace key as `Authorization: Bearer <key>`. The key comes from Parameter
-Store (`/andur/api-keys/<workspace>`, decrypted) and is never printed. To use
-a key you already have, set `ANDUR_API_KEY`; with `--url` as well, the script
-needs no AWS access at all.
+It sends what any client sends, the page included: a `POST` to
+`<WebUrl>/ask` with the workspace key in `X-Andur-Key` and the SHA-256 of the
+body in `x-amz-content-sha256`. Both headers are what the way in demands, not
+the function — see *One address for everything* in the
+[README](../README.md#one-address-for-everything). The stack output
+`FunctionUrl` is not an address to send to: it answers 403 to everyone but
+CloudFront.
+
+The key comes from Parameter Store (`/andur/api-keys/<workspace>`, decrypted)
+and is never printed. To use a key you already have, set `ANDUR_API_KEY`;
+with `--url` as well, the script needs no AWS access at all.
 
 Output: the answer, the layers of the sources it cites, one line per source
 — number, `cited` or blank, layer, score, words, workspace and file — and
@@ -178,5 +185,5 @@ in [app/README.md](../app/README.md).
 | Exit code | Meaning |
 |---|---|
 | 0 | Answered. |
-| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 402 key budget used up, 403 key of another workspace, 400 bad question, 502 Bedrock failed). |
+| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 402 key budget used up, 403 key of another workspace, 400 bad question, 502 Bedrock failed). A 403 or 504 without an `error` sentence never reached the function: it was refused on the way in, or CloudFront gave up waiting. |
 | 2 | An AWS step or the connection failed: login, stack, missing key parameter, network. |
