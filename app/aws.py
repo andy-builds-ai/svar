@@ -30,8 +30,15 @@ class ClientLimits(NamedTuple):
 #: again and double the wait — the caller gets a 502 and can ask again.
 #: The model's read timeout is the longest, since a non-streaming answer
 #: arrives in one piece at the end.
+#:
+#: The budget counter sits on the critical path of every question, so its
+#: timeouts are the shortest of the four. It is tried twice: a conditional
+#: increment is not idempotent, and a retry after a lost response can charge
+#: one question twice — but that is the safe direction. The count runs ahead,
+#: never behind, so the limit stays hard.
 CLIENT_LIMITS = {
     "ssm": ClientLimits(connect_timeout=3, read_timeout=5, attempts=2),
+    "dynamodb": ClientLimits(connect_timeout=2, read_timeout=3, attempts=2),
     "bedrock-agent-runtime": ClientLimits(connect_timeout=3, read_timeout=10, attempts=2),
     "bedrock-runtime": ClientLimits(connect_timeout=3, read_timeout=40, attempts=1),
 }
@@ -41,17 +48,28 @@ CLIENT_LIMITS = {
 RETRY_DELAY_SECONDS = 6
 
 
+#: How often one request can read Parameter Store: once for the cache, and
+#: once more when the key presented is unknown — ``authorize`` in handler.py
+#: rereads before it answers 401, so that a key created a moment ago works at
+#: once. Both reads can run into every timeout in the same request.
+KEY_READS_PER_REQUEST = 2
+
+
 def worst_case_seconds() -> int:
     """How long one request can take when every AWS call runs into every timeout.
 
-    Counts each service once. Reading the keys is one page for a handful of
-    workspaces; a key store large enough to need several pages would add a
-    read per page.
+    Counts each service once, Parameter Store `KEY_READS_PER_REQUEST` times.
+    Reading the keys is one page for a handful of workspaces; a key store
+    large enough to need several pages would add a read per page.
     """
+    calls = {"ssm": KEY_READS_PER_REQUEST}
     return sum(
-        limits.attempts * (limits.connect_timeout + limits.read_timeout)
-        + (limits.attempts - 1) * RETRY_DELAY_SECONDS
-        for limits in CLIENT_LIMITS.values()
+        calls.get(service, 1)
+        * (
+            limits.attempts * (limits.connect_timeout + limits.read_timeout)
+            + (limits.attempts - 1) * RETRY_DELAY_SECONDS
+        )
+        for service, limits in CLIENT_LIMITS.items()
     )
 
 

@@ -37,7 +37,13 @@ def parameter_name(event: Mapping[str, Any]) -> str:
 
 
 def ensure_key(ssm: Any, name: str) -> None:
-    """Store a new key under ``name`` unless a key is already there."""
+    """Store a new key under ``name`` unless a key is already there.
+
+    ``Overwrite=False`` is what decides, so every deploy generates a key that
+    is thrown away again when one exists. That is the intended trade: letting
+    the store refuse the write is one round trip and cannot race, while
+    looking first and writing after can.
+    """
     try:
         ssm.put_parameter(
             Name=name,
@@ -51,12 +57,27 @@ def ensure_key(ssm: Any, name: str) -> None:
         pass
 
 
+def note(message: str) -> None:
+    """One line into the function's log. Lambda takes stdout to CloudWatch."""
+    print(message)
+
+
 def delete_key(ssm: Any, name: str) -> None:
-    """Remove the key under ``name``; a key that is already gone is fine."""
+    """Remove the key under ``name``. A key already gone is fine — and so is
+    a delete that fails for any other reason.
+
+    "A Delete never fails" has to hold against throttling, a denied
+    permission and an unreachable endpoint too, not only against a missing
+    parameter: an exception here leaves the stack in DELETE_FAILED, or a
+    rollback unable to finish. A key nobody can reach any more is a smaller
+    problem than a stack nobody can move. What went wrong goes to the log.
+    """
     try:
         ssm.delete_parameter(Name=name)
     except ssm.exceptions.ParameterNotFound:
         pass
+    except Exception as exc:  # noqa: BLE001 — a Delete may not fail
+        note(f"delete_parameter failed for {name}: {exc!r}")
 
 
 def on_event(event: Mapping[str, Any], context: Any, ssm: Any = None) -> dict[str, str]:
@@ -87,7 +108,13 @@ def on_delete(event: Mapping[str, Any], ssm: Any = None) -> dict[str, str]:
     except (AttributeError, KeyError, TypeError, ValueError):
         return {"PhysicalResourceId": physical_id}
     if physical_id == name:
-        delete_key(ssm or ssm_client(), name)
+        try:
+            delete_key(ssm or ssm_client(), name)
+        except Exception as exc:  # noqa: BLE001 — a Delete may not fail
+            # `ssm_client()` imports boto3 and builds a client; both can fail,
+            # and a Delete that raises here is the same stuck stack as one
+            # that raises inside `delete_parameter`.
+            note(f"could not delete {name}: {exc!r}")
     return {"PhysicalResourceId": physical_id}
 
 

@@ -8,11 +8,12 @@ One stack holds everything Andur needs:
   role it assumes,
 * a data source that tells the knowledge base which prefix to crawl,
 * one key per workspace in Parameter Store, generated during the deploy,
+* a DynamoDB table that counts what each key has spent of its budget,
 * the answer function (app/handler.py) behind a Function URL.
 
 Nothing here runs while nobody asks: the function runs only while a question
-is in flight, and the keys are free standard parameters. What an idle month
-costs is storage, in cents.
+is in flight, the keys are free standard parameters, and the budget table is
+billed per request. What an idle month costs is storage, in cents.
 """
 
 import hashlib
@@ -28,6 +29,7 @@ from aws_cdk import (
     RemovalPolicy,
     Stack,
     aws_bedrock as bedrock,
+    aws_dynamodb as dynamodb,
     aws_iam as iam,
     aws_lambda as lambda_,
     aws_logs as logs,
@@ -107,6 +109,37 @@ WORKSPACES = ("quillmoor", "pellwick")
 #: ``<path>/<workspace>``.
 API_KEY_PARAMETER_PATH = "/andur/api-keys"
 
+# --- Key budgets -----------------------------------------------------------
+# A key is not a password but an allowance: so many questions, and a window
+# that starts with the first one. The counter needs a store outside the
+# function, because every request may run in a different instance, and five
+# may run at once.
+
+#: One item per key. A fixed name, so a person can type it in a CLI command;
+#: it holds no secret, so it may be read.
+BUDGET_TABLE_NAME = "andur-key-budgets"
+
+#: The partition key: a SHA-256 of the key, never the key. The table can be
+#: read without a key falling out of it.
+BUDGET_KEY_ATTRIBUTE = "key_hash"
+
+#: The attribute DynamoDB's TTL watches. An item whose value (epoch seconds)
+#: lies in the past is removed, within days rather than at the second.
+BUDGET_TTL_ATTRIBUTE = "delete_after"
+
+#: What a key may do unless its own item says otherwise (decided 17.09.2026):
+#: ten questions, and 48 hours from the first one.
+DEFAULT_QUESTION_LIMIT = 10
+DEFAULT_WINDOW_HOURS = 48
+
+#: How long an item is kept, counted from the key's first question. The item
+#: is what makes a spent key stay spent, so this is not a cleanup interval
+#: but the lifetime of that fact: once it is gone, the key starts over with a
+#: full budget. A year is far past the life of the link a key travels with,
+#: and a few hundred items cost nothing either way. To end a key for good,
+#: delete its parameter and deploy — the new key hashes differently.
+DEFAULT_KEEP_DAYS = 365
+
 #: The newest Python runtime this CDK version offers.
 LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_14
 
@@ -114,8 +147,8 @@ LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_14
 #: replaces the function under the new name, which does not collide.
 ANSWER_FUNCTION_NAME = "andur-answer"
 
-#: Longer than the handler's worst case (``worst_case_seconds`` in
-#: app/handler.py, checked by a test), so a hanging Bedrock call ends as a 502
+#: Longer than the handler's worst case (``worst_case_seconds`` in app/aws.py,
+#: 135 seconds, checked by a test), so a hanging Bedrock call ends as a 502
 #: with a reason. Far below the 15 minutes a Function URL call may take.
 ANSWER_TIMEOUT_SECONDS = 180
 
@@ -126,8 +159,14 @@ ANSWER_MEMORY_MB = 512
 #: At most this many requests run at the same time; Lambda answers the rest
 #: with 429 before any code runs. The URL is public, so this is the hard cap on
 #: Lambda time and with it on model calls per second, whatever arrives —
-#: with a valid key or not. A limit per key comes with the guardrails
-#: (build step 5).
+#: with a valid key or not. What one key may spend in total is the budget
+#: below; this is only the rate at which anything at all can arrive.
+#:
+#: The price is that five concurrent calls from a stranger hold the service
+#: up: Lambda answers everyone else with 429, and a demo that costs nothing
+#: is unavailable until they stop. Taken on purpose — capping the bill matters
+#: more here than keeping a demo reachable, and a WAF in front of the URL is
+#: the answer if it ever becomes a real problem.
 ANSWER_MAX_CONCURRENCY = 5
 
 #: How long function logs are kept. Without a limit they are kept, and billed,
@@ -201,12 +240,15 @@ class AndurStack(Stack):
         self.data_source = self._create_data_source(self.knowledge_base, self.documents_bucket)
 
         self.api_keys = self._create_api_keys()
+        self.budget_table = self._create_budget_table()
         self.answer_log_group = self._create_log_group(
             "AnswerFunctionLogs", f"/aws/lambda/{ANSWER_FUNCTION_NAME}"
         )
-        self.answer_role = self._create_answer_role(self.knowledge_base, self.answer_log_group)
+        self.answer_role = self._create_answer_role(
+            self.knowledge_base, self.budget_table, self.answer_log_group
+        )
         self.answer_function = self._create_answer_function(
-            self.knowledge_base, self.answer_role, self.answer_log_group
+            self.knowledge_base, self.budget_table, self.answer_role, self.answer_log_group
         )
         self.function_url = self._create_function_url(self.answer_function, self.api_keys)
 
@@ -534,6 +576,41 @@ class AndurStack(Stack):
         """The ARN of the key path; a key is this plus ``/<workspace>``."""
         return f"arn:{Aws.PARTITION}:ssm:{Aws.REGION}:{Aws.ACCOUNT_ID}:parameter{API_KEY_PARAMETER_PATH}"
 
+    # --- Key budgets -----------------------------------------------------
+
+    def _create_budget_table(self) -> dynamodb.TableV2:
+        """One item per key: what it has spent, of how much, and until when.
+
+        On demand, not provisioned: a public URL has no rate to provision for,
+        and a counter that throttles refuses honest questions.
+
+        Choosing on demand gives up the permanent free tier of 25 write and
+        25 read units, which DynamoDB grants to provisioned capacity only. It
+        is not worth the trade. On demand costs 0.625 USD per million writes
+        in us-east-1 (on-demand pricing page, read 17.09.2026), one write per
+        question, against roughly 1,000 USD per million questions at the
+        answering model — three orders of magnitude apart. One item is a few
+        hundred bytes, so a question is that one write unit and nothing else.
+
+        Deleted with the stack. The items are worth exactly as much as the
+        keys they belong to, and a ``cdk destroy`` takes those with it.
+
+        ``TableV2`` renders as ``AWS::DynamoDB::GlobalTable`` with a single
+        replica in this region. That is the construct's normal shape, not a
+        second region: no stream, no replication, one ordinary table.
+        """
+        return dynamodb.TableV2(
+            self,
+            "KeyBudgetTable",
+            table_name=BUDGET_TABLE_NAME,
+            partition_key=dynamodb.Attribute(
+                name=BUDGET_KEY_ATTRIBUTE, type=dynamodb.AttributeType.STRING
+            ),
+            billing=dynamodb.Billing.on_demand(),
+            time_to_live_attribute=BUDGET_TTL_ATTRIBUTE,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
     @staticmethod
     def _write_logs_policy(log_group: logs.LogGroup) -> iam.PolicyDocument:
         """Write to one log group — instead of the managed policy's logs on every group."""
@@ -554,16 +631,25 @@ class AndurStack(Stack):
         return f"arn:{Aws.PARTITION}:bedrock:{Aws.REGION}::foundation-model/{ANSWER_MODEL_ID}"
 
     def _create_answer_role(
-        self, knowledge_base: bedrock.CfnKnowledgeBase, log_group: logs.LogGroup
+        self,
+        knowledge_base: bedrock.CfnKnowledgeBase,
+        budget_table: dynamodb.TableV2,
+        log_group: logs.LogGroup,
     ) -> iam.Role:
-        """The execution role of the answer function: four things, each on one resource.
+        """The execution role of the answer function: five things, each on one resource.
 
-        Read the workspace keys, retrieve from this knowledge base, invoke the
-        answering model (``converse`` is authorised as ``InvokeModel``), write
-        its own log. The keys use the AWS managed key ``aws/ssm``, whose key
-        policy already lets this account decrypt through Parameter Store, so
-        no KMS statement is needed — the deploy of 17.09.2026 read the keys
-        with exactly these four policies.
+        Read the workspace keys, count a question against its key's budget,
+        retrieve from this knowledge base, invoke the answering model
+        (``converse`` is authorised as ``InvokeModel``), write its own log.
+        The keys use the AWS managed key ``aws/ssm``, whose key policy already
+        lets this account decrypt through Parameter Store, so no KMS statement
+        is needed — the deploy of 17.09.2026 read the keys with exactly these
+        policies.
+
+        ``UpdateItem`` alone on the budget table: the function counts, and a
+        conditional update is the whole of that. It never reads an item by
+        itself and never writes one from scratch, so ``GetItem`` and
+        ``PutItem`` would be permissions nothing uses.
         """
         return iam.Role(
             self,
@@ -577,6 +663,15 @@ class AndurStack(Stack):
                             sid="ReadWorkspaceKeys",
                             actions=["ssm:GetParametersByPath"],
                             resources=[self.api_key_path_arn],
+                        )
+                    ]
+                ),
+                "CountQuestionsPerKey": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            sid="CountQuestionAgainstKeyBudget",
+                            actions=["dynamodb:UpdateItem"],
+                            resources=[budget_table.table_arn],
                         )
                     ]
                 ),
@@ -603,7 +698,11 @@ class AndurStack(Stack):
         )
 
     def _create_answer_function(
-        self, knowledge_base: bedrock.CfnKnowledgeBase, role: iam.Role, log_group: logs.LogGroup
+        self,
+        knowledge_base: bedrock.CfnKnowledgeBase,
+        budget_table: dynamodb.TableV2,
+        role: iam.Role,
+        log_group: logs.LogGroup,
     ) -> lambda_.Function:
         """The question handler from app/, configured entirely through its environment.
 
@@ -632,6 +731,10 @@ class AndurStack(Stack):
                 "REGION": Aws.REGION,
                 "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
                 "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,
+                "BUDGET_TABLE_NAME": budget_table.table_name,
+                "QUESTION_LIMIT": str(DEFAULT_QUESTION_LIMIT),
+                "WINDOW_HOURS": str(DEFAULT_WINDOW_HOURS),
+                "KEEP_DAYS": str(DEFAULT_KEEP_DAYS),
             },
         )
 
@@ -706,4 +809,10 @@ class AndurStack(Stack):
             "ApiKeyParameterPath",
             value=API_KEY_PARAMETER_PATH,
             description="Parameter Store path of the workspace keys: <path>/<workspace>, SecureString.",
+        )
+        CfnOutput(
+            self,
+            "BudgetTableName",
+            value=self.budget_table.table_name,
+            description="One item per key, found by the SHA-256 of the key: questions used, window, expiry.",
         )

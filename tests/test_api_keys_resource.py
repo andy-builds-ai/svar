@@ -122,6 +122,37 @@ def test_delete_with_invalid_properties_succeeds_and_deletes_nothing(properties:
     assert ssm.deleted == []
 
 
+def test_delete_survives_a_parameter_store_that_refuses(capsys: pytest.CaptureFixture[str]) -> None:
+    """Throttling or a denied permission may not leave the stack in DELETE_FAILED."""
+
+    class RefusingSSM(FakeSSM):
+        def delete_parameter(self, Name: str) -> None:
+            raise RuntimeError("ThrottlingException: Rate exceeded")
+
+    ssm = RefusingSSM()
+    handler.on_event(lifecycle("Create"), None, ssm)
+
+    assert handler.on_event(lifecycle("Delete", f"{PATH}/quillmoor"), None, ssm) == {
+        "PhysicalResourceId": f"{PATH}/quillmoor"
+    }
+    assert "ThrottlingException" in capsys.readouterr().out
+
+
+def test_delete_survives_a_client_that_cannot_even_be_built(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`ssm_client()` imports boto3; without it a Delete must still report success."""
+
+    def no_client() -> Any:
+        raise ImportError("simulated: boto3 not installed")
+
+    monkeypatch.setattr(handler, "ssm_client", no_client)
+    event = lifecycle("Delete", f"{PATH}/quillmoor")
+
+    assert handler.on_event(event, None) == {"PhysicalResourceId": f"{PATH}/quillmoor"}
+    assert "boto3" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     "name",
     ["/other/quillmoor", f"{PATH}/quill/moor", f"{PATH}X/quillmoor", PATH],

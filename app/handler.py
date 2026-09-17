@@ -4,21 +4,27 @@
     Authorization: Bearer <workspace key>
     {"question": "How do I export project data?", "workspace": "quillmoor"}
 
-A request runs four steps, and each can end it with its own status code:
+A request runs five steps, and each can end it with its own status code:
 
 1. Read the request and check that its key belongs to the workspace it names
    (400, 401, 403, 405).
-2. Retrieve passages from the knowledge base, filtered to that workspace.
-   No passage means no model call: a 200 that says so, and nothing to pay.
-3. Ask the answering model to answer from the numbered passages only (502 if
+2. Count the question against that key's budget: so many questions, and a
+   window that starts with the first one. A key with nothing left is refused
+   before anything is paid for (402).
+3. Retrieve passages from the knowledge base, filtered to that workspace.
+   No passage means no model call: a 200 that says so, and no model to pay
+   for. The question is spent either way — it passed the budget in step 2.
+4. Ask the answering model to answer from the numbered passages only (502 if
    Bedrock fails).
-4. Return the answer, every passage with its layer, the layers of the
+5. Return the answer, every passage with its layer, the layers of the
    passages the answer cites, the model, the token usage and the latency.
 
 Errors come back as ``{"error": "<one sentence>"}`` — never a traceback, and
 for a broken configuration only a fixed sentence; the cause goes to the log.
 Every request is logged as one JSON line with its workspace. The question
-itself is never logged.
+itself is never logged, with one exception: the traceback of a `crashed`
+line can carry an exception message, and a message can quote what it choked
+on.
 
 `LLMError`, `extract_answer` with its stopReason check and the botocore catch
 come from the learning chatbot (rag_chatbot.py); `load_settings` does there
@@ -34,6 +40,7 @@ AWS clients, timeouts and error causes live in aws.py.
 import base64
 import binascii
 import functools
+import hashlib
 import hmac
 import json
 import logging
@@ -55,8 +62,16 @@ logger.setLevel(logging.INFO)
 #: The three layers a document can come from, in the order they are trusted.
 LAYERS = ("human", "agent", "inbox")
 
-#: Same rule as ``WORKSPACE_NAME`` in scripts/ingest.py; a test keeps them equal.
-WORKSPACE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+#: Same rule as ``WORKSPACE_NAME`` in scripts/ingest.py; a test keeps them
+#: equal. ``\Z`` and not ``$``: ``$`` also matches in front of a closing
+#: newline, so ``"quillmoor\n"`` would pass for a workspace name.
+WORKSPACE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+
+#: A workspace name longer than this is refused before the pattern runs. The
+#: name is the one thing from outside a request that reaches a log line and an
+#: error sentence, so its length is capped before it gets anywhere near
+#: either. Same value in scripts/ingest.py; a test keeps them equal.
+MAX_WORKSPACE_CHARACTERS = 64
 
 #: A question longer than this is refused before anything is paid for.
 MAX_QUESTION_CHARACTERS = 1000
@@ -75,6 +90,15 @@ MAX_SOURCE_CHARACTERS = 3000
 
 #: Upper bound for the number of passages a deployment may configure.
 MAX_RESULTS = 100
+
+#: Upper bounds for the budget a deployment may configure. They only catch a
+#: typo in an environment variable; a real budget is far below either.
+MAX_QUESTION_LIMIT = 10_000
+MAX_WINDOW_HOURS = 24 * 365
+MAX_KEEP_DAYS = 3650
+
+SECONDS_PER_HOUR = 3600
+SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
 
 #: How long a warm function trusts the keys it has read. A deleted or
 #: replaced key stops working at the latest after this long.
@@ -95,6 +119,14 @@ NOT_IN_SOURCES_ANSWER = "The sources do not answer this question."
 
 #: The only thing a caller learns about a broken configuration.
 NOT_CONFIGURED_MESSAGE = "The service is not configured."
+
+#: What a caller reads when a key has nothing left. Which half ran out is
+#: worth saying: waiting helps in neither case, but somebody who asked three
+#: questions should not be told they asked ten. The third sentence is for a
+#: refusal whose item did not come back with it.
+QUESTIONS_SPENT_MESSAGE = "This key's {limit} questions are used up; a new key is needed."
+WINDOW_CLOSED_MESSAGE = "This key's time window has closed; a new key is needed."
+BUDGET_SPENT_MESSAGE = "This key's budget is used up; a new key is needed."
 
 #: Notes added to an answer the model did not finish on its own.
 STOP_NOTES = {
@@ -131,6 +163,18 @@ class Unauthorized(HandlerError):
 
 class Forbidden(HandlerError):
     status = 403
+
+
+class BudgetSpent(HandlerError):
+    """A valid key for the right workspace, with nothing left to spend.
+
+    402 rather than 401, 403 or 429. The key is valid, so not 401; it opens
+    this workspace, so not 403; and 429 is the function's concurrency limit,
+    which says "too many at once, try again in a moment" — the opposite of
+    what this means. Waiting does not bring a spent key back.
+    """
+
+    status = 402
 
 
 class MethodNotAllowed(HandlerError):
@@ -172,6 +216,10 @@ class Settings:
     region: str
     number_of_results: int
     key_parameter_path: str
+    budget_table: str
+    question_limit: int
+    window_hours: int
+    keep_days: int
 
 
 #: Environment variable for each setting. The stack sets all of them.
@@ -181,7 +229,25 @@ ENVIRONMENT_VARIABLES = {
     "region": "REGION",
     "number_of_results": "NUMBER_OF_RESULTS",
     "key_parameter_path": "API_KEY_PARAMETER_PATH",
+    "budget_table": "BUDGET_TABLE_NAME",
+    "question_limit": "QUESTION_LIMIT",
+    "window_hours": "WINDOW_HOURS",
+    "keep_days": "KEEP_DAYS",
 }
+
+
+def whole_number(variable: str, text: str, lowest: int, highest: int) -> int:
+    """A setting that has to be a whole number in a range; the error names the variable.
+
+    ``isascii()`` as well as ``isdigit()``: ``"²"`` and the digits of other
+    scripts pass ``isdigit()`` but not ``int()``, and the caller would get a
+    bare ``ValueError`` instead of a message naming the variable to fix.
+    """
+    if not (text.isascii() and text.isdigit()) or not lowest <= int(text) <= highest:
+        raise ConfigurationError(
+            f"{variable} must be a whole number from {lowest} to {highest}, not {text!r}."
+        )
+    return int(text)
 
 
 def load_settings(environ: Mapping[str, str]) -> Settings:
@@ -197,23 +263,33 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             raise ConfigurationError(f"The environment variable {variable} is not set.")
         values[name] = value
 
-    results_text = values["number_of_results"]
-    if not results_text.isdigit() or not 1 <= int(results_text) <= MAX_RESULTS:
-        raise ConfigurationError(
-            f"NUMBER_OF_RESULTS must be a whole number from 1 to {MAX_RESULTS}, not {results_text!r}."
-        )
+    number_of_results = whole_number("NUMBER_OF_RESULTS", values["number_of_results"], 1, MAX_RESULTS)
+    question_limit = whole_number("QUESTION_LIMIT", values["question_limit"], 1, MAX_QUESTION_LIMIT)
+    window_hours = whole_number("WINDOW_HOURS", values["window_hours"], 1, MAX_WINDOW_HOURS)
+    keep_days = whole_number("KEEP_DAYS", values["keep_days"], 1, MAX_KEEP_DAYS)
     path = values["key_parameter_path"]
     if not path.startswith("/") or path.endswith("/"):
         raise ConfigurationError(
             f"API_KEY_PARAMETER_PATH must start with a slash and not end with one, not {path!r}."
+        )
+    # An item that goes before its own window closes would hand the key a
+    # fresh budget while the old one is still running.
+    if keep_days * SECONDS_PER_DAY <= window_hours * SECONDS_PER_HOUR:
+        raise ConfigurationError(
+            f"KEEP_DAYS ({keep_days}) must outlast WINDOW_HOURS ({window_hours}): a budget "
+            "whose item disappears before its window closes is no budget."
         )
 
     return Settings(
         knowledge_base_id=values["knowledge_base_id"],
         model_id=values["model_id"],
         region=values["region"],
-        number_of_results=int(results_text),
+        number_of_results=number_of_results,
         key_parameter_path=values["key_parameter_path"],
+        budget_table=values["budget_table"],
+        question_limit=question_limit,
+        window_hours=window_hours,
+        keep_days=keep_days,
     )
 
 
@@ -249,10 +325,18 @@ def read_body(event: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def requested_workspace(body: Mapping[str, Any]) -> str:
-    """The workspace the request names, checked against the naming rule."""
+    """The workspace the request names, checked against the naming rule.
+
+    The length goes first, before the pattern and before the name is kept for
+    the log line. A megabyte of somebody's choosing should not travel any
+    further into the function than it has to, and the error it earns says
+    nothing back.
+    """
     workspace = body.get("workspace")
     if not isinstance(workspace, str) or not workspace:
         raise BadRequest('The body has no "workspace".')
+    if len(workspace) > MAX_WORKSPACE_CHARACTERS:
+        raise BadRequest(f"A workspace name is at most {MAX_WORKSPACE_CHARACTERS} characters.")
     if not WORKSPACE_NAME.match(workspace):
         raise BadRequest("A workspace name is lowercase letters, digits and single hyphens.")
     return workspace
@@ -391,9 +475,27 @@ def reload_workspace_keys(path: str, region: str) -> dict[str, str]:
 
 
 def workspace_keys(path: str, region: str) -> dict[str, str]:
-    """The workspace keys, read again once they are `KEY_CACHE_SECONDS` old."""
-    if _key_cache.read_at is None or clock() - _key_cache.read_at >= KEY_CACHE_SECONDS:
+    """The workspace keys, read again once they are `KEY_CACHE_SECONDS` old.
+
+    A failed reread of expired keys does not shut the door: the keys already
+    read go on deciding, and the next attempt waits `KEY_RELOAD_MIN_SECONDS`,
+    the same brake an unknown key runs into. Parameter Store being briefly
+    unreachable would otherwise turn every request into a 500, and the keys
+    in hand are not wrong — only old. The price is that a key deleted during
+    such an outage keeps working past its five minutes.
+
+    A function that has never read any keys has nothing to fall back on. That
+    stays a 500.
+    """
+    if _key_cache.read_at is None:
         return reload_workspace_keys(path, region)
+    if clock() - _key_cache.read_at < KEY_CACHE_SECONDS:
+        return _key_cache.keys
+    if may_reload_keys():
+        try:
+            return reload_workspace_keys(path, region)
+        except ConfigurationError as error:
+            log_event("keys-reload-failed", error=str(error), stale=True)
     return _key_cache.keys
 
 
@@ -422,6 +524,10 @@ def check_access(key: str, workspace: str, keys: Mapping[str, str]) -> None:
     if owner is None:
         raise Unauthorized("The key is not valid.")
     if owner != workspace:
+        # The name may go back out: by here it has passed
+        # `MAX_WORKSPACE_CHARACTERS` and `WORKSPACE_NAME`, so it is at most 64
+        # characters of lowercase letters, digits and hyphens — nothing that
+        # can carry markup into a page that shows this sentence.
         raise Forbidden(f"This key does not open the workspace {workspace}.")
 
 
@@ -438,8 +544,151 @@ def authorize(key: str, workspace: str, settings: Settings) -> None:
         try:
             keys = reload_workspace_keys(path, region)
         except ConfigurationError as error:
-            log_event("keys-reload-failed", error=str(error))
+            log_event("keys-reload-failed", error=str(error), stale=False)
     check_access(key, workspace, keys)
+
+
+# --- Key budgets ---------------------------------------------------------
+#
+# A key is an allowance, not a password: so many questions, and a window that
+# starts with the first one. The count cannot live in the function — every
+# request may run in a different instance, and five may run at once — so it
+# lives in one DynamoDB item per key, and the check and the count are a single
+# conditional write.
+
+
+#: The clock the budget runs on. Not the monotonic clock above: an expiry is a
+#: moment every instance has to agree on, and instances come and go. Tests
+#: replace it.
+wall_clock: Callable[[], float] = time.time
+
+#: The item's partition key and the attribute DynamoDB's TTL watches. The
+#: stack creates the table with exactly these names; a test keeps them equal.
+BUDGET_KEY_ATTRIBUTE = "key_hash"
+BUDGET_TTL_ATTRIBUTE = "delete_after"
+
+#: Check and count in one write. Every operand on the right resolves against
+#: the item as it was *before* this update — DynamoDB applies the actions of
+#: one expression together, not left to right ("Using update expressions":
+#: "an action's right-hand operand always refers to the pre-update value of an
+#: attribute"). So the first question writes ``first_used_at`` and the window,
+#: and every later one recomputes ``expires_at`` to the value it already has.
+#: ``window_seconds`` and ``keep_seconds`` are written from the defaults only
+#: when the item does not carry its own — that is how a budget set per key
+#: before the first question overrides them.
+BUDGET_UPDATE_EXPRESSION = (
+    "SET questions_used = if_not_exists(questions_used, :zero) + :one,"
+    " workspace = if_not_exists(workspace, :workspace),"
+    " question_limit = if_not_exists(question_limit, :limit),"
+    " window_seconds = if_not_exists(window_seconds, :window),"
+    " keep_seconds = if_not_exists(keep_seconds, :keep),"
+    " first_used_at = if_not_exists(first_used_at, :now),"
+    " expires_at = if_not_exists(first_used_at, :now) + if_not_exists(window_seconds, :window),"
+    " delete_after = if_not_exists(first_used_at, :now) + if_not_exists(keep_seconds, :keep)"
+)
+
+#: The limit itself. A question passes while the key has one left and its
+#: window is still open; before the first question there is nothing spent yet,
+#: whether the item exists (an operator set a budget) or not. DynamoDB
+#: evaluates this on the item, so five requests at once cannot all read
+#: "nine used" and all go through.
+#:
+#: Both strings were run against the real table on 17.09.2026, 21:00: DynamoDB
+#: took the condition and the update, wrote the items and refused the eleventh
+#: question. So neither the attribute names nor `workspace` collide with a
+#: reserved word, and no placeholder needs an ``ExpressionAttributeNames``
+#: alias.
+BUDGET_CONDITION = (
+    "attribute_not_exists(first_used_at)"
+    " OR (questions_used < question_limit AND expires_at > :now)"
+)
+
+
+def key_hash(key: str) -> str:
+    """The name a key goes by in the budget table: its SHA-256, as hex.
+
+    Never the key itself. A key is 32 random bytes (infra/api_keys/handler.py),
+    so nothing walks the hash back to it, and the table can be read, dumped or
+    pasted into a ticket without a key falling out of it.
+    """
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def budget_values(settings: Settings, workspace: str, now: int) -> dict[str, dict[str, str]]:
+    """The placeholders of the update: this moment, this workspace, the defaults."""
+    return {
+        ":zero": {"N": "0"},
+        ":one": {"N": "1"},
+        ":now": {"N": str(now)},
+        ":workspace": {"S": workspace},
+        ":limit": {"N": str(settings.question_limit)},
+        ":window": {"N": str(settings.window_hours * SECONDS_PER_HOUR)},
+        ":keep": {"N": str(settings.keep_days * SECONDS_PER_DAY)},
+    }
+
+
+def budget_number(item: Mapping[str, Any], name: str) -> int | None:
+    """One whole number out of a DynamoDB item, or None if it is missing or is not one."""
+    value = item.get(name, {})
+    try:
+        return int(value["N"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def spent_message(item: Mapping[str, Any], now: int) -> str:
+    """Which half of the budget ran out, read from the item the condition refused.
+
+    Time first: a closed window is the true answer whatever the counter says,
+    while "your questions are used up" would be wrong for a key that asked
+    three. An item that did not come back gets the sentence without a reason.
+    """
+    expires_at = budget_number(item, "expires_at")
+    if expires_at is not None and now >= expires_at:
+        return WINDOW_CLOSED_MESSAGE
+    used, limit = budget_number(item, "questions_used"), budget_number(item, "question_limit")
+    if used is not None and limit is not None and used >= limit:
+        return QUESTIONS_SPENT_MESSAGE.format(limit=limit)
+    return BUDGET_SPENT_MESSAGE
+
+
+def refused_item(exc: BaseException) -> Mapping[str, Any]:
+    """The item DynamoDB sends back with a failed condition, or an empty one."""
+    response = getattr(exc, "response", None)
+    item = response.get("Item") if isinstance(response, Mapping) else None
+    return item if isinstance(item, Mapping) else {}
+
+
+def charge_question(settings: Settings, workspace: str, key: str) -> None:
+    """Count this question against the key's budget, or refuse it.
+
+    One conditional `UpdateItem` does both: it raises the counter only while
+    the key has a question left and its window is open, and on the first
+    question it writes when that window started and when it ends. There is no
+    read before the write, so concurrent requests cannot all see the same
+    count and all pass.
+
+    A table that cannot be reached is a broken configuration, not a free pass.
+    Without the counter there is no limit, and a key without a limit on a
+    public URL is the thing the budget exists to prevent.
+    """
+    now = int(wall_clock())
+    try:
+        client("dynamodb", settings.region).update_item(
+            TableName=settings.budget_table,
+            Key={BUDGET_KEY_ATTRIBUTE: {"S": key_hash(key)}},
+            UpdateExpression=BUDGET_UPDATE_EXPRESSION,
+            ConditionExpression=BUDGET_CONDITION,
+            ExpressionAttributeValues=budget_values(settings, workspace, now),
+            ReturnValuesOnConditionCheckFailure="ALL_OLD",
+        )
+    except aws.botocore_errors() as exc:
+        if aws.error_code(exc) != "ConditionalCheckFailedException":
+            log_event("budget-unreadable", workspace=workspace, detail=repr(exc))
+            raise ConfigurationError(
+                f"The key budget could not be counted: {aws.error_cause(exc)}."
+            ) from exc
+        raise BudgetSpent(spent_message(refused_item(exc), now)) from exc
 
 
 # --- Retrieval -----------------------------------------------------------
@@ -703,7 +952,13 @@ def handle(event: Mapping[str, Any], record: RequestRecord) -> dict[str, Any]:
 
     The workspace goes into ``record`` as soon as it is known, so that even a
     refused request is logged with it. The order of the checks decides which
-    error a broken request gets: method, body, workspace, key, question.
+    error a broken request gets: method, body, workspace, settings, key,
+    question, budget. Settings sit in the middle because everything after
+    them needs them, and a deployment that is set up wrong is a 500 whatever
+    the request looks like. The budget comes last, and for two reasons: a
+    question the handler would refuse anyway must not cost the key anything,
+    and a caller without a valid key learns nothing about what a key may
+    spend.
     """
     require_post(event)
     body = read_body(event)
@@ -715,6 +970,7 @@ def handle(event: Mapping[str, Any], record: RequestRecord) -> dict[str, Any]:
     authorize(key, workspace, settings)
 
     question = requested_question(body)
+    charge_question(settings, workspace, key)
     return answer_question(settings, workspace, question, record)
 
 
@@ -734,8 +990,14 @@ def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         )
         return http_response(error.status, {"error": error.public_message}, error.headers)
     except Exception:
-        # A bug, not a request problem. The traceback goes to the log only,
-        # as a field, so the log line stays one line.
+        # A bug, or an AWS response outside its contract. The handler reads
+        # Bedrock's and the Function URL's payloads by their documented shape
+        # rather than checking every field: those are contract data from AWS,
+        # not caller input, and a shape that changes is a bug to see in the
+        # log, not a case to carry in every function.
+        #
+        # The traceback goes to the log only, as a field, so the log line
+        # stays one line.
         log_event("crashed", status=500, workspace=record.workspace, traceback=traceback.format_exc())
         return http_response(500, {"error": "The function failed unexpectedly; the details are in its log."})
 

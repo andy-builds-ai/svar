@@ -5,6 +5,11 @@ dict in the shape Bedrock returns — the pattern of the learning chatbot's
 tests. Error paths use botocore's real exception classes and are skipped
 when botocore is not installed; one test proves the module imports without
 boto3 at all. The module is imported by its Lambda name (tests/conftest.py).
+
+The budget fake goes one step further and runs the handler's own update and
+condition strings, so a wrong attribute name or a wrong placeholder fails
+here. What it cannot prove is that DynamoDB reads those strings the same way;
+that is what the measurement against the deployed table is for.
 """
 
 import base64
@@ -20,13 +25,18 @@ import pytest
 
 import handler  # app/handler.py
 from handler import (
+    BUDGET_SPENT_MESSAGE,
     MAX_ANSWER_TOKENS,
     MAX_QUESTION_CHARACTERS,
     MAX_SOURCE_CHARACTERS,
     NO_SOURCES_ANSWER,
     NOT_CONFIGURED_MESSAGE,
     NOT_IN_SOURCES_ANSWER,
+    QUESTIONS_SPENT_MESSAGE,
+    SECONDS_PER_HOUR,
+    WINDOW_CLOSED_MESSAGE,
     BadRequest,
+    BudgetSpent,
     ConfigurationError,
     Forbidden,
     LLMError,
@@ -43,6 +53,10 @@ ENVIRONMENT = {
     "REGION": "us-east-1",
     "NUMBER_OF_RESULTS": "6",
     "API_KEY_PARAMETER_PATH": "/andur/api-keys",
+    "BUDGET_TABLE_NAME": "andur-key-budgets",
+    "QUESTION_LIMIT": "10",
+    "WINDOW_HOURS": "48",
+    "KEEP_DAYS": "365",
 }
 SETTINGS = handler.load_settings(ENVIRONMENT)
 KEYS = {"quillmoor": "quillmoor-key-0001", "pellwick": "pellwick-key-0002"}
@@ -133,6 +147,99 @@ class FakeSSM:
         return iter({"Parameters": page} for page in self.pages)
 
 
+def conditional_check_failed(item: dict[str, Any] | None) -> Exception:
+    """What DynamoDB raises when the update's condition is false."""
+    exceptions = pytest.importorskip("botocore.exceptions")
+    response: dict[str, Any] = {
+        "Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}
+    }
+    if item is not None:
+        response["Item"] = item
+    return exceptions.ClientError(response, "UpdateItem")
+
+
+def split_on(text: str, separator: str) -> list[str]:
+    """Split on a separator that is not inside brackets — if_not_exists holds a comma."""
+    parts, depth, current = [], 0, ""
+    for character in text:
+        depth += (character == "(") - (character == ")")
+        if character == separator and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += character
+    return [part.strip() for part in [*parts, current] if part.strip()]
+
+
+def operand(text: str, before: dict[str, Any], values: dict[str, Any]) -> dict[str, str]:
+    """One operand of a SET action: a placeholder, an attribute, or if_not_exists of both."""
+    if text.startswith(":"):
+        return values[text]
+    if text.startswith("if_not_exists("):
+        path, fallback = split_on(text[len("if_not_exists(") : -1], ",")
+        return before.get(path, values[fallback])
+    return before[text]
+
+
+def apply_update(expression: str, before: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
+    """The SET actions of an update expression, every operand read from `before`.
+
+    That is DynamoDB's rule: the actions of one expression are applied
+    together, so an operand always names the value an attribute had before
+    the update, even when another action in the same expression changes it.
+    """
+    assert expression.startswith("SET "), expression
+    after = dict(before)
+    for action in split_on(expression.removeprefix("SET "), ","):
+        path, _, value = action.partition(" = ")
+        summands = split_on(value, "+")
+        resolved = [operand(part, before, values) for part in summands]
+        after[path] = (
+            resolved[0]
+            if len(resolved) == 1
+            else {"N": str(sum(int(number["N"]) for number in resolved))}
+        )
+    return after
+
+
+class FakeDynamoDB:
+    """The budget table: one item per key hash, and this handler's one update.
+
+    ``items`` is the table as it is now and can be changed between calls, the
+    way a CLI command would change it.
+    """
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.items: dict[str, dict[str, Any]] = {}
+        self.error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def update_item(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        assert kwargs["ConditionExpression"] == handler.BUDGET_CONDITION, "unknown condition"
+        key = kwargs["Key"][handler.BUDGET_KEY_ATTRIBUTE]["S"]
+        before, values = self.items.get(key, {}), kwargs["ExpressionAttributeValues"]
+        if not self.passes(before, values):
+            returned = before if kwargs.get("ReturnValuesOnConditionCheckFailure") == "ALL_OLD" else None
+            raise conditional_check_failed(returned or None)
+        self.items[key] = apply_update(kwargs["UpdateExpression"], before, values)
+        return {}
+
+    @staticmethod
+    def passes(before: dict[str, Any], values: dict[str, Any]) -> bool:
+        """`handler.BUDGET_CONDITION`, spelled out. A missing attribute compares false."""
+        if "first_used_at" not in before:
+            return True
+        used = handler.budget_number(before, "questions_used")
+        limit = handler.budget_number(before, "question_limit")
+        expires = handler.budget_number(before, "expires_at")
+        if used is None or limit is None or expires is None:
+            return False
+        return used < limit and expires > int(values[":now"]["N"])
+
+
 class FakeClock:
     def __init__(self) -> None:
         self.now = 1000.0
@@ -144,13 +251,30 @@ class FakeClock:
         self.now += seconds
 
 
+class FakeWallClock(FakeClock):
+    """The clock the budget runs on. Starts at a fixed moment in 2026."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.now = 1_790_000_000.0
+
+
 @pytest.fixture(autouse=True)
 def cold_start(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     """Every test starts as a fresh function instance: no keys read, a clock of its own."""
     clock = FakeClock()
     monkeypatch.setattr(handler, "_key_cache", handler.KeyCache())
     monkeypatch.setattr(handler, "clock", clock)
+    monkeypatch.setattr(handler, "wall_clock", FakeWallClock())
     handler.log_sdk_versions.cache_clear()
+    return clock
+
+
+@pytest.fixture
+def budget_clock(monkeypatch: pytest.MonkeyPatch) -> FakeWallClock:
+    """The budget's clock, for a test that has to move time forward."""
+    clock = FakeWallClock()
+    monkeypatch.setattr(handler, "wall_clock", clock)
     return clock
 
 
@@ -163,6 +287,7 @@ def aws(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "ssm": FakeSSM([parameters(KEYS)]),
         "bedrock-agent-runtime": FakeAgentRuntime([hit(), hit(layer="inbox", name="draft--01.md", text="Draft.")]),
         "bedrock-runtime": FakeBedrockRuntime(),
+        "dynamodb": FakeDynamoDB(),
     }
     monkeypatch.setattr(handler, "client", lambda service, region: clients[service])
     return clients
@@ -209,6 +334,39 @@ def test_settings_come_from_the_environment() -> None:
     assert SETTINGS.model_id == "nvidia.nemotron-super-3-120b"
     assert SETTINGS.number_of_results == 6
     assert SETTINGS.key_parameter_path == "/andur/api-keys"
+    assert SETTINGS.budget_table == "andur-key-budgets"
+    assert (SETTINGS.question_limit, SETTINGS.window_hours, SETTINGS.keep_days) == (10, 48, 365)
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("QUESTION_LIMIT", "0"),
+        ("QUESTION_LIMIT", "ten"),
+        ("QUESTION_LIMIT", "-1"),
+        ("WINDOW_HOURS", "0"),
+        ("WINDOW_HOURS", "48.5"),
+        ("KEEP_DAYS", "0"),
+        ("KEEP_DAYS", "many"),
+    ],
+)
+def test_a_budget_setting_must_be_a_sensible_whole_number(variable: str, value: str) -> None:
+    with pytest.raises(ConfigurationError, match=variable):
+        handler.load_settings({**ENVIRONMENT, variable: value})
+
+
+@pytest.mark.parametrize("value", ["²", "٣", "１０"])
+def test_a_digit_that_is_not_an_ascii_digit_names_the_variable_too(value: str) -> None:
+    """`isdigit()` alone says yes to these, and `int()` then says no with a bare ValueError."""
+    with pytest.raises(ConfigurationError, match="QUESTION_LIMIT"):
+        handler.load_settings({**ENVIRONMENT, "QUESTION_LIMIT": value})
+
+
+def test_the_item_must_outlast_the_window_it_holds() -> None:
+    """An item that goes first hands the key a fresh budget while the old one runs."""
+    with pytest.raises(ConfigurationError, match="KEEP_DAYS"):
+        handler.load_settings({**ENVIRONMENT, "WINDOW_HOURS": "24", "KEEP_DAYS": "1"})
+    handler.load_settings({**ENVIRONMENT, "WINDOW_HOURS": "23", "KEEP_DAYS": "1"})
 
 
 @pytest.mark.parametrize("variable", sorted(ENVIRONMENT))
@@ -232,10 +390,11 @@ def test_key_path_has_a_leading_slash_and_no_trailing_one(path: str) -> None:
 
 def test_workspace_rule_and_layers_match_the_fill_script() -> None:
     """The handler cannot import scripts/ (Lambda gets app/ only), so a test keeps them equal."""
-    from scripts import ingest
+    ingest = pytest.importorskip("scripts.ingest")
 
     assert handler.WORKSPACE_NAME.pattern == ingest.WORKSPACE_NAME.pattern
     assert handler.LAYERS == ingest.LAYERS
+    assert handler.MAX_WORKSPACE_CHARACTERS == ingest.MAX_WORKSPACE_CHARACTERS
 
 
 # --- Reading the request -------------------------------------------------
@@ -264,10 +423,44 @@ def test_a_body_that_is_no_json_object_is_a_bad_request(request_event: dict[str,
         handler.read_body(request_event)
 
 
-@pytest.mark.parametrize("body", [{}, {"workspace": ""}, {"workspace": 7}, {"workspace": "Quill Moor"}, {"workspace": "a--b"}])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"workspace": ""},
+        {"workspace": 7},
+        {"workspace": "Quill Moor"},
+        {"workspace": "a--b"},
+        {"workspace": "quillmoor\n"},
+    ],
+    ids=["missing", "empty", "not-a-string", "spaces-and-capitals", "double-hyphen", "trailing-newline"],
+)
 def test_workspace_must_be_a_valid_name(body: dict[str, Any]) -> None:
     with pytest.raises(BadRequest):
         handler.requested_workspace(body)
+
+
+def test_a_workspace_name_at_the_limit_passes_and_one_over_it_does_not() -> None:
+    at_limit = "a" * handler.MAX_WORKSPACE_CHARACTERS
+    assert handler.requested_workspace({"workspace": at_limit}) == at_limit
+    with pytest.raises(BadRequest, match=str(handler.MAX_WORKSPACE_CHARACTERS)):
+        handler.requested_workspace({"workspace": "a" * (handler.MAX_WORKSPACE_CHARACTERS + 1)})
+
+
+def test_an_outsized_workspace_name_is_400_and_reaches_neither_log_nor_answer(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The name is the one thing from outside that a log line carries, so it is capped first."""
+    caplog.set_level(logging.INFO, logger="andur")
+    huge = "q" * 5000
+
+    status, body = call(event({"question": "How?", "workspace": huge}))
+    assert status == 400
+    assert huge not in json.dumps(body)
+    assert huge not in caplog.text
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "refused"]
+    assert line["workspace"] is None
+    assert aws["dynamodb"].calls == []
 
 
 def test_question_is_stripped_and_limited() -> None:
@@ -439,13 +632,55 @@ def test_a_failed_reread_still_answers_an_unknown_key_with_401(
     assert any(line["event"] == "keys-reload-failed" for line in log_lines(caplog))
 
 
-def test_expired_keys_that_cannot_be_read_again_let_nobody_in(aws: dict[str, Any], cold_start: FakeClock) -> None:
+def test_expired_keys_that_cannot_be_read_again_keep_working(
+    aws: dict[str, Any], cold_start: FakeClock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A brief Parameter Store outage must not turn every request into a 500.
+
+    The keys in hand are old, not wrong. They go on deciding, and the next
+    attempt waits `KEY_RELOAD_MIN_SECONDS` — the same brake an unknown key
+    runs into, so an outage cannot become a read per request.
+    """
+    caplog.set_level(logging.INFO, logger="andur")
     call(event())
     aws["ssm"].error = client_error("ThrottlingException", operation="GetParametersByPath")
     cold_start.advance(handler.KEY_CACHE_SECONDS)
+
+    assert call(event())[0] == 200
+    assert len(aws["ssm"].calls) == 2
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "keys-reload-failed"]
+    assert line["stale"] is True
+
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS - 1)
+    assert call(event())[0] == 200
+    assert len(aws["ssm"].calls) == 2
+
+    cold_start.advance(1)
+    assert call(event())[0] == 200
+    assert len(aws["ssm"].calls) == 3
+
+
+def test_a_function_that_never_read_any_keys_lets_nobody_in(aws: dict[str, Any]) -> None:
+    """There is nothing old to fall back on, so this stays a 500."""
+    aws["ssm"].error = client_error("ThrottlingException", operation="GetParametersByPath")
     status, body = call(event())
     assert status == 500
     assert body == {"error": NOT_CONFIGURED_MESSAGE}
+
+
+def test_an_expired_key_still_stops_working_once_the_keys_can_be_read_again(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    """The price of keeping old keys: a deleted key lives until the next good read."""
+    assert call(event())[0] == 200
+    aws["ssm"].error = client_error("ThrottlingException", operation="GetParametersByPath")
+    cold_start.advance(handler.KEY_CACHE_SECONDS)
+    assert call(event())[0] == 200
+
+    aws["ssm"].error = None
+    aws["ssm"].pages = [parameters({"pellwick": KEYS["pellwick"]})]
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    assert call(event())[0] == 401
 
 
 # --- AWS clients ---------------------------------------------------------
@@ -473,6 +708,277 @@ def test_the_modules_import_and_read_requests_without_boto3() -> None:
     result = subprocess.run([sys.executable, "-c", code], cwd=REPOSITORY_ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "quillmoor"
+
+
+# --- Key budgets ---------------------------------------------------------
+
+
+def budget_item(aws: dict[str, Any], key: str = KEYS["quillmoor"]) -> dict[str, Any]:
+    """The table item of one key, found the way the handler finds it."""
+    return aws["dynamodb"].items[handler.key_hash(key)]
+
+
+def number(item: dict[str, Any], name: str) -> int | None:
+    return handler.budget_number(item, name)
+
+
+def test_a_key_is_hashed_and_the_key_itself_never_leaves_the_function(aws: dict[str, Any]) -> None:
+    """The table may be read by anyone with the console; no key may fall out of it."""
+    import hashlib
+
+    assert call(event())[0] == 200
+    (update,) = aws["dynamodb"].calls
+    assert update["Key"] == {
+        handler.BUDGET_KEY_ATTRIBUTE: {"S": hashlib.sha256(KEYS["quillmoor"].encode()).hexdigest()}
+    }
+    assert KEYS["quillmoor"] not in json.dumps(update)
+    assert KEYS["quillmoor"] not in json.dumps(aws["dynamodb"].items, default=str)
+
+
+def test_the_first_question_opens_the_window_and_counts_one(aws: dict[str, Any]) -> None:
+    started = int(handler.wall_clock())
+    assert call(event())[0] == 200
+
+    item = budget_item(aws)
+    assert number(item, "questions_used") == 1
+    assert number(item, "question_limit") == int(ENVIRONMENT["QUESTION_LIMIT"])
+    assert number(item, "first_used_at") == started
+    assert number(item, "window_seconds") == 48 * SECONDS_PER_HOUR
+    assert number(item, "expires_at") == started + 48 * SECONDS_PER_HOUR
+    assert number(item, handler.BUDGET_TTL_ATTRIBUTE) == started + 365 * 24 * SECONDS_PER_HOUR
+    assert item["workspace"] == {"S": "quillmoor"}
+
+
+def test_the_window_does_not_move_with_later_questions(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    call(event())
+    opened = number(budget_item(aws), "expires_at")
+    budget_clock.advance(SECONDS_PER_HOUR)
+    call(event())
+
+    item = budget_item(aws)
+    assert number(item, "expires_at") == opened
+    assert number(item, "questions_used") == 2
+
+
+def test_the_tenth_question_goes_through_and_the_eleventh_does_not(aws: dict[str, Any]) -> None:
+    for asked in range(1, 11):
+        status, _ = call(event())
+        assert status == 200, f"question {asked}"
+
+    status, body = call(event())
+    assert status == 402
+    assert body == {"error": QUESTIONS_SPENT_MESSAGE.format(limit=10)}
+    assert number(budget_item(aws), "questions_used") == 10
+    assert len(aws["bedrock-runtime"].calls) == 10
+
+
+def test_the_window_closes_even_with_questions_left(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    assert call(event())[0] == 200
+    budget_clock.advance(48 * SECONDS_PER_HOUR)
+
+    status, body = call(event())
+    assert status == 402
+    assert body == {"error": WINDOW_CLOSED_MESSAGE}
+    assert number(budget_item(aws), "questions_used") == 1
+
+
+def test_the_last_second_of_the_window_still_answers(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    call(event())
+    budget_clock.advance(48 * SECONDS_PER_HOUR - 1)
+    assert call(event())[0] == 200
+
+
+def test_a_budget_set_before_the_first_question_overrides_the_defaults(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """Two questions and a six-hour window, written the way the CLI command writes them."""
+    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
+        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+        "question_limit": {"N": "2"},
+        "window_seconds": {"N": str(6 * SECONDS_PER_HOUR)},
+        "keep_seconds": {"N": str(7 * 24 * SECONDS_PER_HOUR)},
+    }
+    started = int(budget_clock())
+
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    assert number(item, "expires_at") == started + 6 * SECONDS_PER_HOUR
+    assert number(item, handler.BUDGET_TTL_ATTRIBUTE) == started + 7 * 24 * SECONDS_PER_HOUR
+    assert call(event())[0] == 200
+
+    status, body = call(event())
+    assert status == 402
+    assert body == {"error": QUESTIONS_SPENT_MESSAGE.format(limit=2)}
+
+
+def test_deleting_the_item_gives_the_key_a_fresh_budget(aws: dict[str, Any]) -> None:
+    """That is the reset command: the budget is the item, and nothing else."""
+    for _ in range(10):
+        call(event())
+    assert call(event())[0] == 402
+
+    del aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])]
+    assert call(event())[0] == 200
+    assert number(budget_item(aws), "questions_used") == 1
+
+
+def test_a_question_that_is_refused_costs_nothing(aws: dict[str, Any]) -> None:
+    """The budget is the sixth check, behind the question — a 400 spends nothing."""
+    assert call(event({"question": "", "workspace": "quillmoor"}))[0] == 400
+    assert call(event({"question": "x" * (MAX_QUESTION_CHARACTERS + 1), "workspace": "quillmoor"}))[0] == 400
+    assert aws["dynamodb"].calls == []
+
+
+@pytest.mark.parametrize(
+    ("request_event", "status"),
+    [
+        (event(key="wrong-key"), 401),
+        (event(key=None), 401),
+        (event({"question": "How?", "workspace": "pellwick"}), 403),
+    ],
+    ids=["wrong-key", "no-key", "other-workspace"],
+)
+def test_a_key_that_does_not_open_the_workspace_never_reaches_the_budget(
+    aws: dict[str, Any], request_event: dict[str, Any], status: int
+) -> None:
+    assert call(request_event)[0] == status
+    assert aws["dynamodb"].calls == []
+
+
+def test_a_table_that_cannot_be_reached_is_500_and_not_a_free_pass(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["dynamodb"].error = client_error("ResourceNotFoundException", operation="UpdateItem")
+
+    status, body = call(event())
+    assert status == 500
+    assert body == {"error": NOT_CONFIGURED_MESSAGE}
+    assert aws["bedrock-agent-runtime"].calls == []
+    assert aws["bedrock-runtime"].calls == []
+    assert any(line["event"] == "budget-unreadable" for line in log_lines(caplog))
+
+
+def test_a_throttled_table_is_500_too(aws: dict[str, Any]) -> None:
+    aws["dynamodb"].error = client_error("ThrottlingException", operation="UpdateItem")
+    assert call(event())[0] == 500
+    assert aws["bedrock-runtime"].calls == []
+
+
+def test_a_failed_condition_becomes_402_and_never_an_answer(aws: dict[str, Any]) -> None:
+    """What a lost race looks like from inside the handler.
+
+    Not a test of concurrency — nothing here runs at the same time. It pins
+    the one thing the handler decides when DynamoDB says the condition was
+    false: 402, no retrieval, no model call. With the item, the way DynamoDB
+    sends it, the sentence names what ran out; without it, the plain one.
+    """
+    spent = {"questions_used": {"N": "10"}, "question_limit": {"N": "10"}}
+    aws["dynamodb"].error = conditional_check_failed(spent)
+    status, body = call(event())
+    assert status == 402
+    assert body == {"error": QUESTIONS_SPENT_MESSAGE.format(limit=10)}
+
+    aws["dynamodb"].error = conditional_check_failed(None)
+    status, body = call(event())
+    assert status == 402
+    assert body == {"error": BUDGET_SPENT_MESSAGE}
+
+    assert aws["bedrock-agent-runtime"].calls == []
+    assert aws["bedrock-runtime"].calls == []
+
+
+def test_the_budget_is_never_read_before_it_is_written(aws: dict[str, Any]) -> None:
+    """One conditional write per question, and no read: that is what makes the limit hard."""
+    call(event())
+    (update,) = aws["dynamodb"].calls
+    assert set(update) == {
+        "TableName",
+        "Key",
+        "UpdateExpression",
+        "ConditionExpression",
+        "ExpressionAttributeValues",
+        "ReturnValuesOnConditionCheckFailure",
+    }
+    assert update["TableName"] == ENVIRONMENT["BUDGET_TABLE_NAME"]
+    assert update["ReturnValuesOnConditionCheckFailure"] == "ALL_OLD"
+
+
+def test_a_question_that_passed_the_budget_is_not_given_back(aws: dict[str, Any]) -> None:
+    """Simple, hard, and easy to explain: what got through the budget stays counted."""
+    aws["bedrock-runtime"].error = client_error("ThrottlingException")
+    assert call(event())[0] == 502
+    assert number(budget_item(aws), "questions_used") == 1
+
+    aws["bedrock-runtime"].error = None
+    aws["bedrock-agent-runtime"].error = client_error("AccessDeniedException", operation="Retrieve")
+    assert call(event())[0] == 502
+    assert number(budget_item(aws), "questions_used") == 2
+
+
+def test_the_table_is_asked_again_for_every_question_although_the_keys_are_cached(
+    aws: dict[str, Any],
+) -> None:
+    """The key cache keeps keys, never counts — a cached count would be no count."""
+    for _ in range(3):
+        call(event())
+    assert len(aws["ssm"].calls) == 1
+    assert len(aws["dynamodb"].calls) == 3
+
+
+def test_two_keys_have_two_budgets(aws: dict[str, Any]) -> None:
+    for _ in range(10):
+        call(event())
+    assert call(event())[0] == 402
+    assert call(event({"question": "How?", "workspace": "pellwick"}, key=KEYS["pellwick"]))[0] == 200
+
+
+def test_a_spent_key_is_logged_as_refused_with_the_reason_and_without_the_key(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    for _ in range(10):
+        call(event())
+    caplog.clear()
+    caplog.set_level(logging.INFO, logger="andur")
+
+    response = respond(event())
+    assert response["statusCode"] == 402
+    assert "WWW-Authenticate" not in response["headers"]
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "refused"]
+    assert line["status"] == 402
+    assert line["workspace"] == "quillmoor"
+    assert line["error"] == QUESTIONS_SPENT_MESSAGE.format(limit=10)
+    assert KEYS["quillmoor"] not in caplog.text
+    assert handler.key_hash(KEYS["quillmoor"]) not in caplog.text
+
+
+def test_which_half_ran_out_is_read_from_the_item_the_condition_refused() -> None:
+    now = 1_790_000_000
+    closed = {"expires_at": {"N": str(now)}, "questions_used": {"N": "3"}, "question_limit": {"N": "10"}}
+    spent = {"expires_at": {"N": str(now + 1)}, "questions_used": {"N": "10"}, "question_limit": {"N": "10"}}
+    assert handler.spent_message(closed, now) == WINDOW_CLOSED_MESSAGE
+    assert handler.spent_message(spent, now) == QUESTIONS_SPENT_MESSAGE.format(limit=10)
+    assert handler.spent_message({}, now) == BUDGET_SPENT_MESSAGE
+    assert handler.spent_message({"questions_used": {"S": "many"}}, now) == BUDGET_SPENT_MESSAGE
+
+
+def test_the_spent_status_is_none_of_the_three_it_could_be_mistaken_for() -> None:
+    assert BudgetSpent.status == 402
+    assert BudgetSpent.status not in {Unauthorized.status, Forbidden.status, 429}
+    assert BudgetSpent.headers == {}
+
+
+def test_the_update_writes_the_attributes_the_condition_and_the_table_watch() -> None:
+    assert f"{handler.BUDGET_TTL_ATTRIBUTE} = " in handler.BUDGET_UPDATE_EXPRESSION
+    assert "first_used_at = " in handler.BUDGET_UPDATE_EXPRESSION
+    assert "first_used_at" in handler.BUDGET_CONDITION
+    assert handler.BUDGET_UPDATE_EXPRESSION.startswith("SET ")
 
 
 # --- Retrieval and prompt ------------------------------------------------

@@ -10,11 +10,16 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-import aws_cdk as cdk
 import pytest
-from aws_cdk.assertions import Match, Template
 
-from scripts import ask
+# The CDK is a heavy dependency and only these tests need it; without it they
+# skip rather than break the run, the way the botocore tests already do.
+pytest.importorskip("aws_cdk")
+
+import aws_cdk as cdk  # noqa: E402
+from aws_cdk.assertions import Match, Template  # noqa: E402
+
+from scripts import ask  # noqa: E402
 
 import aws  # app/aws.py, imported by its Lambda name (tests/conftest.py)
 import handler  # app/handler.py, likewise
@@ -25,9 +30,15 @@ from infra.stacks.andur_stack import (
     ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
     API_KEY_PARAMETER_PATH,
+    BUDGET_KEY_ATTRIBUTE,
+    BUDGET_TABLE_NAME,
+    BUDGET_TTL_ATTRIBUTE,
     CHUNK_MAX_TOKENS,
     CHUNK_OVERLAP_PERCENT,
     DATA_SOURCE_NAME,
+    DEFAULT_KEEP_DAYS,
+    DEFAULT_QUESTION_LIMIT,
+    DEFAULT_WINDOW_HOURS,
     DISTANCE_METRIC,
     EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_ID,
@@ -428,6 +439,7 @@ def test_stack_publishes_what_later_steps_need(template: Template) -> None:
         "KnowledgeBaseRoleArn",
         "FunctionUrl",
         "ApiKeyParameterPath",
+        "BudgetTableName",
     } <= set(outputs)
 
 
@@ -457,8 +469,11 @@ def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
 
     A hanging Bedrock call ends as the handler's 502, not as a Lambda timeout;
     the function ends before the 15 minutes a Function URL call may take; and
-    the ask script waits longer than the function, so it prints the 502.
+    the ask script waits longer than the function, so it prints the 502. The
+    innermost number counts the keys twice, because an unknown key is read
+    again before it is refused.
     """
+    assert aws.worst_case_seconds() == 135
     assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
 
 
@@ -478,6 +493,10 @@ def test_answer_function_is_configured_only_through_its_environment(
         "REGION": {"Ref": "AWS::Region"},
         "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
         "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,
+        "BUDGET_TABLE_NAME": {"Ref": stack.get_logical_id(stack.budget_table.node.default_child)},
+        "QUESTION_LIMIT": str(DEFAULT_QUESTION_LIMIT),
+        "WINDOW_HOURS": str(DEFAULT_WINDOW_HOURS),
+        "KEEP_DAYS": str(DEFAULT_KEEP_DAYS),
     }
     assert set(variables) == set(handler.ENVIRONMENT_VARIABLES.values())
 
@@ -487,13 +506,23 @@ def test_the_model_id_is_configuration_not_handler_code() -> None:
         assert ANSWER_MODEL_ID not in module.read_text(encoding="utf-8"), module.name
 
 
-def test_answer_role_has_four_permissions_each_on_one_resource(stack: AndurStack, template: Template) -> None:
+def test_answer_role_has_five_permissions_each_on_one_resource(stack: AndurStack, template: Template) -> None:
     policies = role_policies(stack, template, stack.answer_role)
-    assert set(policies) == {"ReadApiKeys", "RetrieveFromKnowledgeBase", "InvokeAnswerModel", "WriteLogs"}
+    assert set(policies) == {
+        "ReadApiKeys",
+        "CountQuestionsPerKey",
+        "RetrieveFromKnowledgeBase",
+        "InvokeAnswerModel",
+        "WriteLogs",
+    }
 
     (read_keys,) = policies["ReadApiKeys"]["Statement"]
     assert read_keys["Action"] == "ssm:GetParametersByPath"
     assert joined_last_part(read_keys["Resource"]) == f":parameter{API_KEY_PARAMETER_PATH}"
+
+    (count,) = policies["CountQuestionsPerKey"]["Statement"]
+    assert count["Action"] == "dynamodb:UpdateItem"
+    assert count["Resource"] == get_att(stack, stack.budget_table.node.default_child, "Arn")
 
     (retrieve,) = policies["RetrieveFromKnowledgeBase"]["Statement"]
     assert retrieve["Action"] == "bedrock:Retrieve"
@@ -532,6 +561,73 @@ def test_exactly_one_output_is_a_function_url(stack: AndurStack, template: Templ
     assert template.find_outputs("FunctionUrl")["FunctionUrl"]["Value"] == get_att(
         stack, stack.function_url.node.default_child, "FunctionUrl"
     )
+
+
+# --- Key budgets ---------------------------------------------------------
+
+
+def budget_table(stack: AndurStack, template: Template) -> Mapping[str, Any]:
+    """The rendered table. ``TableV2`` renders as a global table with one replica."""
+    return resource_of(stack, template, stack.budget_table)
+
+
+def test_the_budget_table_is_one_item_per_key_hash(stack: AndurStack, template: Template) -> None:
+    template.resource_count_is("AWS::DynamoDB::GlobalTable", 1)
+    properties = budget_table(stack, template)["Properties"]
+    assert properties["TableName"] == BUDGET_TABLE_NAME
+    assert properties["KeySchema"] == [{"AttributeName": BUDGET_KEY_ATTRIBUTE, "KeyType": "HASH"}]
+    assert properties["AttributeDefinitions"] == [
+        {"AttributeName": BUDGET_KEY_ATTRIBUTE, "AttributeType": "S"}
+    ]
+    assert properties["Replicas"] == [{"Region": {"Ref": "AWS::Region"}}]
+
+
+def test_the_budget_table_is_billed_per_request(stack: AndurStack, template: Template) -> None:
+    """A public URL has no rate to provision for, and an idle month must cost nothing."""
+    assert budget_table(stack, template)["Properties"]["BillingMode"] == "PAY_PER_REQUEST"
+
+
+def test_the_budget_table_clears_old_items_by_itself(stack: AndurStack, template: Template) -> None:
+    """On the attribute the handler writes — a TTL on any other name would never fire."""
+    assert budget_table(stack, template)["Properties"]["TimeToLiveSpecification"] == {
+        "AttributeName": BUDGET_TTL_ATTRIBUTE,
+        "Enabled": True,
+    }
+    assert f"{BUDGET_TTL_ATTRIBUTE} = " in handler.BUDGET_UPDATE_EXPRESSION
+
+
+def test_the_table_and_the_handler_agree_on_the_attribute_names() -> None:
+    """The stack creates the table, the handler writes the items; a typo would only show in AWS."""
+    assert handler.BUDGET_KEY_ATTRIBUTE == BUDGET_KEY_ATTRIBUTE
+    assert handler.BUDGET_TTL_ATTRIBUTE == BUDGET_TTL_ATTRIBUTE
+
+
+def test_the_defaults_the_stack_hands_over_are_a_budget_the_handler_accepts() -> None:
+    """The handler refuses an item that would go before its own window closes."""
+    handler.load_settings(
+        {
+            "KNOWLEDGE_BASE_ID": "KB1",
+            "MODEL_ID": ANSWER_MODEL_ID,
+            "REGION": "us-east-1",
+            "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
+            "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,
+            "BUDGET_TABLE_NAME": BUDGET_TABLE_NAME,
+            "QUESTION_LIMIT": str(DEFAULT_QUESTION_LIMIT),
+            "WINDOW_HOURS": str(DEFAULT_WINDOW_HOURS),
+            "KEEP_DAYS": str(DEFAULT_KEEP_DAYS),
+        }
+    )
+    assert (DEFAULT_QUESTION_LIMIT, DEFAULT_WINDOW_HOURS) == (10, 48)
+
+
+def test_no_role_may_do_more_than_count_on_the_budget_table(template: Template) -> None:
+    """One action, on one table. Reading or writing items freely is nobody's job here."""
+    actions = [
+        statement["Action"]
+        for _, statement in all_policy_statements(template)
+        if "dynamodb" in json.dumps(statement["Action"])
+    ]
+    assert actions == ["dynamodb:UpdateItem"]
 
 
 # --- Workspace keys ------------------------------------------------------

@@ -60,7 +60,14 @@ SIDECAR_SUFFIX = ".metadata.json"
 REQUIRED_KEYS = ("workspace", "layer", "source", "license")
 
 #: Lowercase, no spaces: letters and digits, single hyphens in between.
-WORKSPACE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+#: ``\Z`` and not ``$``, which would also match in front of a closing newline.
+WORKSPACE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+
+#: A workspace name is at most this long. Same value as in app/handler.py,
+#: where the limit keeps an outsized name out of the log; a test keeps the two
+#: equal, so a folder that uploads here is a folder the function can be asked
+#: about.
+MAX_WORKSPACE_CHARACTERS = 64
 
 #: File types a Bedrock knowledge base can read, with the content type the
 #: upload sets. Anything else would only fail later, inside the sync.
@@ -387,6 +394,11 @@ def discover(source: Path, only_workspace: str | None = None) -> tuple[list[Docu
         if only_workspace is not None and workspace != only_workspace:
             continue
         seen_workspaces.append(workspace)
+        if len(workspace) > MAX_WORKSPACE_CHARACTERS:
+            problems.append(
+                f"{entry}: workspace name is longer than {MAX_WORKSPACE_CHARACTERS} characters"
+            )
+            continue
         if not WORKSPACE_NAME.match(workspace):
             problems.append(
                 f"{entry}: workspace name must be lowercase letters, digits and single hyphens"

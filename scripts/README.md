@@ -178,5 +178,5 @@ in [app/README.md](../app/README.md).
 | Exit code | Meaning |
 |---|---|
 | 0 | Answered. |
-| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 403 key of another workspace, 400 bad question, 502 Bedrock failed). |
+| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 402 key budget used up, 403 key of another workspace, 400 bad question, 502 Bedrock failed). |
 | 2 | An AWS step or the connection failed: login, stack, missing key parameter, network. |

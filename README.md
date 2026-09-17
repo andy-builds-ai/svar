@@ -25,6 +25,7 @@ removes it.
 | Separation | Metadata filter | `workspace` on every chunk. The filter, not a separate deployment, is what keeps companies apart. |
 | Answering | Nemotron 3 Super on Bedrock, behind a Lambda function | Answers from the retrieved passages only and cites them. No idle cost; the function only runs while a question is in flight. |
 | Access | Function URL, one key per workspace | The key decides the workspace. Keys are generated during the deploy and kept as SecureString parameters, which cost nothing. |
+| Budget | DynamoDB, one item per key | A key is an allowance, not a password: 10 questions and 48 hours from the first one. Billed per request, so an idle month costs nothing. |
 | Web page | *(build step 4)* static page on S3 | A chat box. Cheap enough to ignore. |
 
 What is missing from that list is as deliberate as what is in it: no
@@ -36,11 +37,20 @@ barely is one.
 
 Build steps 1 to 3 of six. The stack creates the documents bucket, the
 vector bucket and index, the knowledge base with its service role, a data
-source pointing at the documents, one key per workspace, and the answer
-function behind a Function URL. A fill script loads a demo corpus of two
-fictional companies into it, a retrieve script shows that a query in one
-company's workspace never returns the other's documents, and an ask script
-puts a question to the deployed function. No web page yet — that is step 4.
+source pointing at the documents, one key per workspace, the table that
+holds each key's budget, and the answer function behind a Function URL. A
+fill script loads a demo corpus of two fictional companies into it, a
+retrieve script shows that a query in one company's workspace never returns
+the other's documents, and an ask script puts a question to the deployed
+function. No web page yet — that is step 4.
+
+Every key carries a budget: ten questions, and 48 hours from the first of
+them. The handler counts a question against the key that asked before it
+retrieves anything, in one conditional write against a DynamoDB item found by
+the SHA-256 of the key. A key with nothing left gets a 402 that says which
+half ran out. Both numbers can be set per key without a deploy; what that
+costs, how to set it and how to reset it is in
+[app/README.md](app/README.md).
 
 ```
 infra/       the CDK app, the stack, and the key generator it runs during a deploy
@@ -266,7 +276,9 @@ pytest -q
 
 The stack tests render the stack to CloudFormation JSON and assert on it. The
 handler tests drive the answer function through every status code against
-fake Bedrock and Parameter Store clients. The script tests check the corpus
+fake Bedrock, Parameter Store and DynamoDB clients; the budget fake runs the
+handler's own update and condition strings, so a wrong attribute name fails
+there rather than in AWS. The script tests check the corpus
 layout, the sidecars, the object keys and the counters, and drive upload,
 job wait, retrieval and asking against small fake clients. None of them call
 AWS or need credentials, and they finish in
@@ -293,10 +305,19 @@ documents bucket is a handful of megabytes, and nothing else is running.
 **The cap:** the Function URL is public, so the answer function runs at most
 5 requests at the same time and Lambda turns the rest away with HTTP 429
 before any code runs. A request without a valid key never reaches the model.
-With a valid key, at about 2 seconds per answer, five in flight are roughly
-9,000 answers an hour — about 5 USD an hour at the model price above. That is
-a ceiling on a leaked key, not a limit on it; a limit per key comes with the
-guardrails.
+That bounds the rate at which anything can arrive; what one key may spend in
+total is its budget — ten questions and 48 hours, so about 0.01 USD before
+the key is refused. A leaked key is a leak of ten questions, not of an
+open tap.
+
+**Counting it:** one conditional write per question, which is one write unit
+on a table billed per request — 0.625 USD per million writes in `us-east-1`
+(DynamoDB on-demand pricing page, read 17.09.2026). That is 0.63 USD per
+million questions, against roughly 1,000 USD per million at the model. The
+counter is not what the bill is made of. Note that the permanent free tier of
+25 write and 25 read units is for provisioned capacity, not for on-demand
+tables; this table is on-demand, because a public URL has no rate to
+provision for and a throttled counter would refuse honest questions.
 
 **Filling it:** 40 documents of 2,000 words is roughly 110,000 tokens of
 embedding at 0.02 USD per million — about 0.002 USD. Embedding a corpus is
@@ -307,8 +328,8 @@ not what costs money; asking questions is, and barely.
 1. **Infrastructure** — bucket, vector index, knowledge base, IAM. *(done)*
 2. **Ingest** — a fill script and a fictional demo company, 20–40 documents. *(done)*
 3. **Answering** — Lambda handler behind a Function URL with one key per
-   workspace: question, retrieval, model, answer with sources and layer,
-   token counts per answer in the log. *(this step)*
+   workspace: question, budget per key, retrieval, model, answer with sources
+   and layer, token counts per answer in the log. *(this step)*
 4. **Web page** — a chat page on S3 that calls the Function URL.
 5. **Guardrails** — topic, PII and hallucination filters.
 6. **Release** — screenshots, a walkthrough, a tagged version.
