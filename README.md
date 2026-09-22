@@ -39,9 +39,15 @@ barely is one.
 The page and the answer function sit behind the same CloudFront
 distribution. The page comes from a private S3 bucket; the single path
 `/ask` goes to the answer function instead. Both origins are reached through
-an origin access control, which means neither is reachable on its own: the
-bucket blocks all public access, and the function URL is set to `AWS_IAM`, so
-it answers 403 to everyone but CloudFront, and only for this distribution.
+an origin access control, which means neither is reachable from outside on
+its own: the bucket blocks all public access, and the function URL is set to
+`AWS_IAM`, so it answers 403 to every caller outside this account, and its
+resource policy names CloudFront alone, only for this distribution. Inside
+the account it is not a wall — `AWS_IAM` lets a role here be authorised by
+its own identity policy — so an administrator or a CI role can sign a call
+and reach the function past the distribution. The workspace key, its
+workspace and its budget are checked in the function on every call, wherever
+it came from.
 
 That shape buys three things. The page calls `/ask` as a relative path, so it
 never has to know its own address and there is no configuration file to keep
@@ -246,8 +252,8 @@ curl -s -X POST "$WEB_URL/ask" \
 `$KEY` is the workspace key ([app/README.md](app/README.md#getting-a-key)).
 `printf '%s'` and not `echo`: a trailing newline would go into the hash but
 not into the body, and the request would be refused. The stack output
-`FunctionUrl` is not an address to send this to — it answers 403 to everyone
-but CloudFront.
+`FunctionUrl` is not an address to send this to — from outside the account
+it answers 403 to everyone but CloudFront.
 
 ## Retrieval findings
 
@@ -380,9 +386,9 @@ documents bucket is a handful of megabytes, and nothing else is running.
 | Question embedding, vector query, Lambda | < 0.0001 USD |
 | **Total** | **~0.001 USD — about 1 USD per 1,000 questions** |
 
-**The cap:** the Function URL is public, so the answer function runs at most
-5 requests at the same time and Lambda turns the rest away with HTTP 429
-before any code runs. A request without a valid key never reaches the model.
+**The cap:** the web address is open to anyone who has it, so the answer
+function runs at most 5 requests at the same time and Lambda turns the rest
+away with HTTP 429 before any code runs. A request without a valid key never reaches the model.
 That bounds the rate at which anything can arrive; what one key may spend in
 total is its budget — ten questions and 48 hours, so about 0.01 USD before
 the key is refused. A leaked key is a leak of ten questions, not of an

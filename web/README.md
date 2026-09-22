@@ -13,7 +13,14 @@ This README stays behind: the deploy leaves it out, like every other
 The page and the answer function sit behind the same CloudFront distribution.
 The page is served from a private S3 bucket; the single path `/ask` goes to
 the answer function's URL instead. Both are reached through an origin access
-control, so neither is reachable on its own.
+control, so neither is reachable from outside on its own.
+
+Every response the distribution sends carries the security headers set on it:
+a content security policy that allows nothing but this page's own script,
+stylesheet and `/ask` call, `frame-ancestors 'none'` so the page cannot be
+put in somebody else's frame, HSTS, `X-Content-Type-Options: nosniff` and
+`Referrer-Policy: no-referrer`. They are set once on the distribution, so no
+file here has to carry a `<meta>` of its own.
 
 Because it is one address, the page posts to `/ask` — a relative path. It
 never has to know its own address, which is why no file here carries one and
@@ -40,7 +47,16 @@ removes it from this browser and leaves the workspace. A browser with storage
 switched off works the same; it just asks again next time.
 
 A question is 1 to 1,000 characters. Enter asks, Shift + Enter starts a new
-line, and the button is disabled while an answer is on its way.
+line, and the button is disabled while an answer is on its way. Enter reaches
+the form directly, past the disabled button, so the page also keeps a flag:
+a second question while the first is in flight is ignored. Two would be two
+questions off the same ten, and an answer that may not belong to the question
+in the field.
+
+The page stops waiting after 125 seconds. CloudFront gives up at 120 and
+sends a 504, so in every ordinary case that answer arrives first; this is the
+floor under it, for a connection that neither answers nor fails. Without it
+the button stayed on *Asking…* until the browser was reloaded.
 
 An answer is shown as the model wrote it, with its `[n]` citations, then the
 layers it rests on, then every retrieved passage with its layer, length,
@@ -63,6 +79,7 @@ cannot bring markup of its own into the page.
 | 403 without a sentence | The request was refused on the way in. Not a wrong key — that is a 401 with a sentence. |
 | 504 | The answer took longer than CloudFront waits (120 seconds). The function may still be running it, and the question is already counted. |
 | No response at all | The connection failed. |
+| Nothing within 125 seconds | The page stopped waiting. The question may still be running, and asking again costs another one. |
 
 The three statuses without a sentence never passed through the function, so
 there is no sentence to pass on. Their bodies are not the function's either:

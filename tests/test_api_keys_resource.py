@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+import handler as answer_handler  # app/handler.py, by its Lambda name (tests/conftest.py)
 from infra.api_keys import handler
 
 PATH = "/andur/api-keys"
@@ -61,6 +62,22 @@ def test_create_stores_a_secure_string_and_names_the_resource_after_it() -> None
     assert stored["Tier"] == "Standard"
     assert stored["Overwrite"] is False
     assert len(stored["Value"]) == 43
+
+
+def test_the_description_names_the_header_the_function_reads() -> None:
+    """Whoever reads a key in the SSM console reads this line with it.
+
+    It said ``Authorization: Bearer <key>`` — the one header the key may not
+    travel in, because CloudFront replaces it with its own signature on the
+    way to the function. Following it earned a 401 and no hint why. No test
+    held the string, so nothing noticed.
+    """
+    ssm = FakeSSM()
+    handler.on_event(lifecycle("Create"), None, ssm)
+    description = ssm.parameters[f"{PATH}/quillmoor"]["Description"]
+
+    assert answer_handler.KEY_HEADER in description
+    assert "Authorization" not in description and "Bearer" not in description
 
 
 def test_create_and_update_keep_an_existing_key() -> None:

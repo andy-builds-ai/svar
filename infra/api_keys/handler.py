@@ -21,6 +21,18 @@ from typing import Any
 #: 32 random bytes, written as 43 URL-safe characters.
 KEY_BYTES = 32
 
+#: What the SSM console shows next to the key. Whoever reads a key there reads
+#: this line with it, so it has to name the header the function actually
+#: checks: ``X-Andur-Key``, not ``Authorization``. CloudFront replaces
+#: ``Authorization`` with its own signature on the way to the function, so a
+#: key sent there never arrives and the answer is 401 (app/handler.py,
+#: ``KEY_HEADER``).
+#:
+#: ``Overwrite=False`` means no deploy rewrites the description of a parameter
+#: that already exists. A key created before this line changed keeps the old
+#: text until someone edits it in the console.
+KEY_DESCRIPTION = "Andur workspace key. Send it in the header X-Andur-Key."
+
 
 def new_key() -> str:
     """A fresh random key, safe to send in an HTTP header."""
@@ -47,7 +59,7 @@ def ensure_key(ssm: Any, name: str) -> None:
     try:
         ssm.put_parameter(
             Name=name,
-            Description="Andur workspace key. Send it as Authorization: Bearer <key>.",
+            Description=KEY_DESCRIPTION,
             Value=new_key(),
             Type="SecureString",
             Tier="Standard",

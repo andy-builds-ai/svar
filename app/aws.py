@@ -55,14 +55,24 @@ RETRY_DELAY_SECONDS = 6
 KEY_READS_PER_REQUEST = 2
 
 
+#: How often one request can write the budget table: once to count the
+#: question, and once more to push an item's end past the window it carries —
+#: ``keep_the_item_past_its_window`` in handler.py. The second write happens
+#: for a hand-written item that is wrong, and only until it is right, but the
+#: worst case has to hold for it too.
+BUDGET_WRITES_PER_REQUEST = 2
+
+
 def worst_case_seconds() -> int:
     """How long one request can take when every AWS call runs into every timeout.
 
-    Counts each service once, Parameter Store `KEY_READS_PER_REQUEST` times.
-    Reading the keys is one page for a handful of workspaces; a key store
-    large enough to need several pages would add a read per page.
+    Counts each service once, except Parameter Store
+    (`KEY_READS_PER_REQUEST`) and the budget table
+    (`BUDGET_WRITES_PER_REQUEST`). Reading the keys is one page for a handful
+    of workspaces; a key store large enough to need several pages would add a
+    read per page.
     """
-    calls = {"ssm": KEY_READS_PER_REQUEST}
+    calls = {"ssm": KEY_READS_PER_REQUEST, "dynamodb": BUDGET_WRITES_PER_REQUEST}
     return sum(
         calls.get(service, 1)
         * (
@@ -121,6 +131,21 @@ _THROTTLING_CODES = {
     "ServiceQuotaExceededException",
 }
 _UNAVAILABLE_CODES = {"ServiceUnavailableException", "InternalServerException", "ModelNotReadyException"}
+
+
+def error_detail(exc: BaseException) -> str:
+    """What a log line may say about a botocore exception: its class and its code.
+
+    Never ``repr(exc)``. A botocore exception carries the service's own
+    message, and a service quotes what it choked on: a Bedrock
+    ``ValidationException`` on a converse call repeats the whole prompt, which
+    is the question plus passages out of a company's documents. That belongs
+    in no log. The class name and the error code are what a person actually
+    reads to tell one failure from another, and neither carries data.
+    """
+    code = error_code(exc)
+    name = type(exc).__name__
+    return f"{name}: {code}" if code else name
 
 
 def error_cause(exc: BaseException) -> str:

@@ -14,14 +14,16 @@ from typing import Any
 
 import pytest
 
-# The CDK is a heavy dependency and only these tests need it; without it they
-# skip rather than break the run, the way the botocore tests already do.
-pytest.importorskip("aws_cdk")
+# Imported, not skipped past. `aws-cdk-lib` is a hard dependency in
+# pyproject.toml, and it has to stay one: with an `importorskip` here, an
+# environment without the CDK reported "passed" for this whole module — over
+# sixty assertions about the stack, IAM, CloudFront and the page gone without
+# a red line anywhere. A missing dependency is a broken environment and has
+# to look like one.
+import aws_cdk as cdk
+from aws_cdk.assertions import Match, Template
 
-import aws_cdk as cdk  # noqa: E402
-from aws_cdk.assertions import Match, Template  # noqa: E402
-
-from scripts import ask  # noqa: E402
+from scripts import ask
 
 import aws  # app/aws.py, imported by its Lambda name (tests/conftest.py)
 import handler  # app/handler.py, likewise
@@ -42,9 +44,11 @@ from infra.stacks.andur_stack import (
     DEFAULT_KEEP_DAYS,
     DEFAULT_QUESTION_LIMIT,
     DEFAULT_WINDOW_HOURS,
+    DEPLOY_PROPERTY,
     DISTANCE_METRIC,
     EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_ID,
+    HSTS_MAX_AGE_DAYS,
     KNOWLEDGE_BASE_NAME,
     NON_FILTERABLE_METADATA_KEYS,
     NONCURRENT_VERSION_RETENTION_DAYS,
@@ -62,9 +66,25 @@ from infra.stacks.andur_stack import (
 )
 
 
+#: The file `cdk deploy` reads its context from. The tests read the same file,
+#: so that what is synthesised here is what would be deployed.
+CDK_JSON = REPOSITORY_ROOT / "cdk.json"
+
+
+def deploy_context() -> dict[str, Any]:
+    """The context of cdk.json — the feature flags a deploy renders with.
+
+    A flag can change the template: ``@aws-cdk/aws-iam:minimizePolicies``
+    merges policy statements, and this module unpacks statements by position
+    (``list_bucket, get_object = ...``). Synthesised without the context, the
+    tests would be reading a template nobody deploys.
+    """
+    return json.loads(CDK_JSON.read_text(encoding="utf-8"))["context"]
+
+
 @pytest.fixture(scope="module")
 def stack() -> AndurStack:
-    app = cdk.App()
+    app = cdk.App(context=deploy_context())
     return AndurStack(app, "TestAndurStack")
 
 
@@ -105,45 +125,40 @@ def joined_last_part(value: Mapping[str, Any]) -> str:
 # --- Documents bucket ----------------------------------------------------
 
 
-def test_documents_bucket_blocks_all_public_access(template: Template) -> None:
-    template.has_resource_properties(
-        "AWS::S3::Bucket",
-        {
-            "PublicAccessBlockConfiguration": {
-                "BlockPublicAcls": True,
-                "BlockPublicPolicy": True,
-                "IgnorePublicAcls": True,
-                "RestrictPublicBuckets": True,
-            }
-        },
-    )
+def documents_bucket(stack: AndurStack, template: Template) -> Mapping[str, Any]:
+    """The documents bucket itself, not whichever bucket happens to match.
+
+    The stack has two: the documents bucket and the private site bucket.
+    ``has_resource_properties`` is happy as soon as one resource of the type
+    fits, so with it these three promises were kept by the site bucket while
+    the documents bucket could have lost all of them — and the documents are
+    the one thing here that cannot be rebuilt from anything else.
+    """
+    return resource_of(stack, template, stack.documents_bucket)["Properties"]
 
 
-def test_documents_bucket_is_versioned(template: Template) -> None:
-    template.has_resource_properties(
-        "AWS::S3::Bucket", {"VersioningConfiguration": {"Status": "Enabled"}}
-    )
+def test_documents_bucket_blocks_all_public_access(
+    stack: AndurStack, template: Template
+) -> None:
+    assert documents_bucket(stack, template)["PublicAccessBlockConfiguration"] == {
+        "BlockPublicAcls": True,
+        "BlockPublicPolicy": True,
+        "IgnorePublicAcls": True,
+        "RestrictPublicBuckets": True,
+    }
 
 
-def test_old_document_versions_expire(template: Template) -> None:
+def test_documents_bucket_is_versioned(stack: AndurStack, template: Template) -> None:
+    assert documents_bucket(stack, template)["VersioningConfiguration"] == {"Status": "Enabled"}
+
+
+def test_old_document_versions_expire(stack: AndurStack, template: Template) -> None:
     """Versioning without an expiry would keep every old version forever."""
-    template.has_resource_properties(
-        "AWS::S3::Bucket",
-        {
-            "LifecycleConfiguration": {
-                "Rules": [
-                    Match.object_like(
-                        {
-                            "Status": "Enabled",
-                            "NoncurrentVersionExpiration": {
-                                "NoncurrentDays": NONCURRENT_VERSION_RETENTION_DAYS
-                            },
-                        }
-                    )
-                ]
-            }
-        },
-    )
+    (rule,) = documents_bucket(stack, template)["LifecycleConfiguration"]["Rules"]
+    assert rule["Status"] == "Enabled"
+    assert rule["NoncurrentVersionExpiration"] == {
+        "NoncurrentDays": NONCURRENT_VERSION_RETENTION_DAYS
+    }
 
 
 # --- What survives cdk destroy, and what does not ------------------------
@@ -387,11 +402,19 @@ def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(templa
     construct. Nothing in this stack's own roles is on a wildcard.
     """
     wildcard_actions = [
-        statement["Action"] for _, statement in all_policy_statements(template) if statement["Resource"] == "*"
+        sorted(action) if isinstance(action, list) else [action]
+        for action in (
+            statement["Action"]
+            for _, statement in all_policy_statements(template)
+            if statement["Resource"] == "*"
+        )
     ]
-    assert wildcard_actions == [
-        "bedrock:ListFoundationModels",
-        ["cloudfront:GetInvalidation", "cloudfront:CreateInvalidation"],
+    # Sorted, because the order inside one statement is the renderer's:
+    # ``@aws-cdk/aws-iam:minimizePolicies`` in cdk.json merges statements and
+    # decides for itself in which order the actions end up.
+    assert sorted(wildcard_actions) == [
+        ["bedrock:ListFoundationModels"],
+        ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"],
     ]
 
 
@@ -511,9 +534,10 @@ def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
     the function ends before the 15 minutes a Function URL call may take; and
     the ask script waits longer than the function, so it prints the 502. The
     innermost number counts the keys twice, because an unknown key is read
-    again before it is refused.
+    again before it is refused, and the budget table twice, because a wrong
+    item is put right with a second write.
     """
-    assert aws.worst_case_seconds() == 135
+    assert aws.worst_case_seconds() == 151
     assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
 
 
@@ -734,6 +758,56 @@ def test_cloudfront_waits_as_long_as_an_account_may_without_asking(
     assert origin["CustomOriginConfig"]["OriginReadTimeout"] == ORIGIN_RESPONSE_TIMEOUT_SECONDS == 120
 
 
+def security_headers(template: Template) -> Mapping[str, Any]:
+    """The one response headers policy, as CloudFormation would receive it."""
+    policy = only_resource(template, "AWS::CloudFront::ResponseHeadersPolicy")
+    return policy["Properties"]["ResponseHeadersPolicyConfig"]["SecurityHeadersConfig"]
+
+
+def test_both_behaviours_send_the_security_headers(
+    stack: AndurStack, template: Template
+) -> None:
+    """The page and the answer, one policy — the distribution is the only free place for it."""
+    config = distribution_config(stack, template)
+    headers = stack.node.find_child("SecurityHeaders")
+    policy_id = {"Ref": stack.get_logical_id(headers.node.default_child)}
+    assert config["DefaultCacheBehavior"]["ResponseHeadersPolicyId"] == policy_id
+    for behavior in config["CacheBehaviors"]:
+        assert behavior["ResponseHeadersPolicyId"] == policy_id
+
+
+def test_the_page_says_what_it_may_load_and_who_may_frame_it(template: Template) -> None:
+    """A page that keeps a key in localStorage may not be framed and may not load strangers.
+
+    ``default-src 'none'`` is the floor and every source below it is the
+    page's own origin, so a script or a stylesheet added from anywhere else
+    does not run. ``frame-ancestors 'none'`` keeps the page out of somebody
+    else's frame, where the key field would be theirs to read.
+    """
+    policy = security_headers(template)["ContentSecurityPolicy"]
+    assert policy["Override"] is True
+    directives = dict(
+        part.split(" ", 1) for part in policy["ContentSecurityPolicy"].split("; ")
+    )
+    assert directives["default-src"] == "'none'"
+    assert directives["frame-ancestors"] == "'none'"
+    assert directives["script-src"] == directives["style-src"] == "'self'"
+    assert directives["connect-src"] == "'self'"
+
+
+def test_the_address_may_only_be_reached_over_https_and_not_be_sniffed(
+    template: Template,
+) -> None:
+    headers = security_headers(template)
+    assert headers["StrictTransportSecurity"]["AccessControlMaxAgeSec"] == (
+        HSTS_MAX_AGE_DAYS * 24 * 3600
+    )
+    assert headers["StrictTransportSecurity"]["IncludeSubdomains"] is True
+    assert headers["ContentTypeOptions"] == {"Override": True}
+    assert headers["ReferrerPolicy"]["ReferrerPolicy"] == "no-referrer"
+    assert headers["FrameOptions"]["FrameOption"] == "DENY"
+
+
 def test_the_web_address_is_the_distribution(stack: AndurStack, template: Template) -> None:
     value = template.find_outputs("WebUrl")["WebUrl"]["Value"]
     assert value["Fn::Join"][1] == [
@@ -792,6 +866,68 @@ def test_the_page_never_prints_the_key() -> None:
     """Not to the console, and not into the address — the key goes into one header."""
     script = (WEB_FOLDER / "app.js").read_text(encoding="utf-8")
     assert "console." not in script
+
+
+def page_constant(name: str) -> str:
+    """One ``const NAME = "value";`` out of the page's script.
+
+    The page cannot import from Python, so it spells these out. What it
+    spells out is what the tests below read back.
+    """
+    script = (WEB_FOLDER / "app.js").read_text(encoding="utf-8")
+    (value,) = re.findall(rf'^const {name} = "([^"]*)";$', script, re.MULTILINE)
+    return value
+
+
+def page_number(name: str) -> int:
+    script = (WEB_FOLDER / "app.js").read_text(encoding="utf-8")
+    (value,) = re.findall(rf"^const {name} = (\d+);$", script, re.MULTILINE)
+    return int(value)
+
+
+def test_the_page_and_the_stack_mean_the_same_path_and_the_same_headers() -> None:
+    """A typo here is a green suite and a page that reaches the wrong origin.
+
+    The page posts to `ASK_PATH`; CloudFront sends exactly that one path to
+    the function and everything else to the bucket. Move the path in the
+    stack alone and the page's POST falls onto the default behaviour: S3
+    answers 403, CloudFront hands back HTML, and the page — which can only
+    read what it gets — tells the reader something about their key. The two
+    headers are the same kind of agreement one layer further in.
+    """
+    assert page_constant("ASK_PATH") == ASK_PATH
+    assert page_constant("KEY_HEADER") == handler.KEY_HEADER
+    assert page_constant("BODY_HASH_HEADER") == ask.BODY_HASH_HEADER
+    assert page_number("MAX_QUESTION_CHARACTERS") == handler.MAX_QUESTION_CHARACTERS
+
+
+def test_the_page_asks_once_at_a_time() -> None:
+    """Enter submits the form directly, and a disabled button does not stop it.
+
+    A second question while the first is in flight is a second question off
+    the same ten, two of the five Lambda places, and an answer that may not
+    belong to the question in the field. The guard is a flag the submit
+    handler reads before anything else.
+    """
+    script = (WEB_FOLDER / "app.js").read_text(encoding="utf-8")
+    assert "let asking = false;" in script
+    assert "if (asking) {" in script
+
+
+def test_the_page_stops_waiting_by_itself() -> None:
+    """Without this a hung connection leaves the button on "Asking…" forever.
+
+    The page waits a little longer than CloudFront does, so in every ordinary
+    case CloudFront's 504 arrives first and says more. This is the floor
+    under it: an abort, a cleared timer, and a sentence.
+    """
+    script = (WEB_FOLDER / "app.js").read_text(encoding="utf-8")
+    assert "new AbortController()" in script
+    assert "signal: controller.signal" in script
+    assert "clearTimeout(giveUp)" in script
+    assert "AbortError" in script
+    # Longer than the distribution waits, so the 504 is the answer that wins.
+    assert page_number("REQUEST_TIMEOUT_MS") > ORIGIN_RESPONSE_TIMEOUT_SECONDS * 1000
 
 
 # --- Key budgets ---------------------------------------------------------
@@ -869,7 +1005,54 @@ def test_one_key_per_workspace_is_generated_during_the_deploy(template: Template
     names = sorted(key["Properties"]["ParameterName"] for key in keys.values())
     assert names == sorted(f"{API_KEY_PARAMETER_PATH}/{workspace}" for workspace in WORKSPACES)
     for key in keys.values():
-        assert set(key["Properties"]) == {"ServiceToken", "ServiceTimeout", "ParameterName", "ParameterPath"}
+        assert set(key["Properties"]) == {
+            "ServiceToken",
+            "ServiceTimeout",
+            "ParameterName",
+            "ParameterPath",
+            DEPLOY_PROPERTY,
+        }
+
+
+def test_every_deploy_asks_again_whether_a_key_is_there() -> None:
+    """The one written way to end a key rests on this.
+
+    CloudFormation calls a custom resource only when its properties or its
+    service token change, and both were constants: a deploy walked past the
+    key generator without calling it. So deleting a key in Parameter Store
+    and deploying — what the stack and the README both say to do — left the
+    workspace with no key at all, every question 401, until somebody edited
+    the stack. `DEPLOY_PROPERTY` is what makes the call happen.
+    """
+    first = Template.from_stack(AndurStack(cdk.App(context=deploy_context()), "First"))
+    second = Template.from_stack(AndurStack(cdk.App(context=deploy_context()), "Second"))
+    stamps = [
+        key["Properties"][DEPLOY_PROPERTY]
+        for template in (first, second)
+        for key in template.find_resources("Custom::AndurApiKey").values()
+    ]
+    assert len(stamps) == 2 * len(WORKSPACES)
+    assert len(set(stamps)) == 2, "one value per synthesis, and a new one each time"
+
+
+def test_every_workspace_is_a_name_the_function_accepts() -> None:
+    """A name the function does not accept deploys cleanly and then answers 401.
+
+    The stack writes a parameter for every entry of `WORKSPACES` without
+    looking at it. `keys_by_workspace` in the handler drops an entry whose
+    last path part is not a valid workspace name — silently, because at that
+    point it is a stranger's parameter under the path, not a mistake. So
+    ``"Quillmoor"`` would deploy, store its key, and refuse every question
+    asked with it without a line anywhere saying why. The two ends have to
+    agree, and this is the only place they can be made to.
+    """
+    for workspace in WORKSPACES:
+        assert handler.WORKSPACE_NAME.match(workspace), workspace
+        assert len(workspace) <= handler.MAX_WORKSPACE_CHARACTERS, workspace
+        assert handler.keys_by_workspace(
+            [{"Name": f"{API_KEY_PARAMETER_PATH}/{workspace}", "Value": "a-key"}],
+            API_KEY_PARAMETER_PATH,
+        ) == {workspace: "a-key"}
 
 
 def test_no_key_value_is_in_the_template(template: Template) -> None:

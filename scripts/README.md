@@ -149,8 +149,8 @@ It sends what any client sends, the page included: a `POST` to
 body in `x-amz-content-sha256`. Both headers are what the way in demands, not
 the function — see *One address for everything* in the
 [README](../README.md#one-address-for-everything). The stack output
-`FunctionUrl` is not an address to send to: it answers 403 to everyone but
-CloudFront.
+`FunctionUrl` is not an address to send to: from outside the account it
+answers 403 to everyone but CloudFront.
 
 The key comes from Parameter Store (`/andur/api-keys/<workspace>`, decrypted)
 and is never printed. To use a key you already have, set `ANDUR_API_KEY`;

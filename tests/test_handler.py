@@ -15,9 +15,10 @@ that is what the measurement against the deployed table is for.
 import base64
 import json
 import logging
+import operator
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ from handler import (
     NOT_CONFIGURED_MESSAGE,
     NOT_IN_SOURCES_ANSWER,
     QUESTIONS_SPENT_MESSAGE,
+    SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
     WINDOW_CLOSED_MESSAGE,
     BadRequest,
@@ -203,42 +205,134 @@ def apply_update(expression: str, before: dict[str, Any], values: dict[str, Any]
     return after
 
 
-class FakeDynamoDB:
-    """The budget table: one item per key hash, and this handler's one update.
+#: The comparisons a condition expression can make on numbers.
+COMPARISONS = {
+    "<": operator.lt,
+    "<=": operator.le,
+    ">": operator.gt,
+    ">=": operator.ge,
+    "=": operator.eq,
+    "<>": operator.ne,
+}
 
-    ``items`` is the table as it is now and can be changed between calls, the
-    way a CLI command would change it.
+
+class ConditionReader:
+    """A condition expression, read from its text and evaluated on one item.
+
+    Written the way `apply_update` is written, and for the same reason: what
+    the handler sends is a string, and a fake that reproduces its *meaning*
+    from memory proves nothing about the string. Spelled out by hand, a
+    ``<`` that turned into ``<=`` in `handler.BUDGET_CONDITION` would leave
+    every test green while the deployed budget let an eleventh question
+    through. Read from the text, the same change turns tests red.
+
+    Enough of the grammar for the conditions this handler sends: ``AND``,
+    ``OR``, brackets, ``attribute_exists`` and ``attribute_not_exists``, and
+    a comparison between two operands, each an attribute name or a ``:``
+    placeholder. DynamoDB's rule for a missing attribute is kept: it does not
+    raise, it makes the comparison false.
     """
 
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(self, expression: str) -> None:
+        self.tokens = expression.replace("(", " ( ").replace(")", " ) ").split()
+        self.at = 0
+
+    def peek(self) -> str | None:
+        return self.tokens[self.at] if self.at < len(self.tokens) else None
+
+    def take(self) -> str:
+        token = self.tokens[self.at]
+        self.at += 1
+        return token
+
+    def either(self, item: Mapping[str, Any], values: Mapping[str, Any]) -> bool:
+        """``a OR b``, with both sides always read — the reader may not skip tokens."""
+        held = self.both(item, values)
+        while self.peek() == "OR":
+            self.take()
+            held = self.both(item, values) or held
+        return held
+
+    def both(self, item: Mapping[str, Any], values: Mapping[str, Any]) -> bool:
+        held = self.term(item, values)
+        while self.peek() == "AND":
+            self.take()
+            held = self.term(item, values) and held
+        return held
+
+    def term(self, item: Mapping[str, Any], values: Mapping[str, Any]) -> bool:
+        if self.peek() == "(":
+            self.take()
+            held = self.either(item, values)
+            assert self.take() == ")", "a bracket was not closed"
+            return held
+        name = self.take()
+        if self.peek() == "(":
+            self.take()
+            path = self.take()
+            assert self.take() == ")", "a bracket was not closed"
+            assert name in {"attribute_exists", "attribute_not_exists"}, name
+            return (path in item) == (name == "attribute_exists")
+        comparison = self.take()
+        assert comparison in COMPARISONS, comparison
+        left, right = self.number(name, item, values), self.number(self.take(), item, values)
+        if left is None or right is None:
+            return False
+        return COMPARISONS[comparison](left, right)
+
+    @staticmethod
+    def number(
+        token: str, item: Mapping[str, Any], values: Mapping[str, Any]
+    ) -> int | None:
+        """One side of a comparison: a placeholder or an attribute, as a whole number."""
+        source = values if token.startswith(":") else item
+        entry = source.get(token)
+        if not isinstance(entry, Mapping) or "N" not in entry:
+            return None
+        return int(entry["N"])
+
+
+def condition_holds(
+    expression: str, item: Mapping[str, Any], values: Mapping[str, Any]
+) -> bool:
+    """Whether DynamoDB would let an update with this condition through."""
+    reader = ConditionReader(expression)
+    held = reader.either(item, values)
+    assert reader.peek() is None, f"not read to the end: {expression}"
+    return held
+
+
+class FakeDynamoDB:
+    """The budget table: one item per key hash, and this handler's updates.
+
+    ``items`` is the table as it is now and can be changed between calls, the
+    way a CLI command would change it. Both expressions are executed, not
+    described: `apply_update` for the SET actions, `condition_holds` for the
+    condition.
+    """
+
+    def __init__(self, error: Exception | None = None, error_from_call: int = 1) -> None:
         self.items: dict[str, dict[str, Any]] = {}
         self.error = error
+        #: Which call starts failing. A table that only fails the second write
+        #: is how a repair that does not get through is tested.
+        self.error_from_call = error_from_call
         self.calls: list[dict[str, Any]] = []
 
     def update_item(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
-        if self.error:
+        if self.error and len(self.calls) >= self.error_from_call:
             raise self.error
-        assert kwargs["ConditionExpression"] == handler.BUDGET_CONDITION, "unknown condition"
         key = kwargs["Key"][handler.BUDGET_KEY_ATTRIBUTE]["S"]
-        before, values = self.items.get(key, {}), kwargs["ExpressionAttributeValues"]
-        if not self.passes(before, values):
+        before = self.items.get(key, {})
+        values = kwargs.get("ExpressionAttributeValues", {})
+        condition = kwargs.get("ConditionExpression")
+        if condition is not None and not condition_holds(condition, before, values):
             returned = before if kwargs.get("ReturnValuesOnConditionCheckFailure") == "ALL_OLD" else None
             raise conditional_check_failed(returned or None)
-        self.items[key] = apply_update(kwargs["UpdateExpression"], before, values)
-        return {}
-
-    @staticmethod
-    def passes(before: dict[str, Any], values: dict[str, Any]) -> bool:
-        """`handler.BUDGET_CONDITION`, spelled out. A missing attribute compares false."""
-        if "first_used_at" not in before:
-            return True
-        used = handler.budget_number(before, "questions_used")
-        limit = handler.budget_number(before, "question_limit")
-        expires = handler.budget_number(before, "expires_at")
-        if used is None or limit is None or expires is None:
-            return False
-        return used < limit and expires > int(values[":now"]["N"])
+        after = apply_update(kwargs["UpdateExpression"], before, values)
+        self.items[key] = after
+        return {"Attributes": after} if kwargs.get("ReturnValues") == "ALL_NEW" else {}
 
 
 class FakeClock:
@@ -674,6 +768,41 @@ def test_expired_keys_that_cannot_be_read_again_keep_working(
     assert len(aws["ssm"].calls) == 3
 
 
+def test_keys_deleted_from_the_store_stop_working_at_once(
+    aws: dict[str, Any], cold_start: FakeClock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An empty key path is an answer, not an outage.
+
+    Deleting every parameter under the path is how all workspaces are
+    retired at once. The store is readable and says there are no keys, so the
+    keys in hand are not old but gone. Treated as a failed read, they would
+    have gone on opening workspaces until a deploy wrote new ones — and the
+    five minutes the README promises would have meant nothing.
+    """
+    caplog.set_level(logging.INFO, logger="andur")
+    assert call(event())[0] == 200
+    aws["ssm"].pages = []
+    cold_start.advance(handler.KEY_CACHE_SECONDS)
+
+    status, body = call(event())
+    assert status == 500
+    assert body == {"error": NOT_CONFIGURED_MESSAGE}
+    assert handler._key_cache.keys == {}
+    assert not [line for line in log_lines(caplog) if line["event"] == "keys-reload-failed"]
+    # The caller reads the fixed sentence; the reason is in the log.
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "failed"]
+    assert line["status"] == 500 and "No usable workspace keys" in line["error"]
+
+    # And it stays refused: nothing old is left to fall back on.
+    assert call(event())[0] == 500
+
+
+def test_an_unreadable_store_and_an_empty_one_are_not_the_same_error() -> None:
+    """The stale path catches one and not the other; that is what the class is for."""
+    assert issubclass(handler.NoWorkspaceKeys, handler.ConfigurationError)
+    assert handler.NoWorkspaceKeys.status == 500
+
+
 def test_a_function_that_never_read_any_keys_lets_nobody_in(aws: dict[str, Any]) -> None:
     """There is nothing old to fall back on, so this stays a 500."""
     aws["ssm"].error = client_error("ThrottlingException", operation="GetParametersByPath")
@@ -918,10 +1047,14 @@ def test_the_budget_is_never_read_before_it_is_written(aws: dict[str, Any]) -> N
         "UpdateExpression",
         "ConditionExpression",
         "ExpressionAttributeValues",
+        "ReturnValues",
         "ReturnValuesOnConditionCheckFailure",
     }
     assert update["TableName"] == ENVIRONMENT["BUDGET_TABLE_NAME"]
     assert update["ReturnValuesOnConditionCheckFailure"] == "ALL_OLD"
+    # What the write itself wrote, not a read of its own: `ReturnValues` is
+    # answered from the update, costs no second call and no extra capacity.
+    assert update["ReturnValues"] == "ALL_NEW"
 
 
 def test_a_question_that_passed_the_budget_is_not_given_back(aws: dict[str, Any]) -> None:
@@ -993,6 +1126,142 @@ def test_the_update_writes_the_attributes_the_condition_and_the_table_watch() ->
     assert "first_used_at = " in handler.BUDGET_UPDATE_EXPRESSION
     assert "first_used_at" in handler.BUDGET_CONDITION
     assert handler.BUDGET_UPDATE_EXPRESSION.startswith("SET ")
+
+
+#: `handler.BUDGET_CONDITION` with one operator changed, the two changes that
+#: would cost real money: a key that gets an eleventh question, and a window
+#: that stays open one second past its end. Each is a single character.
+ONE_TOO_MANY = handler.BUDGET_CONDITION.replace(
+    "questions_used < question_limit", "questions_used <= question_limit"
+)
+ONE_SECOND_TOO_LONG = handler.BUDGET_CONDITION.replace("expires_at > :now", "expires_at >= :now")
+
+
+def test_a_condition_that_allowed_one_question_too_many_would_show_here(
+    aws: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The eleventh question is refused because of the string, not despite it.
+
+    With the real condition the eleventh question is a 402
+    (`test_the_tenth_question_goes_through_and_the_eleventh_does_not`). This
+    changes ``<`` to ``<=`` and nothing else, and the eleventh goes through —
+    which is what proves the tests are reading the condition the handler
+    sends rather than a copy of its meaning.
+    """
+    monkeypatch.setattr(handler, "BUDGET_CONDITION", ONE_TOO_MANY)
+    for asked in range(1, 11):
+        assert call(event())[0] == 200, f"question {asked}"
+    assert call(event())[0] == 200
+    assert number(budget_item(aws), "questions_used") == 11
+
+
+def test_a_condition_that_held_the_window_open_a_second_too_long_would_show_here(
+    aws: dict[str, Any], budget_clock: "FakeWallClock", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same for the other half: ``>`` against ``>=`` at the exact second."""
+    monkeypatch.setattr(handler, "BUDGET_CONDITION", ONE_SECOND_TOO_LONG)
+    assert call(event())[0] == 200
+    budget_clock.advance(48 * SECONDS_PER_HOUR)
+    assert call(event())[0] == 200
+
+
+def test_an_item_that_lost_an_attribute_does_not_lock_its_key_out(aws: dict[str, Any]) -> None:
+    """A half-written item costs one question and is repaired, not a key for a year.
+
+    ``question_limit`` gone, ``first_used_at`` there: in DynamoDB both sides
+    of the comparison are false, so before this the condition refused every
+    question this key would ever ask, until the TTL removed the item — 365
+    days by default. The message said nothing either, because there was no
+    limit in the item to name.
+    """
+    started = int(handler.wall_clock())
+    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
+        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+        "first_used_at": {"N": str(started)},
+        "questions_used": {"N": "3"},
+        "expires_at": {"N": str(started + 48 * SECONDS_PER_HOUR)},
+    }
+
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    assert number(item, "question_limit") == int(ENVIRONMENT["QUESTION_LIMIT"])
+    assert number(item, "questions_used") == 4
+
+
+def test_an_item_whose_own_window_outlasts_it_has_its_end_pushed_out(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """A seven-day window kept for one day would hand the key a fresh budget.
+
+    The item is what makes a spent key stay spent. Written by hand this way
+    (app/README.md warns about it, and nothing in DynamoDB checks it), the
+    item would disappear on day two with six days of its window left, and the
+    key would start over with ten questions. The counting write hands back
+    what it wrote, and the second write puts the end past the window.
+    """
+    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
+        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+        "window_seconds": {"N": str(7 * SECONDS_PER_DAY)},
+        "keep_seconds": {"N": str(SECONDS_PER_DAY)},
+    }
+    started = int(budget_clock())
+
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    end_of_the_item = started + 7 * SECONDS_PER_DAY + int(ENVIRONMENT["KEEP_DAYS"]) * SECONDS_PER_DAY
+    assert number(item, "expires_at") == started + 7 * SECONDS_PER_DAY
+    assert number(item, handler.BUDGET_TTL_ATTRIBUTE) == end_of_the_item
+    counted, repaired = aws["dynamodb"].calls
+    assert "ConditionExpression" in counted and "ConditionExpression" not in repaired
+
+
+def test_the_repair_holds_and_is_not_written_a_second_time(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """The counting update rewrites `delete_after` on every question.
+
+    So a repair that only raised `delete_after` would be undone by the next
+    question and written again by the next repair: two writes per question
+    for as long as the key lives, and an item left short whenever one of
+    those repairs is throttled. Raising ``keep_seconds`` with it is what
+    makes the counting update arrive at the same number by itself.
+    """
+    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
+        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+        "window_seconds": {"N": str(7 * SECONDS_PER_DAY)},
+        "keep_seconds": {"N": str(SECONDS_PER_DAY)},
+    }
+    started = int(budget_clock())
+    end_of_the_item = started + 7 * SECONDS_PER_DAY + int(ENVIRONMENT["KEEP_DAYS"]) * SECONDS_PER_DAY
+
+    assert call(event())[0] == 200
+    budget_clock.advance(SECONDS_PER_HOUR)
+    assert call(event())[0] == 200
+
+    item = budget_item(aws)
+    assert number(item, "expires_at") == started + 7 * SECONDS_PER_DAY
+    assert number(item, handler.BUDGET_TTL_ATTRIBUTE) == end_of_the_item
+    # Count, repair, count — and no repair behind the second question.
+    assert len(aws["dynamodb"].calls) == 3
+
+
+def test_a_repair_that_does_not_get_through_does_not_cost_the_answer(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The question is paid for by then, so a second write that fails goes to the log."""
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
+        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+        "window_seconds": {"N": str(7 * SECONDS_PER_DAY)},
+        "keep_seconds": {"N": str(SECONDS_PER_DAY)},
+    }
+    aws["dynamodb"].error = client_error("ThrottlingException", operation="UpdateItem")
+    aws["dynamodb"].error_from_call = 2
+
+    assert call(event())[0] == 200
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "budget-ttl-unrepaired"]
+    assert line["detail"] == "ClientError: ThrottlingException"
+
 
 
 # --- Retrieval and prompt ------------------------------------------------
@@ -1388,14 +1657,39 @@ def test_every_request_is_logged_with_its_workspace_and_never_with_the_question(
     assert KEYS["quillmoor"] not in caplog.text
 
 
-def test_bedrock_failure_details_go_to_the_log_not_the_body(
+def test_a_bedrock_failure_is_logged_by_its_code_and_never_by_its_message(
     aws: dict[str, Any], caplog: pytest.LogCaptureFixture
 ) -> None:
+    """A service message quotes what it choked on — for converse, the prompt.
+
+    The prompt carries the question and the passages behind it, out of a
+    company's documents. Which call failed and why is the error code; the
+    message adds nothing a person needs and everything that may not be kept.
+    """
     caplog.set_level(logging.INFO, logger="andur")
-    aws["bedrock-runtime"].error = client_error("AccessDeniedException", "arn:aws:bedrock:us-east-1:123456789012:thing")
+    aws["bedrock-runtime"].error = client_error(
+        "ValidationException", "malformed input near 'the secret plan' (arn:aws:bedrock:us-east-1:123456789012:thing)"
+    )
     _, body = call(event())
-    assert "123456789012" not in json.dumps(body)
-    assert any(line["event"] == "converse-failed" and "123456789012" in line["detail"] for line in log_lines(caplog))
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "converse-failed"]
+    assert line["detail"] == "ClientError: ValidationException"
+    assert "secret plan" not in caplog.text and "123456789012" not in caplog.text
+    assert "secret plan" not in json.dumps(body) and "123456789012" not in json.dumps(body)
+
+
+def test_a_retrieval_failure_is_logged_by_its_code_and_never_by_its_message(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The same for the search: a retrieve message can quote the question."""
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["bedrock-agent-runtime"].error = client_error(
+        "ValidationException", "bad query 'the secret plan' (arn:aws:bedrock:us-east-1:123456789012:thing)"
+    )
+    _, body = call(event())
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "retrieve-failed"]
+    assert line["detail"] == "ClientError: ValidationException"
+    assert "secret plan" not in caplog.text and "123456789012" not in caplog.text
+    assert "secret plan" not in json.dumps(body) and "123456789012" not in json.dumps(body)
 
 
 def test_a_crash_is_one_json_line_with_the_traceback_as_a_field(

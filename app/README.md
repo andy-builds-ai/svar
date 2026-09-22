@@ -6,8 +6,11 @@ asked, retrieves passages from the knowledge base with a `workspace` filter,
 asks the answering model to answer from those passages only, and returns the
 answer with its sources and the layer of each source.
 
-It has a Function URL, but that is not a way in: the URL is set to `AWS_IAM`
-and only CloudFront may invoke it, only for this stack's distribution.
+It has a Function URL, but that is not a way in from outside: the URL is set
+to `AWS_IAM`, and its resource policy names CloudFront alone, only for this
+stack's distribution. Inside the account a role with
+`lambda:InvokeFunctionUrl` can sign a call itself; the key, the workspace and
+the budget are checked in the function either way.
 Everything arrives through the web address — see *One address for everything*
 in the [main README](../README.md#one-address-for-everything).
 
@@ -75,11 +78,22 @@ In Git Bash on Windows, put `MSYS_NO_PATHCONV=1` in front of any command with
 Windows path and AWS rejects it.
 
 A deploy keeps existing keys. To replace one, delete the parameter and deploy
-again. The function keeps the keys it has read for 5 minutes
+again: every deploy calls the key generator once per workspace, so a
+parameter that is not there is created, and one that is there is left alone.
+(What makes the call happen is `DEPLOY_PROPERTY` in the stack — a custom
+resource whose properties never change is never called at all, and this way
+of ending a key would have left the workspace with no key rather than a new
+one.) The function keeps the keys it has read for 5 minutes
 (`KEY_CACHE_SECONDS`), so **a deleted or replaced key keeps working for up to
-5 minutes** — and longer if Parameter Store cannot be read at the moment the
+5 minutes** — and longer if Parameter Store cannot be *read* at the moment the
 5 minutes are up, because expired keys that cannot be replaced go on deciding
-rather than turning every request into a 500. To revoke a key at once, change
+rather than turning every request into a 500.
+
+An empty path is not that case. Delete every parameter under
+`/andur/api-keys` and the store still answers, it just has nothing to say: the
+function throws away the keys it holds and answers 500 until keys exist again
+(`NoWorkspaceKeys`). So retiring every workspace at once does take effect
+within the 5 minutes, outage or none. To revoke a single key at once, change
 the function after deleting it —
 every running instance is replaced, and the new ones read the keys fresh:
 
@@ -114,8 +128,8 @@ into a ticket without a key falling out of it. Each item holds:
 | `first_used_at` | When the window started, epoch seconds. |
 | `window_seconds` | How long the window is. Default `WINDOW_HOURS`. |
 | `expires_at` | `first_used_at + window_seconds`. |
-| `keep_seconds` | How long the item is kept. Default `KEEP_DAYS`. |
-| `delete_after` | `first_used_at + keep_seconds`; DynamoDB's TTL watches this. |
+| `keep_seconds` | How long the item is kept. Default `KEEP_DAYS`; raised to `window_seconds + KEEP_DAYS` if it would not outlast the window. |
+| `delete_after` | `first_used_at + keep_seconds`, raised past `expires_at` when that is not enough; DynamoDB's TTL watches this. |
 
 Checking and counting are one conditional write, so five questions arriving
 together cannot all see the same count and all pass:
@@ -123,8 +137,22 @@ together cannot all see the same count and all pass:
 ```
 ConditionExpression:
   attribute_not_exists(first_used_at)
-  OR (questions_used < question_limit AND expires_at > :now)
+  OR (
+       (attribute_not_exists(questions_used)
+        OR attribute_not_exists(question_limit)
+        OR questions_used < question_limit)
+       AND (attribute_not_exists(expires_at) OR expires_at > :now)
+     )
 ```
+
+The two `attribute_not_exists` in the middle are for an item that lost an
+attribute — a half-finished edit by hand. In DynamoDB a comparison against a
+missing attribute is false, not an error, so without them such an item made
+both sides of the `OR` false and the key was refused every question it would
+ever ask, until the TTL removed the item a year later. Letting that question
+through costs one question and repairs the item: the update writes the
+missing attribute from the defaults in the same call. While the item is whole
+the condition says exactly what it said before.
 
 **A question counts once it has passed the budget**, even if Bedrock then
 fails with a 502. Nothing is given back. That is one rule instead of two, and
@@ -171,9 +199,20 @@ aws dynamodb delete-item --region us-east-1 --table-name andur-key-budgets \
 `keep_seconds` has to outlast `window_seconds`: an item that disappears while
 its own window is still open would hand the key a fresh budget. The function
 checks that for **its own defaults** and refuses to start if they break the
-rule — it does not check an item somebody wrote by hand. That is why the set
-command above writes both numbers together, and why they are worth a second
-look before you paste it.
+rule. For an item written by hand it cannot check before the fact — a
+DynamoDB `SET` action takes two operands, so the update cannot write the
+later of the two numbers by itself. So it checks afterwards: the counting
+write hands back what it wrote, and if `delete_after` does not outlast
+`expires_at`, one more write raises **both** `keep_seconds` (to
+`window_seconds + KEEP_DAYS`) and `delete_after` (to `expires_at +
+KEEP_DAYS`). Raising `keep_seconds` is what makes it stick: the counting
+update rewrites `delete_after` from `keep_seconds` at every question, so a
+repair that touched only `delete_after` would be undone by the next question
+and written again by the next repair, for as long as the key lives. With both
+raised it happens once, for an item that is wrong; an ordinary question is
+still one write. The log line is `budget-ttl-repaired`, and it should appear
+once per item, never once per question. Writing both numbers together in the
+set command above is still the better way round.
 
 `expires_at` and `delete_after` are not yours to set. The function derives
 both from `first_used_at` plus the two lengths and rewrites them on every
@@ -295,11 +334,17 @@ The question is never logged, nor the key, nor its hash — with one
 exception: a `crashed` line carries a traceback, and an exception message
 inside it can quote what the code choked on.
 
-Bedrock and Parameter Store failures add a line with the full exception, a
-budget table that cannot be reached a `budget-unreadable` line, and a key
-shared by two workspaces a `duplicate-key` line. A failed reread of the keys
+A Bedrock failure adds a `retrieve-failed` or `converse-failed` line with
+the exception class and the AWS error code, never the service's own message:
+a message quotes what the call choked on, and for `converse` that is the
+prompt — the question and passages out of a company's documents. Parameter
+Store and the budget table do add the full exception (`keys-unreadable`,
+`budget-unreadable`); neither call carries a question. A key shared by two
+workspaces gives a `duplicate-key` line. A failed reread of the keys
 is a `keys-reload-failed` line, with `stale: true` when the keys were already
-past their five minutes and the old ones went on deciding. A bug is one
+past their five minutes and the old ones went on deciding. A key path that is
+readable and empty is not a failed reread: it ends the request as a `failed`
+line with status 500 and the path in its `error` field. A bug is one
 `crashed` line with the traceback in a field. The first line after a cold
 start names the boto3 and botocore versions of the runtime.
 
@@ -342,8 +387,10 @@ already have produced its answer, and a second attempt would pay for the
 input tokens again. A retried count can charge one question twice, which is
 the safe direction: the count runs ahead, never behind. The budget call waits
 the shortest of the four, since it sits in front of every question. Added up,
-the worst case is 135 seconds — Parameter Store counts twice, because an
-unknown key makes the function read the keys again before it answers 401. The
+the worst case is 151 seconds — Parameter Store counts twice, because an
+unknown key makes the function read the keys again before it answers 401, and
+the budget table counts twice, because an item whose own window outlasts it is
+put right with a second write. The
 function's timeout is 180, so a hanging Bedrock call still ends as a 502 with
 a reason, not as a bare timeout.
 

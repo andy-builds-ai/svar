@@ -16,9 +16,13 @@ One stack holds everything Andur needs:
 
 One address for everything. The page and the answer function sit behind the
 same distribution, so the page calls /ask on its own origin and there is no
-cross-origin request to allow. The function URL is set to AWS_IAM and is
-unreachable on its own: only CloudFront holds the permission to invoke it,
-and only for this distribution.
+cross-origin request to allow. The function URL is set to AWS_IAM, so an
+unsigned call to it is refused: the resource policy grants the CloudFront
+service principal alone, and only for this distribution. It is not a wall
+against this account — with AWS_IAM, a caller inside the account can be let
+through by its own identity policy, so any role here that holds
+``lambda:InvokeFunctionUrl`` can sign a call and reach the function past the
+distribution. Nobody outside can. The workspace key is checked either way.
 
 Nothing here runs while nobody asks: the function runs only while a question
 is in flight, the keys are free standard parameters, the budget table is
@@ -28,6 +32,7 @@ traffic many times over. What an idle month costs is storage, in cents.
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -122,6 +127,22 @@ WORKSPACES = ("quillmoor", "pellwick")
 #: ``<path>/<workspace>``.
 API_KEY_PARAMETER_PATH = "/andur/api-keys"
 
+#: The property that makes every deploy ask again whether a key is there.
+#:
+#: CloudFormation calls a custom resource only when its properties or its
+#: service token change. Both are constants for the key resources, so with
+#: nothing else in the properties a deploy would walk past the key generator
+#: without calling it — and the documented way to end a key (delete its
+#: parameter, deploy) would leave the workspace with no key at all rather than
+#: a new one. This value is the moment of the synthesis, so it differs on
+#: every `cdk synth` and the Update always runs.
+#:
+#: The price is that `cdk diff` reports this property as changed on every run,
+#: and two key functions are invoked per deploy. The call is a no-op while the
+#: parameter is there: ``ensure_key`` writes with ``Overwrite=False`` and
+#: throws its fresh key away when the store refuses.
+DEPLOY_PROPERTY = "SynthesisedAt"
+
 # --- Key budgets -----------------------------------------------------------
 # A key is not a password but an allowance: so many questions, and a window
 # that starts with the first one. The counter needs a store outside the
@@ -161,7 +182,7 @@ LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_14
 ANSWER_FUNCTION_NAME = "andur-answer"
 
 #: Longer than the handler's worst case (``worst_case_seconds`` in app/aws.py,
-#: 135 seconds, checked by a test), so a hanging Bedrock call ends as a 502
+#: 151 seconds, checked by a test), so a hanging Bedrock call ends as a 502
 #: with a reason. Far below the 15 minutes a Function URL call may take.
 ANSWER_TIMEOUT_SECONDS = 180
 
@@ -222,6 +243,46 @@ SITE_ROOT_DOCUMENT = "index.html"
 #: an answer that took longer would reach the browser as a 504 while the
 #: function ran it to the end. Answers take 0.7 to 3 seconds today.
 ORIGIN_RESPONSE_TIMEOUT_SECONDS = 120
+
+#: What the page is allowed to load and to reach, sent with every response.
+#:
+#: ``default-src 'none'`` is the floor: nothing loads unless a directive below
+#: allows it. The page needs exactly three things — its own script, its own
+#: stylesheet and a POST to its own origin — plus the empty ``data:`` icon in
+#: index.html, which is an image as far as the browser is concerned. No
+#: inline script and no inline style, so neither needs an exception; adding
+#: one to the page would break the page and not the rule.
+#:
+#: ``frame-ancestors 'none'`` is what keeps the page out of somebody else's
+#: frame, where a key typed into it would be typed into their page.
+#: ``form-action 'none'``: the one form is a form for the keyboard's sake —
+#: its submit is always intercepted, and nothing here posts a form anywhere.
+CONTENT_SECURITY_POLICY = "; ".join(
+    [
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+    ]
+)
+
+#: How long a browser is told to reach this address over HTTPS only. Two
+#: years is what the HSTS preload list asks for; the list itself is not asked
+#: for here, since the address is a CloudFront domain and not ours to submit.
+HSTS_MAX_AGE_DAYS = 730
+
+
+def synthesised_at() -> str:
+    """The moment of this synthesis, as a value for `DEPLOY_PROPERTY`.
+
+    Read by a human in a `cdk diff`, and different on every run — which is the
+    whole point: it is what makes CloudFormation call the key resources.
+    """
+    return datetime.now(timezone.utc).isoformat()
 
 
 def replacement_safe_name(
@@ -563,6 +624,12 @@ class AndurStack(Stack):
         small function (infra/api_keys/handler.py) generates each key and
         stores it; the CDK provider framework runs it as a custom resource and
         reports back to CloudFormation. An existing key survives every deploy.
+
+        Every deploy calls the function, because `DEPLOY_PROPERTY` changes
+        with each synthesis. That is what the documented way to end a key
+        rests on: delete the parameter, deploy, and the workspace gets a key
+        again — a new one, hashing differently, so the old key's budget item
+        no longer belongs to anybody.
         """
         log_group = self._create_log_group("ApiKeyFunctionLogs")
         role = iam.Role(
@@ -603,6 +670,7 @@ class AndurStack(Stack):
             on_event_handler=function,
             log_group=self._create_log_group("ApiKeyProviderLogs"),
         )
+        stamp = synthesised_at()
         return [
             CustomResource(
                 self,
@@ -612,6 +680,9 @@ class AndurStack(Stack):
                 properties={
                     "ParameterName": f"{API_KEY_PARAMETER_PATH}/{workspace}",
                     "ParameterPath": API_KEY_PARAMETER_PATH,
+                    # Without a property that changes, CloudFormation would
+                    # never call this resource again (`DEPLOY_PROPERTY`).
+                    DEPLOY_PROPERTY: stamp,
                 },
                 # CloudFormation otherwise waits an hour for a custom resource
                 # that never answers.
@@ -796,11 +867,21 @@ class AndurStack(Stack):
         credentials, and the only holder of a permission to invoke this URL is
         the CloudFront service principal, restricted to this stack's
         distribution (`_allow_cloudfront_to_invoke`, and the permission the
-        origin access control adds). Called directly the URL answers 403,
-        whatever key the call carries. Origin access control requires
-        ``AWS_IAM``: "To use OAC, you must specify AWS_IAM as the value for
-        the AuthType parameter" (CloudFront developer guide, "Restrict access
-        to an AWS Lambda function URL origin", read 17.09.2026).
+        origin access control adds). Called from outside the account the URL
+        answers 403, whatever key the call carries. Origin access control
+        requires ``AWS_IAM``: "To use OAC, you must specify AWS_IAM as the
+        value for the AuthType parameter" (CloudFront developer guide,
+        "Restrict access to an AWS Lambda function URL origin", read
+        17.09.2026).
+
+        Inside the account it is not a wall. AWS_IAM lets a caller in the
+        same account be authorised by its own identity policy, without the
+        resource policy saying anything: a role with ``lambda:*``, an
+        administrator, the deploy role, a CI profile, can sign a request and
+        reach the function directly — past the distribution, and so past
+        anything later put in front of it. What that skips is the front door,
+        not the lock: the workspace key, its workspace and its budget are
+        checked in the function, on every call, wherever it came from.
 
         The workspace key is no weaker for it — it is still the whole of what
         decides which workspace a question may read. It only travels one layer
@@ -839,6 +920,44 @@ class AndurStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,
         )
 
+    def _create_security_headers(self) -> cloudfront.ResponseHeadersPolicy:
+        """The headers every response carries, page and answer alike.
+
+        The distribution is the one place where these cost nothing: no code
+        runs for them, and neither origin has to set them — S3 would need
+        them stored per object, and the function would have to repeat them in
+        every reply. `CONTENT_SECURITY_POLICY` says what the page may load,
+        the rest closes the three doors a page that holds a key in
+        ``localStorage`` should not leave open: a downgrade to HTTP, a guess
+        at a content type, and an address leaking in a Referer header.
+
+        ``override=True`` on each: an origin that sends its own value does
+        not get to weaken these.
+        """
+        return cloudfront.ResponseHeadersPolicy(
+            self,
+            "SecurityHeaders",
+            comment="Andur: what the page may load, and how it must be reached.",
+            security_headers_behavior=cloudfront.ResponseSecurityHeadersBehavior(
+                content_security_policy=cloudfront.ResponseHeadersContentSecurityPolicy(
+                    content_security_policy=CONTENT_SECURITY_POLICY, override=True
+                ),
+                strict_transport_security=cloudfront.ResponseHeadersStrictTransportSecurity(
+                    access_control_max_age=Duration.days(HSTS_MAX_AGE_DAYS),
+                    include_subdomains=True,
+                    preload=False,
+                    override=True,
+                ),
+                content_type_options=cloudfront.ResponseHeadersContentTypeOptions(override=True),
+                referrer_policy=cloudfront.ResponseHeadersReferrerPolicy(
+                    referrer_policy=cloudfront.HeadersReferrerPolicy.NO_REFERRER, override=True
+                ),
+                frame_options=cloudfront.ResponseHeadersFrameOptions(
+                    frame_option=cloudfront.HeadersFrameOption.DENY, override=True
+                ),
+            ),
+        )
+
     def _create_distribution(
         self, site_bucket: s3.Bucket, function_url: lambda_.FunctionUrl
     ) -> cloudfront.Distribution:
@@ -859,6 +978,7 @@ class AndurStack(Stack):
         CloudFront's own, because the origin access control signs the request
         for the function URL's host.
         """
+        headers = self._create_security_headers()
         return cloudfront.Distribution(
             self,
             "SiteDistribution",
@@ -868,6 +988,7 @@ class AndurStack(Stack):
                 origin=origins.S3BucketOrigin.with_origin_access_control(site_bucket),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+                response_headers_policy=headers,
             ),
             additional_behaviors={
                 ASK_PATH: cloudfront.BehaviorOptions(
@@ -879,6 +1000,7 @@ class AndurStack(Stack):
                     allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
                     cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
                     origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                    response_headers_policy=headers,
                 )
             },
         )
@@ -1003,8 +1125,9 @@ class AndurStack(Stack):
             "FunctionUrl",
             value=self.function_url.url,
             description=(
-                "The function's own address. Not a way in: it is set to AWS_IAM and only "
-                f"CloudFront may invoke it. Ask through <WebUrl>{ASK_PATH}."
+                "The function's own address. Set to AWS_IAM: from outside this account "
+                "only CloudFront may invoke it, while a role in this account can sign a "
+                f"call itself. Ask through <WebUrl>{ASK_PATH}."
             ),
         )
         CfnOutput(

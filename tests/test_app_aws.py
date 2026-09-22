@@ -44,13 +44,16 @@ def test_the_budget_counter_waits_the_shortest() -> None:
 
 
 def test_worst_case_is_every_attempt_timing_out() -> None:
-    """ssm 2 × 22, budget 2 × (2 + 3) + 6, retrieve 2 × (3 + 10) + 6, converse 1 × (3 + 40).
+    """ssm 2 × 22, budget 2 × 16, retrieve 2 × (3 + 10) + 6, converse 1 × (3 + 40).
 
     Twice the keys, because an unknown key makes the handler read them again
-    before it answers 401; one call each for the other three.
+    before it answers 401. Twice the budget table, because an item whose own
+    window outlasts it is put right with a second write. One call each for
+    retrieve and converse.
     """
     assert aws.KEY_READS_PER_REQUEST == 2
-    assert aws.worst_case_seconds() == 2 * 22 + 16 + 32 + 43 == 135
+    assert aws.BUDGET_WRITES_PER_REQUEST == 2
+    assert aws.worst_case_seconds() == 2 * 22 + 2 * 16 + 32 + 43 == 151
 
 
 def test_clients_get_their_service_limits_and_are_made_once() -> None:

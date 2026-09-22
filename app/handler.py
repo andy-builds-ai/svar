@@ -207,6 +207,19 @@ class ConfigurationError(HandlerError):
         return NOT_CONFIGURED_MESSAGE
 
 
+class NoWorkspaceKeys(ConfigurationError):
+    """The key path is readable and holds no usable key.
+
+    A different thing from "the keys could not be read", and the difference
+    decides what a warm instance does with the keys it already has. Reading
+    failed means the keys in hand are only old, so they go on deciding
+    (`workspace_keys`). An empty path means they are *gone* — every parameter
+    under it was deleted, which is how every workspace's key is rotated at
+    once — and a key that no longer exists may not open anything. So this one
+    is never caught as a reason to keep using stale keys; it clears them.
+    """
+
+
 class RetrievalError(HandlerError):
     """The knowledge base could not be asked."""
 
@@ -465,7 +478,7 @@ def read_workspace_keys(path: str, region: str) -> dict[str, str]:
         log_event("duplicate-key", workspaces=sorted(shared))
         keys = {workspace: key for workspace, key in keys.items() if workspace not in shared}
     if not keys:
-        raise ConfigurationError(f"No usable workspace keys are stored under {path}.")
+        raise NoWorkspaceKeys(f"No usable workspace keys are stored under {path}.")
     return keys
 
 
@@ -488,9 +501,20 @@ clock: Callable[[], float] = time.monotonic
 
 
 def reload_workspace_keys(path: str, region: str) -> dict[str, str]:
-    """Read the keys now and keep them. When reading fails, nothing is kept."""
+    """Read the keys now and keep them.
+
+    When reading fails, nothing is kept — the keys in hand are old, not
+    wrong. When the path is readable and empty, the keys in hand are wrong:
+    they were deleted, and what is thrown away here is exactly what would
+    otherwise go on opening workspaces. The instance is then where a cold one
+    is, and answers 500 until keys exist again.
+    """
     _key_cache.tried_at = clock()
-    keys = read_workspace_keys(path, region)
+    try:
+        keys = read_workspace_keys(path, region)
+    except NoWorkspaceKeys:
+        _key_cache.keys, _key_cache.read_at = {}, None
+        raise
     _key_cache.keys, _key_cache.read_at = keys, clock()
     return keys
 
@@ -505,6 +529,11 @@ def workspace_keys(path: str, region: str) -> dict[str, str]:
     in hand are not wrong — only old. The price is that a key deleted during
     such an outage keeps working past its five minutes.
 
+    An empty key path is not that case and is not caught here
+    (`NoWorkspaceKeys`): the store answered, and its answer is that there are
+    no keys. Going on with the deleted ones would make the one way to retire
+    every key at once — delete the parameters — do nothing at all.
+
     A function that has never read any keys has nothing to fall back on. That
     stays a 500.
     """
@@ -515,6 +544,8 @@ def workspace_keys(path: str, region: str) -> dict[str, str]:
     if may_reload_keys():
         try:
             return reload_workspace_keys(path, region)
+        except NoWorkspaceKeys:
+            raise
         except ConfigurationError as error:
             log_event("keys-reload-failed", error=str(error), stale=True)
     return _key_cache.keys
@@ -564,6 +595,8 @@ def authorize(key: str, workspace: str, settings: Settings) -> None:
     if workspace_for_key(key, keys) is None and may_reload_keys():
         try:
             keys = reload_workspace_keys(path, region)
+        except NoWorkspaceKeys:
+            raise
         except ConfigurationError as error:
             log_event("keys-reload-failed", error=str(error), stale=False)
     check_access(key, workspace, keys)
@@ -614,14 +647,35 @@ BUDGET_UPDATE_EXPRESSION = (
 #: evaluates this on the item, so five requests at once cannot all read
 #: "nine used" and all go through.
 #:
-#: Both strings were run against the real table on 17.09.2026, 21:00: DynamoDB
-#: took the condition and the update, wrote the items and refused the eleventh
-#: question. So neither the attribute names nor `workspace` collide with a
-#: reserved word, and no placeholder needs an ``ExpressionAttributeNames``
-#: alias.
+#: An attribute that is not there is the reason for the two
+#: ``attribute_not_exists`` in the middle. In DynamoDB a comparison against a
+#: missing attribute is false, not an error, so an item that carries
+#: ``first_used_at`` but has lost ``questions_used`` or ``question_limit`` —
+#: a hand-written item, a half-finished edit — would make both sides of the
+#: OR false and refuse every question this key ever asks again, until the TTL
+#: removes the item a year later. Letting such a question through costs one
+#: question and repairs the item: the update writes the missing attribute
+#: from the defaults in the same call, and the next question is measured
+#: against it. The same for ``expires_at``.
+#:
+#: Nothing is loosened while the item is whole. With all three attributes
+#: present this says exactly what it said before: fewer questions used than
+#: allowed, and a window that has not closed.
+#:
+#: The update expression and the earlier, shorter form of this condition were
+#: run against the real table on 17.09.2026, 21:00: DynamoDB took both, wrote
+#: the items and refused the eleventh question. So neither the attribute names
+#: nor `workspace` collide with a reserved word, and no placeholder needs an
+#: ``ExpressionAttributeNames`` alias. This longer form adds no new name, only
+#: ``attribute_not_exists`` and brackets around what was already there.
 BUDGET_CONDITION = (
     "attribute_not_exists(first_used_at)"
-    " OR (questions_used < question_limit AND expires_at > :now)"
+    " OR ("
+    "(attribute_not_exists(questions_used)"
+    " OR attribute_not_exists(question_limit)"
+    " OR questions_used < question_limit)"
+    " AND (attribute_not_exists(expires_at) OR expires_at > :now)"
+    ")"
 )
 
 
@@ -680,6 +734,68 @@ def refused_item(exc: BaseException) -> Mapping[str, Any]:
     return item if isinstance(item, Mapping) else {}
 
 
+#: Pushes the item's own end past the end of its window, and makes that hold.
+#:
+#: Both operands are read after the counting update has written them, so
+#: ``window_seconds`` and ``expires_at`` are there; ``:keep`` is the deployed
+#: default, which `load_settings` has already proven to outlast the default
+#: window.
+#:
+#: ``keep_seconds`` is the half that makes this stick. Writing only
+#: ``delete_after`` would be undone by the very next question: the counting
+#: update writes ``delete_after`` unconditionally from ``keep_seconds``, so a
+#: too-short ``keep_seconds`` would pull it back every time and the repair
+#: would run again, two writes per question for as long as the key lives —
+#: and whichever question's repair was throttled would leave the item short.
+#: With ``keep_seconds`` set to the window plus the default, the counting
+#: update computes ``first_used_at + window_seconds + keep``, which is
+#: ``expires_at + keep``: the same number this writes, from then on by
+#: itself.
+BUDGET_TTL_REPAIR_EXPRESSION = (
+    "SET keep_seconds = window_seconds + :keep, delete_after = expires_at + :keep"
+)
+
+
+def keep_the_item_past_its_window(settings: Settings, key: str, item: Mapping[str, Any]) -> None:
+    """Make sure the item outlasts the window it carries, and say so when it did not.
+
+    An item is what makes a spent key stay spent. If it disappears while its
+    own window is still open, the key comes back with a full budget and the
+    window it was given means nothing — exactly what `load_settings` refuses
+    to start for the deployed defaults. It cannot refuse it for an item: an
+    operator writes ``window_seconds`` and ``keep_seconds`` by hand
+    (app/README.md), the two are not checked against each other anywhere in
+    DynamoDB, and a ``SET`` action takes two operands, so the update cannot
+    write the later of the two by itself.
+
+    So it is checked here, on what the update wrote back, and put right with
+    one more write. That write happens only for an item that is wrong, and
+    only once: it raises ``keep_seconds`` as well as ``delete_after``, so from
+    the next question on the counting update arrives at the same number on its
+    own and this does nothing. A normal question makes no second call.
+
+    The question is paid for by the time this runs, so nothing here may end
+    the request. A repair that does not get through goes to the log and the
+    answer goes out.
+    """
+    expires_at, delete_after = budget_number(item, "expires_at"), budget_number(item, "delete_after")
+    if expires_at is None or delete_after is None or delete_after > expires_at:
+        return
+    try:
+        client("dynamodb", settings.region).update_item(
+            TableName=settings.budget_table,
+            Key={BUDGET_KEY_ATTRIBUTE: {"S": key_hash(key)}},
+            UpdateExpression=BUDGET_TTL_REPAIR_EXPRESSION,
+            ExpressionAttributeValues={
+                ":keep": {"N": str(settings.keep_days * SECONDS_PER_DAY)}
+            },
+        )
+    except aws.botocore_errors() as exc:
+        log_event("budget-ttl-unrepaired", detail=aws.error_detail(exc))
+    else:
+        log_event("budget-ttl-repaired", expired_at=expires_at, deleted_after=delete_after)
+
+
 def charge_question(settings: Settings, workspace: str, key: str) -> None:
     """Count this question against the key's budget, or refuse it.
 
@@ -692,15 +808,21 @@ def charge_question(settings: Settings, workspace: str, key: str) -> None:
     A table that cannot be reached is a broken configuration, not a free pass.
     Without the counter there is no limit, and a key without a limit on a
     public URL is the thing the budget exists to prevent.
+
+    ``ALL_NEW`` costs no second call and no extra capacity — the write has
+    happened either way — and it is the only look this function gets at the
+    numbers an operator wrote into the item; `keep_the_item_past_its_window`
+    is what that look is for.
     """
     now = int(wall_clock())
     try:
-        client("dynamodb", settings.region).update_item(
+        written = client("dynamodb", settings.region).update_item(
             TableName=settings.budget_table,
             Key={BUDGET_KEY_ATTRIBUTE: {"S": key_hash(key)}},
             UpdateExpression=BUDGET_UPDATE_EXPRESSION,
             ConditionExpression=BUDGET_CONDITION,
             ExpressionAttributeValues=budget_values(settings, workspace, now),
+            ReturnValues="ALL_NEW",
             ReturnValuesOnConditionCheckFailure="ALL_OLD",
         )
     except aws.botocore_errors() as exc:
@@ -710,6 +832,8 @@ def charge_question(settings: Settings, workspace: str, key: str) -> None:
                 f"The key budget could not be counted: {aws.error_cause(exc)}."
             ) from exc
         raise BudgetSpent(spent_message(refused_item(exc), now)) from exc
+    attributes = written.get("Attributes") if isinstance(written, Mapping) else None
+    keep_the_item_past_its_window(settings, key, attributes if isinstance(attributes, Mapping) else {})
 
 
 # --- Retrieval -----------------------------------------------------------
@@ -736,7 +860,7 @@ def retrieve_passages(
             },
         )
     except aws.botocore_errors() as exc:
-        log_event("retrieve-failed", workspace=workspace, detail=repr(exc))
+        log_event("retrieve-failed", workspace=workspace, detail=aws.error_detail(exc))
         raise RetrievalError(f"The knowledge base could not be searched: {aws.error_cause(exc)}.") from exc
     return response.get("retrievalResults", [])
 
@@ -843,7 +967,7 @@ def ask_model(bedrock_runtime: Any, model_id: str, prompt: str) -> dict[str, Any
             inferenceConfig={"maxTokens": MAX_ANSWER_TOKENS},
         )
     except aws.botocore_errors() as exc:
-        log_event("converse-failed", model=model_id, detail=repr(exc))
+        log_event("converse-failed", model=model_id, detail=aws.error_detail(exc))
         cause = aws.error_cause(exc)
         if aws.error_code(exc) in {"AccessDeniedException", "AccessDenied"}:
             cause += " — the model may not be enabled for this account"

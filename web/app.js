@@ -24,6 +24,13 @@ const KEY_HEADER = "X-Andur-Key";
 const BODY_HASH_HEADER = "x-amz-content-sha256";
 const MAX_QUESTION_CHARACTERS = 1000;
 
+/* How long this page waits before it gives up on its own. CloudFront stops
+ * waiting for the function after 120 seconds and sends a 504, so in every
+ * ordinary case that answer arrives first and says more than this page could.
+ * This is for the case underneath it: a connection that neither answers nor
+ * fails, where without a limit the button would say "Asking…" forever. */
+const REQUEST_TIMEOUT_MS = 125000;
+
 /* What the page remembers between visits. The key lives here and nowhere
  * else: not in the address, not in a log line, not in this file. */
 const STORED_KEY = "andur.key";
@@ -110,8 +117,25 @@ async function ask(workspace, key, question) {
     [BODY_HASH_HEADER]: await bodyHash(body),
   };
 
-  const response = await fetch(ASK_PATH, { method: "POST", headers: headers, body: body });
-  const raw = await response.text();
+  // A request that hangs is ended by this page rather than left running: the
+  // controller aborts it, fetch rejects with an AbortError, and submit() turns
+  // that into a sentence. The timer is cleared whatever happens, so a fast
+  // answer leaves nothing behind.
+  const controller = new AbortController();
+  const giveUp = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+  let raw;
+  try {
+    response = await fetch(ASK_PATH, {
+      method: "POST",
+      headers: headers,
+      body: body,
+      signal: controller.signal,
+    });
+    raw = await response.text();
+  } finally {
+    window.clearTimeout(giveUp);
+  }
   let payload = null;
   try {
     payload = JSON.parse(raw);
@@ -205,8 +229,18 @@ function show(answer) {
 
 // --- One question, start to finish -----------------------------------------
 
+/* Whether a question is on its way. The disabled button is not enough: Enter
+ * in the question field submits the form directly, and a form can be submitted
+ * while its button is disabled. A second question would be charged against the
+ * same ten-question allowance and could come back out of order, so the answer
+ * on screen would not belong to the question in the field. */
+let asking = false;
+
 async function submit(event) {
   event.preventDefault();
+  if (asking) {
+    return;
+  }
 
   const workspace = workspaceField.value.trim();
   const key = keyField.value.trim();
@@ -235,6 +269,7 @@ async function submit(event) {
 
   clearMessage();
   result.hidden = true;
+  asking = true;
   working(true);
   try {
     const { status, payload } = await ask(workspace, key, question);
@@ -245,10 +280,18 @@ async function submit(event) {
     }
   } catch (problem) {
     // A dropped connection, an offline browser, a request the browser refused
-    // to make. The exception text is the browser's, never the key's.
-    say("The question did not get through: the connection failed. Check the network "
-      + "and ask again.", "error");
+    // to make, or the wait above running out. The exception text is the
+    // browser's, never the key's.
+    if (problem && problem.name === "AbortError") {
+      say("Nothing came back within " + Math.round(REQUEST_TIMEOUT_MS / 1000) + " seconds, so "
+        + "the page stopped waiting. The question may still be running; asking again costs "
+        + "another question of the key's allowance.", "error");
+    } else {
+      say("The question did not get through: the connection failed. Check the network "
+        + "and ask again.", "error");
+    }
   } finally {
+    asking = false;
     working(false);
   }
 }
