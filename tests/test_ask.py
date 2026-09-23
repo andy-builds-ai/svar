@@ -20,10 +20,26 @@ ASK_URL = WEB_URL + "/ask"
 ANSWER = {
     "answer": "Open Settings > Export [1].",
     "sources": [
-        {"number": 1, "file": "faq--03.md", "layer": "human", "workspace": "quillmoor", "score": 0.8147,
-         "words": 156, "cited": True, "excerpt": "..."},
-        {"number": 2, "file": "draft--01.md", "layer": "inbox", "workspace": "quillmoor", "score": 0.7,
-         "words": 22, "cited": False, "excerpt": "..."},
+        {
+            "number": 1,
+            "file": "faq--03.md",
+            "layer": "human",
+            "workspace": "quillmoor",
+            "score": 0.8147,
+            "words": 156,
+            "cited": True,
+            "excerpt": "...",
+        },
+        {
+            "number": 2,
+            "file": "draft--01.md",
+            "layer": "inbox",
+            "workspace": "quillmoor",
+            "score": 0.7,
+            "words": 22,
+            "cited": False,
+            "excerpt": "...",
+        },
     ],
     "layers": ["human"],
     "model": "nvidia.nemotron-super-3-120b",
@@ -97,11 +113,17 @@ def test_send_returns_the_error_body_of_a_refused_request(monkeypatch: pytest.Mo
         raise http_error(401, b'{"error": "The key is not valid."}')
 
     monkeypatch.setattr(urllib.request, "urlopen", refuse)
-    assert ask.send(ask.build_request(ASK_URL, KEY, "How?", "quillmoor")) == (401, {"error": "The key is not valid."})
+    assert ask.send(ask.build_request(ASK_URL, KEY, "How?", "quillmoor")) == (
+        401,
+        {"error": "The key is not valid."},
+    )
 
 
-def test_a_cloudfront_error_page_is_reported_as_what_came_instead(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_cloudfront_error_page_is_reported_as_what_came_instead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A 403 or 504 from CloudFront never passed through the function, so it has no sentence."""
+
     def refuse(*_: Any, **__: Any) -> Any:
         raise http_error(504, b"<!DOCTYPE HTML><html><head><title>ERROR</title>")
 
@@ -122,27 +144,38 @@ def test_send_wraps_a_body_that_is_not_json(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
 
-def test_send_falls_back_to_the_reason_for_an_empty_error_body(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_send_falls_back_to_the_reason_for_an_empty_error_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def empty(*_: Any, **__: Any) -> Any:
         raise http_error(429, b"")
 
     monkeypatch.setattr(urllib.request, "urlopen", empty)
-    assert ask.send(ask.build_request("https://x", KEY, "How?", "quillmoor")) == (429, {"error": "reason"})
+    assert ask.send(ask.build_request("https://x", KEY, "How?", "quillmoor")) == (
+        429,
+        {"error": "reason"},
+    )
 
 
 class FakeResponse(io.BytesIO):
     status = 200
 
 
-def test_send_reports_a_200_that_is_not_json_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *_, **__: FakeResponse(b"<html>proxy page</html>"))
+def test_send_reports_a_200_that_is_not_json_instead_of_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda *_, **__: FakeResponse(b"<html>proxy page</html>")
+    )
     assert ask.send(ask.build_request("https://x", KEY, "How?", "quillmoor")) == (
         200,
         {"error": "The response is not JSON: <html>proxy page</html>"},
     )
 
 
-def test_main_exits_1_on_a_200_without_an_answer(deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_exits_1_on_a_200_without_an_answer(
+    deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     deployed["response"] = (200, {"error": "The response is not JSON: <html>proxy page</html>"})
     assert ask.main(["How?", "--workspace", "quillmoor"]) == 1
     assert "HTTP 200: The response is not JSON" in capsys.readouterr().err
@@ -161,13 +194,21 @@ def test_answer_is_printed_with_layers_sources_and_usage() -> None:
     lines = ask.format_answer("quillmoor", ANSWER)
     assert lines[:3] == ["Answer (quillmoor):", "", "Open Settings > Export [1]."]
     assert "Layers cited: human" in lines
-    assert any("[1] cited" in line and "faq--03.md" in line and "156 words" in line for line in lines)
+    assert any(
+        "[1] cited" in line and "faq--03.md" in line and "156 words" in line for line in lines
+    )
     assert any("[2]" in line and "cited" not in line for line in lines)
     assert lines[-1] == "nvidia.nemotron-super-3-120b · 1900 tokens in, 131 out · 2820 ms"
 
 
 def test_an_answer_without_sources_says_so() -> None:
-    body = {**ANSWER, "sources": [], "layers": [], "model": None, "usage": {"input_tokens": 0, "output_tokens": 0}}
+    body = {
+        **ANSWER,
+        "sources": [],
+        "layers": [],
+        "model": None,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
     lines = ask.format_answer("pellwick", body)
     assert "Sources: none" in lines
     assert "Layers cited: none" in lines
@@ -189,9 +230,14 @@ def deployed(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return seen.get("response", (200, ANSWER))
 
     monkeypatch.setattr(ask, "client", fake_client)
-    monkeypatch.setattr(ask, "read_stack_outputs", lambda cloudformation, stack: {
-        ask.WEB_URL_OUTPUT: WEB_URL, "ApiKeyParameterPath": "/andur/api-keys",
-    })
+    monkeypatch.setattr(
+        ask,
+        "read_stack_outputs",
+        lambda cloudformation, stack: {
+            ask.WEB_URL_OUTPUT: WEB_URL,
+            "ApiKeyParameterPath": "/andur/api-keys",
+        },
+    )
     monkeypatch.setattr(ask, "send", fake_send)
     monkeypatch.delenv(ask.API_KEY_ENVIRONMENT_VARIABLE, raising=False)
     return seen
@@ -216,12 +262,16 @@ def test_the_function_url_output_is_not_what_the_script_asks(deployed: dict[str,
     assert "lambda-url" not in request.full_url
 
 
-def test_main_json_prints_the_raw_response(deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_json_prints_the_raw_response(
+    deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     assert ask.main(["How?", "--workspace", "quillmoor", "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == ANSWER
 
 
-def test_main_exits_1_on_a_refused_request(deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_exits_1_on_a_refused_request(
+    deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     deployed["response"] = (403, {"error": "This key does not open the workspace pellwick."})
     assert ask.main(["How?", "--workspace", "pellwick"]) == 1
     assert "HTTP 403: This key does not open the workspace pellwick." in capsys.readouterr().err
@@ -238,7 +288,9 @@ def test_key_from_the_environment_skips_parameter_store_and_stack(
     assert request.get_header(ask.KEY_HEADER.capitalize()) == "key-from-env"
 
 
-def test_main_exits_2_when_an_aws_step_fails(deployed: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_exits_2_when_an_aws_step_fails(
+    deployed: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     def expired(cloudformation: Any, stack: str) -> dict[str, str]:
         raise AwsProblem("the AWS login is missing or expired")
 

@@ -3,9 +3,8 @@
 import builtins
 from typing import Any
 
-import pytest
-
 import aws  # app/aws.py, imported by its Lambda name (tests/conftest.py)
+import pytest
 
 
 def client_error(code: str, message: str = "details", operation: str = "Converse") -> Exception:
@@ -30,11 +29,18 @@ def test_the_model_call_is_tried_once_everything_else_twice() -> None:
     assert aws.CLIENT_LIMITS["ssm"].attempts == 2
     assert aws.CLIENT_LIMITS["dynamodb"].attempts == 2
     assert aws.CLIENT_LIMITS["guardrail"].attempts == 2
-    assert set(aws.CLIENT_LIMITS) == {"ssm", "dynamodb", "bedrock-agent-runtime", "bedrock-runtime", "guardrail"}
+    assert set(aws.CLIENT_LIMITS) == {
+        "ssm",
+        "dynamodb",
+        "bedrock-agent-runtime",
+        "bedrock-runtime",
+        "guardrail",
+    }
 
 
 def test_the_excerpt_guardrail_is_a_bedrock_runtime_client_with_short_limits() -> None:
-    """ApplyGuardrail is a bedrock-runtime call; under the model's 40 seconds the worst case would pass 180."""
+    """ApplyGuardrail is a bedrock-runtime call; under the model's 40 seconds the worst case
+    would pass 180."""
     assert aws.SERVICE_OF_CLIENT == {"guardrail": "bedrock-runtime"}
     guard = aws.CLIENT_LIMITS["guardrail"]
     assert guard.connect_timeout + guard.read_timeout == 7
@@ -45,14 +51,16 @@ def test_the_budget_counter_waits_the_shortest() -> None:
     counter = aws.CLIENT_LIMITS["dynamodb"]
     assert counter.connect_timeout + counter.read_timeout == 5
     assert all(
-        counter.connect_timeout + counter.read_timeout < limits.connect_timeout + limits.read_timeout
+        counter.connect_timeout + counter.read_timeout
+        < limits.connect_timeout + limits.read_timeout
         for service, limits in aws.CLIENT_LIMITS.items()
         if service != "dynamodb"
     )
 
 
 def test_worst_case_is_every_attempt_timing_out() -> None:
-    """ssm 2 × 22, budget 2 × 16, retrieve 2 × (3 + 10) + 6, converse 1 × (3 + 40), excerpts 2 × (2 + 5) + 6.
+    """ssm 2 × 22, budget 2 × 16, retrieve 2 × (3 + 10) + 6, converse 1 × (3 + 40),
+    excerpts 2 × (2 + 5) + 6.
 
     Twice the keys, because an unknown key makes the handler read them again
     before it answers 401. Twice the budget table, because an item whose own
@@ -70,7 +78,10 @@ def test_clients_get_their_service_limits_and_are_made_once() -> None:
         made = aws.client(service, "us-east-1")
         assert made.meta.config.connect_timeout == limits.connect_timeout
         assert made.meta.config.read_timeout == limits.read_timeout
-        assert made.meta.config.retries == {"mode": "standard", "total_max_attempts": limits.attempts}
+        assert made.meta.config.retries == {
+            "mode": "standard",
+            "total_max_attempts": limits.attempts,
+        }
         assert aws.client(service, "us-east-1") is made
         assert made.meta.service_model.service_name == aws.SERVICE_OF_CLIENT.get(service, service)
 
@@ -117,12 +128,16 @@ def test_error_cause_for_timeouts_and_unreachable_endpoints() -> None:
     exceptions = pytest.importorskip("botocore.exceptions")
     assert "timeout" in aws.error_cause(exceptions.ReadTimeoutError(endpoint_url="https://x"))
     assert "timeout" in aws.error_cause(exceptions.ConnectTimeoutError(endpoint_url="https://x"))
-    assert "could not be reached" in aws.error_cause(exceptions.EndpointConnectionError(endpoint_url="https://x"))
+    assert "could not be reached" in aws.error_cause(
+        exceptions.EndpointConnectionError(endpoint_url="https://x")
+    )
 
 
 def test_error_cause_never_repeats_the_message() -> None:
     """AWS messages carry ARNs, and ARNs the account id."""
-    error = client_error("AccessDeniedException", "User: arn:aws:sts::123456789012:assumed-role/x is not authorized")
+    error = client_error(
+        "AccessDeniedException", "User: arn:aws:sts::123456789012:assumed-role/x is not authorized"
+    )
     assert "123456789012" not in aws.error_cause(error)
 
 

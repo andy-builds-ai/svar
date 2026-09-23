@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +26,6 @@ from aws_cdk import (
     custom_resources as cr,
 )
 from constructs import Construct
-
 
 #: Titan Text Embeddings V2. The model id is part of the Bedrock ARN.
 EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
@@ -68,26 +67,41 @@ DENIED_TOPICS = (
         "Legal advice",
         "Requests for advice on a legal matter: rights, contracts, liability, disputes, lawsuits, "
         "or what the law requires a person or a business to do.",
-        ["Can I sue my landlord over this?", "Is this non-compete clause enforceable?",
-         "What are my rights if I am dismissed?"],
+        [
+            "Can I sue my landlord over this?",
+            "Is this non-compete clause enforceable?",
+            "What are my rights if I am dismissed?",
+        ],
     ),
     (
         "Tax advice",
         "Requests for advice on taxes: how to file, declare, deduct, reduce or avoid tax, "
         "or how tax law applies to a person or a business.",
-        ["Can I deduct my home office from my taxes?", "How do I pay less VAT?",
-         "Do I have to declare this income?"],
+        [
+            "Can I deduct my home office from my taxes?",
+            "How do I pay less VAT?",
+            "Do I have to declare this income?",
+        ],
     ),
     (
         "Medical advice",
-        "Requests for advice on health: symptoms, diagnoses, treatments, medicines or doses for a person.",
-        ["What should I take for a headache?", "Is this rash serious?", "How much ibuprofen can I take?"],
+        "Requests for advice on health: symptoms, diagnoses, treatments, medicines or doses "
+        "for a person.",
+        [
+            "What should I take for a headache?",
+            "Is this rash serious?",
+            "How much ibuprofen can I take?",
+        ],
     ),
     (
         "People outside the documents",
-        "Questions about celebrities, politicians or other public figures, or about the private life, "
-        "family, health, beliefs or home of a named person.",
-        ["Who is the richest person in the world?", "Is our CEO married?", "Where does my colleague live?"],
+        "Questions about celebrities, politicians or other public figures, or about the "
+        "private life, family, health, beliefs or home of a named person.",
+        [
+            "Who is the richest person in the world?",
+            "Is our CEO married?",
+            "Where does my colleague live?",
+        ],
     ),
 )
 
@@ -98,10 +112,12 @@ RELEVANCE_THRESHOLD = 0.7
 
 BLOCKED_INPUT_MESSAGE = (
     "Andur answers questions about this company's documents. It does not give legal, tax or "
-    "medical advice, and it does not answer questions about people's private lives or public figures."
+    "medical advice, and it does not answer questions about people's private lives or public "
+    "figures."
 )
 BLOCKED_OUTPUT_MESSAGE = (
-    "Andur withheld this answer: the documents do not carry it, or it strays into advice Andur does not give."
+    "Andur withheld this answer: the documents do not carry it, or it strays into advice "
+    "Andur does not give."
 )
 
 EXCERPT_GUARDRAIL_NAME = "andur-excerpt-guardrail"
@@ -126,7 +142,9 @@ def masking_policy() -> bedrock.CfnGuardrail.SensitiveInformationPolicyConfigPro
         ]
     )
 
-#: USD per 1,000 tokens or guardrail text units, us-east-1, standard tier: aws.amazon.com/bedrock/pricing.
+
+#: USD per 1,000 tokens or guardrail text units, us-east-1, standard tier:
+#: aws.amazon.com/bedrock/pricing.
 PRICE_DATE = "2026-09-23"
 PRICE_INPUT_PER_1K_TOKENS = "0.00015"
 PRICE_OUTPUT_PER_1K_TOKENS = "0.00065"
@@ -198,7 +216,7 @@ HSTS_MAX_AGE_DAYS = 730
 
 def synthesised_at() -> str:
     """The moment of this synthesis, as a value for `DEPLOY_PROPERTY`."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def replacement_safe_name(
@@ -289,9 +307,7 @@ class AndurStack(Stack):
             lifecycle_rules=[
                 s3.LifecycleRule(
                     id="ExpireOldVersions",
-                    noncurrent_version_expiration=Duration.days(
-                        NONCURRENT_VERSION_RETENTION_DAYS
-                    ),
+                    noncurrent_version_expiration=Duration.days(NONCURRENT_VERSION_RETENTION_DAYS),
                 )
             ],
             removal_policy=RemovalPolicy.RETAIN,
@@ -339,7 +355,9 @@ class AndurStack(Stack):
             self,
             "KnowledgeBaseRole",
             role_name="AmazonBedrockExecutionRoleForKnowledgeBase_Andur",
-            description="Lets Bedrock Knowledge Bases read Andur documents and write Andur vectors.",
+            description=(
+                "Lets Bedrock Knowledge Bases read Andur documents and write Andur vectors."
+            ),
             assumed_by=iam.ServicePrincipal(
                 "bedrock.amazonaws.com",
                 conditions={
@@ -446,7 +464,9 @@ class AndurStack(Stack):
             self,
             "DocumentsDataSource",
             name=DATA_SOURCE_NAME,
-            description=f"All workspaces under the {WORKSPACE_PREFIX} prefix of the documents bucket.",
+            description=(
+                f"All workspaces under the {WORKSPACE_PREFIX} prefix of the documents bucket."
+            ),
             knowledge_base_id=knowledge_base.attr_knowledge_base_id,
             data_deletion_policy="DELETE",
             data_source_configuration=bedrock.CfnDataSource.DataSourceConfigurationProperty(
@@ -542,7 +562,10 @@ class AndurStack(Stack):
     @property
     def api_key_path_arn(self) -> str:
         """The ARN of the key path; a key is this plus ``/<workspace>``."""
-        return f"arn:{Aws.PARTITION}:ssm:{Aws.REGION}:{Aws.ACCOUNT_ID}:parameter{API_KEY_PARAMETER_PATH}"
+        return (
+            f"arn:{Aws.PARTITION}:ssm:{Aws.REGION}:{Aws.ACCOUNT_ID}"
+            f":parameter{API_KEY_PARAMETER_PATH}"
+        )
 
     # --- Key budgets -----------------------------------------------------
 
@@ -578,7 +601,8 @@ class AndurStack(Stack):
     def _guardrail_with_version(
         self, construct_id: str, label: str, properties: dict[str, Any]
     ) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
-        """A guardrail from ``properties``, and a numbered version that follows every one of them."""
+        """A guardrail from ``properties``, and a numbered version that follows every one of
+        them."""
         resolved = json.dumps(self.resolve(properties), sort_keys=True)
         digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
         guardrail = bedrock.CfnGuardrail(self, construct_id, **properties)
@@ -597,7 +621,10 @@ class AndurStack(Stack):
             "answer",
             {
                 "name": GUARDRAIL_NAME,
-                "description": "Andur: refuses advice topics, masks personal details, withholds ungrounded answers.",
+                "description": (
+                    "Andur: refuses advice topics, masks personal details, withholds "
+                    "ungrounded answers."
+                ),
                 "blocked_input_messaging": BLOCKED_INPUT_MESSAGE,
                 "blocked_outputs_messaging": BLOCKED_OUTPUT_MESSAGE,
                 "topic_policy_config": bedrock.CfnGuardrail.TopicPolicyConfigProperty(
@@ -616,13 +643,19 @@ class AndurStack(Stack):
                     ]
                 ),
                 "sensitive_information_policy_config": masking_policy(),
-                "contextual_grounding_policy_config": bedrock.CfnGuardrail.ContextualGroundingPolicyConfigProperty(
+                "contextual_grounding_policy_config": bedrock.CfnGuardrail.ContextualGroundingPolicyConfigProperty(  # noqa: E501
                     filters_config=[
                         bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
-                            type="GROUNDING", threshold=GROUNDING_THRESHOLD, action="BLOCK", enabled=True
+                            type="GROUNDING",
+                            threshold=GROUNDING_THRESHOLD,
+                            action="BLOCK",
+                            enabled=True,
                         ),
                         bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
-                            type="RELEVANCE", threshold=RELEVANCE_THRESHOLD, action="BLOCK", enabled=True
+                            type="RELEVANCE",
+                            threshold=RELEVANCE_THRESHOLD,
+                            action="BLOCK",
+                            enabled=True,
                         ),
                     ]
                 ),
@@ -662,7 +695,9 @@ class AndurStack(Stack):
         return iam.Role(
             self,
             "AnswerFunctionRole",
-            description="Lets the Andur answer function read keys, retrieve, invoke the model and log.",
+            description=(
+                "Lets the Andur answer function read keys, retrieve, invoke the model and log."
+            ),
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             inline_policies={
                 "ReadApiKeys": iam.PolicyDocument(
@@ -709,7 +744,10 @@ class AndurStack(Stack):
                         iam.PolicyStatement(
                             sid="ApplyAnswerGuardrail",
                             actions=["bedrock:ApplyGuardrail"],
-                            resources=[guardrail.attr_guardrail_arn, excerpt_guardrail.attr_guardrail_arn],
+                            resources=[
+                                guardrail.attr_guardrail_arn,
+                                excerpt_guardrail.attr_guardrail_arn,
+                            ],
                         ),
                     ]
                 ),
@@ -942,13 +980,18 @@ class AndurStack(Stack):
             self,
             "ApiKeyParameterPath",
             value=API_KEY_PARAMETER_PATH,
-            description="Parameter Store path of the workspace keys: <path>/<workspace>, SecureString.",
+            description=(
+                "Parameter Store path of the workspace keys: <path>/<workspace>, SecureString."
+            ),
         )
         CfnOutput(
             self,
             "GuardrailVersion",
             value=self.guardrail_version.ref,
-            description="The guardrail on every answer and the version the function uses, as <id>|<version>.",
+            description=(
+                "The guardrail on every answer and the version the function uses, "
+                "as <id>|<version>."
+            ),
         )
         CfnOutput(
             self,
@@ -960,5 +1003,7 @@ class AndurStack(Stack):
             self,
             "BudgetTableName",
             value=self.budget_table.table_name,
-            description="One item per key, found by the SHA-256 of the key: questions used, window, expiry.",
+            description=(
+                "One item per key, found by the SHA-256 of the key: questions used, window, expiry."
+            ),
         )

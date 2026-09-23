@@ -253,7 +253,9 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             raise ConfigurationError(f"The environment variable {variable} is not set.")
         values[name] = value
 
-    number_of_results = whole_number("NUMBER_OF_RESULTS", values["number_of_results"], 1, MAX_RESULTS)
+    number_of_results = whole_number(
+        "NUMBER_OF_RESULTS", values["number_of_results"], 1, MAX_RESULTS
+    )
     question_limit = whole_number("QUESTION_LIMIT", values["question_limit"], 1, MAX_QUESTION_LIMIT)
     window_hours = whole_number("WINDOW_HOURS", values["window_hours"], 1, MAX_WINDOW_HOURS)
     keep_days = whole_number("KEEP_DAYS", values["keep_days"], 1, MAX_KEEP_DAYS)
@@ -276,7 +278,9 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         input_tokens=price("PRICE_INPUT_PER_1K_TOKENS", values["price_input_tokens"]),
         output_tokens=price("PRICE_OUTPUT_PER_1K_TOKENS", values["price_output_tokens"]),
         topic_units=price("PRICE_TOPIC_PER_1K_UNITS", values["price_topic_units"]),
-        sensitive_information_units=price("PRICE_PII_PER_1K_UNITS", values["price_sensitive_information_units"]),
+        sensitive_information_units=price(
+            "PRICE_PII_PER_1K_UNITS", values["price_sensitive_information_units"]
+        ),
         grounding_units=price("PRICE_GROUNDING_PER_1K_UNITS", values["price_grounding_units"]),
     )
 
@@ -407,7 +411,12 @@ def shared_key_workspaces(keys: Mapping[str, str]) -> set[str]:
     owners: dict[str, list[str]] = {}
     for workspace, key in keys.items():
         owners.setdefault(key, []).append(workspace)
-    return {workspace for workspaces in owners.values() if len(workspaces) > 1 for workspace in workspaces}
+    return {
+        workspace
+        for workspaces in owners.values()
+        if len(workspaces) > 1
+        for workspace in workspaces
+    }
 
 
 def read_workspace_keys(path: str, region: str) -> dict[str, str]:
@@ -421,7 +430,9 @@ def read_workspace_keys(path: str, region: str) -> dict[str, str]:
             parameters.extend(page.get("Parameters", []))
     except aws.botocore_errors() as exc:
         log_event("keys-unreadable", detail=repr(exc))
-        raise ConfigurationError(f"The workspace keys could not be read: {aws.error_cause(exc)}.") from exc
+        raise ConfigurationError(
+            f"The workspace keys could not be read: {aws.error_cause(exc)}."
+        ) from exc
 
     keys = keys_by_workspace(parameters, path)
     shared = shared_key_workspaces(keys)
@@ -592,7 +603,10 @@ BUDGET_TTL_REPAIR_EXPRESSION = (
 
 def keep_the_item_past_its_window(settings: Settings, key: str, item: Mapping[str, Any]) -> None:
     """Make sure the item outlasts the window it carries, and say so when it did not."""
-    expires_at, delete_after = budget_number(item, "expires_at"), budget_number(item, "delete_after")
+    expires_at, delete_after = (
+        budget_number(item, "expires_at"),
+        budget_number(item, "delete_after"),
+    )
     if expires_at is None or delete_after is None or delete_after > expires_at:
         return
     try:
@@ -600,9 +614,7 @@ def keep_the_item_past_its_window(settings: Settings, key: str, item: Mapping[st
             TableName=settings.budget_table,
             Key={BUDGET_KEY_ATTRIBUTE: {"S": key_hash(key)}},
             UpdateExpression=BUDGET_TTL_REPAIR_EXPRESSION,
-            ExpressionAttributeValues={
-                ":keep": {"N": str(settings.keep_days * SECONDS_PER_DAY)}
-            },
+            ExpressionAttributeValues={":keep": {"N": str(settings.keep_days * SECONDS_PER_DAY)}},
         )
     except aws.botocore_errors() as exc:
         log_event("budget-ttl-unrepaired", detail=aws.error_detail(exc))
@@ -631,7 +643,9 @@ def charge_question(settings: Settings, workspace: str, key: str) -> None:
             ) from exc
         raise BudgetSpent(spent_message(refused_item(exc), now)) from exc
     attributes = written.get("Attributes") if isinstance(written, Mapping) else None
-    keep_the_item_past_its_window(settings, key, attributes if isinstance(attributes, Mapping) else {})
+    keep_the_item_past_its_window(
+        settings, key, attributes if isinstance(attributes, Mapping) else {}
+    )
 
 
 # --- Retrieval -----------------------------------------------------------
@@ -643,7 +657,11 @@ def workspace_filter(workspace: str) -> dict[str, Any]:
 
 
 def retrieve_passages(
-    agent_runtime: Any, knowledge_base_id: str, question: str, workspace: str, number_of_results: int
+    agent_runtime: Any,
+    knowledge_base_id: str,
+    question: str,
+    workspace: str,
+    number_of_results: int,
 ) -> list[dict[str, Any]]:
     """Ask the knowledge base for the passages that best match the question, in one workspace."""
     try:
@@ -659,13 +677,20 @@ def retrieve_passages(
         )
     except aws.botocore_errors() as exc:
         log_event("retrieve-failed", workspace=workspace, detail=aws.error_detail(exc))
-        raise RetrievalError(f"The knowledge base could not be searched: {aws.error_cause(exc)}.") from exc
+        raise RetrievalError(
+            f"The knowledge base could not be searched: {aws.error_cause(exc)}."
+        ) from exc
     return response.get("retrievalResults", [])
 
 
-def keep_workspace(results: Sequence[Mapping[str, Any]], workspace: str) -> tuple[list[Mapping[str, Any]], int]:
-    """Drop every passage whose workspace is not the requested one; return what is left and how many went."""
-    kept = [result for result in results if result.get("metadata", {}).get("workspace") == workspace]
+def keep_workspace(
+    results: Sequence[Mapping[str, Any]], workspace: str
+) -> tuple[list[Mapping[str, Any]], int]:
+    """Drop every passage whose workspace is not the requested one; return what is left and
+    how many went."""
+    kept = [
+        result for result in results if result.get("metadata", {}).get("workspace") == workspace
+    ]
     return kept, len(results) - len(kept)
 
 
@@ -715,7 +740,7 @@ Rules:
 - Cite the sources behind every statement by their numbers in square brackets, like [1] or [2][3]. Cite only sources the statement is taken from.
 - Write only the answer. Do not describe, compare or list the sources, and do not mention sources that were not used.
 - If the sources do not answer the question, reply with exactly this sentence and nothing else: {NOT_IN_SOURCES_ANSWER}
-- Answer in the language of the question, in a few sentences."""
+- Answer in the language of the question, in a few sentences."""  # noqa: E501
 
 
 def capped(text: str) -> str:
@@ -729,7 +754,8 @@ def capped(text: str) -> str:
 def build_sources(results: Sequence[Mapping[str, Any]]) -> str:
     """Every passage under its number, layer and file, after a ``Sources:`` line."""
     blocks = [
-        f"[{number}] layer: {result.get('metadata', {}).get('layer', 'unknown')} | file: {file_name(result)}\n"
+        f"[{number}] layer: {result.get('metadata', {}).get('layer', 'unknown')} "
+        f"| file: {file_name(result)}\n"
         f"{capped(passage_text(result))}"
         for number, result in enumerate(results, start=1)
     ]
@@ -739,7 +765,11 @@ def build_sources(results: Sequence[Mapping[str, Any]]) -> str:
 def build_content(question: str, results: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """The user message as three content blocks: sources, a label, the question."""
     return [
-        {"guardContent": {"text": {"text": build_sources(results), "qualifiers": ["grounding_source"]}}},
+        {
+            "guardContent": {
+                "text": {"text": build_sources(results), "qualifiers": ["grounding_source"]}
+            }
+        },
         {"text": "\n\nQuestion:"},
         {"guardContent": {"text": {"text": question, "qualifiers": ["query", "guard_content"]}}},
     ]
@@ -748,9 +778,11 @@ def build_content(question: str, results: Sequence[Mapping[str, Any]]) -> list[d
 # --- Answering model -----------------------------------------------------
 
 
-def ask_model(bedrock_runtime: Any, settings: Settings, content: list[dict[str, Any]]) -> dict[str, Any]:
-    """Send the system rules and the message to the model through the guardrail; return Bedrock's raw
-    response."""
+def ask_model(
+    bedrock_runtime: Any, settings: Settings, content: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Send the system rules and the message to the model through the guardrail; return
+    Bedrock's raw response."""
     try:
         return bedrock_runtime.converse(
             modelId=settings.model_id,
@@ -804,7 +836,8 @@ PRICED_UNITS = {
 
 
 def guardrail_assessments(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """Every assessment in the guardrail trace: the one of the input, then each one of the output."""
+    """Every assessment in the guardrail trace: the one of the input, then each one of the
+    output."""
     trace = response.get("trace", {}).get("guardrail", {})
     found = list(trace.get("inputAssessment", {}).values())
     for assessments in trace.get("outputAssessments", {}).values():
@@ -818,7 +851,9 @@ def read_guardrail(response: Mapping[str, Any]) -> dict[str, Any]:
     masked: list[str] = []
     scores: dict[str, float | None] = {"grounding_score": None, "relevance_score": None}
     units: dict[str, int] | None = None
-    input_assessments = list(response.get("trace", {}).get("guardrail", {}).get("inputAssessment", {}).values())
+    input_assessments = list(
+        response.get("trace", {}).get("guardrail", {}).get("inputAssessment", {}).values()
+    )
     question_refused = any(
         topic.get("action") == "BLOCKED"
         for assessment in input_assessments
@@ -854,11 +889,20 @@ def read_guardrail(response: Mapping[str, Any]) -> dict[str, Any]:
     else:
         action = "none"
     policies = list(dict.fromkeys(blocked + masked))
-    return {"action": action, "policies": policies, **scores, "units": units, "question_refused": question_refused}
+    return {
+        "action": action,
+        "policies": policies,
+        **scores,
+        "units": units,
+        "question_refused": question_refused,
+    }
 
 
-def mask_excerpts(guardrail_client: Any, settings: Settings, sources: list[dict[str, Any]]) -> dict[str, Any]:
-    """Mask the personal details in the sources' excerpts, in place; return what was masked and its units."""
+def mask_excerpts(
+    guardrail_client: Any, settings: Settings, sources: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Mask the personal details in the sources' excerpts, in place; return what was masked and
+    its units."""
     if not sources:
         return {"policies": [], "units": 0}
     try:
@@ -888,7 +932,11 @@ def mask_excerpts(guardrail_client: Any, settings: Settings, sources: list[dict[
     if action == "NONE":
         return counted
     outputs = response.get("outputs", [])
-    masked = outputs[0].get("text", "").split("\n") if action == "GUARDRAIL_INTERVENED" and len(outputs) == 1 else []
+    masked = (
+        outputs[0].get("text", "").split("\n")
+        if action == "GUARDRAIL_INTERVENED" and len(outputs) == 1
+        else []
+    )
     if len(masked) != len(sources):
         log_event(
             "excerpt-guard-unusable",
@@ -900,13 +948,14 @@ def mask_excerpts(guardrail_client: Any, settings: Settings, sources: list[dict[
         for source in sources:
             source["excerpt"] = None
         return counted
-    for source, text in zip(sources, masked):
+    for source, text in zip(sources, masked, strict=True):
         source["excerpt"] = text
     return counted
 
 
 def add_units(units: Mapping[str, int] | None, excerpt_units: int | None) -> dict[str, int] | None:
-    """The answer's guardrail units plus the excerpt guardrail's PII units; None when either is unknown."""
+    """The answer's guardrail units plus the excerpt guardrail's PII units; None when either is
+    unknown."""
     if units is None or excerpt_units is None:
         return None
     total = dict(units)
@@ -914,15 +963,21 @@ def add_units(units: Mapping[str, int] | None, excerpt_units: int | None) -> dic
     return total
 
 
-def answer_cost(prices: Prices, usage: Mapping[str, int], units: Mapping[str, int] | None) -> float | None:
-    """What one answer cost in USD: model tokens and guardrail units, each times its price per thousand."""
+def answer_cost(
+    prices: Prices, usage: Mapping[str, int], units: Mapping[str, int] | None
+) -> float | None:
+    """What one answer cost in USD: model tokens and guardrail units, each times its price per
+    thousand."""
     if units is None:
         return None
     total = (
         Decimal(usage["input_tokens"]) * prices.input_tokens
         + Decimal(usage["output_tokens"]) * prices.output_tokens
         + sum(
-            (Decimal(units[name]) * getattr(prices, field_name) for name, field_name in PRICED_UNITS.items()),
+            (
+                Decimal(units[name]) * getattr(prices, field_name)
+                for name, field_name in PRICED_UNITS.items()
+            ),
             Decimal(0),
         )
     ) / 1000
@@ -973,7 +1028,9 @@ class RequestRecord:
     excerpt_policies: list[str] = field(default_factory=list)
 
 
-def answer_question(settings: Settings, workspace: str, question: str, record: RequestRecord) -> dict[str, Any]:
+def answer_question(
+    settings: Settings, workspace: str, question: str, record: RequestRecord
+) -> dict[str, Any]:
     """Retrieve, ask the model, and build the response body — without latency."""
     retrieved = retrieve_passages(
         client("bedrock-agent-runtime", settings.region),
@@ -1005,7 +1062,9 @@ def answer_question(settings: Settings, workspace: str, question: str, record: R
             "price_date": settings.price_date,
         }
 
-    response = ask_model(client("bedrock-runtime", settings.region), settings, build_content(question, results))
+    response = ask_model(
+        client("bedrock-runtime", settings.region), settings, build_content(question, results)
+    )
     guardrail = read_guardrail(response)
     answer = extract_answer(response, guardrail["action"])
     usage = read_usage(response)
@@ -1037,7 +1096,9 @@ def answer_question(settings: Settings, workspace: str, question: str, record: R
 # --- HTTP ----------------------------------------------------------------
 
 
-def http_response(status: int, body: Mapping[str, Any], headers: Mapping[str, str] | None = None) -> dict[str, Any]:
+def http_response(
+    status: int, body: Mapping[str, Any], headers: Mapping[str, str] | None = None
+) -> dict[str, Any]:
     """A Function URL response with a JSON body."""
     return {
         "statusCode": status,
@@ -1078,8 +1139,12 @@ def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         )
         return http_response(error.status, {"error": error.public_message}, error.headers)
     except Exception:
-        log_event("crashed", status=500, workspace=record.workspace, traceback=traceback.format_exc())
-        return http_response(500, {"error": "The function failed unexpectedly; the details are in its log."})
+        log_event(
+            "crashed", status=500, workspace=record.workspace, traceback=traceback.format_exc()
+        )
+        return http_response(
+            500, {"error": "The function failed unexpectedly; the details are in its log."}
+        )
 
     body["latency_ms"] = round((time.perf_counter() - started) * 1000)
     log_event(

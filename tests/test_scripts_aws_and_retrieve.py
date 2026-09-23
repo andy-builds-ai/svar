@@ -88,7 +88,10 @@ def test_resolve_names_a_missing_output() -> None:
     ("error", "expected"),
     [
         (FakeClientError("ExpiredTokenException", "token expired"), "aws login"),
-        (type("NoCredentialsError", (Exception,), {"__module__": "botocore.exceptions"})(), "aws login"),
+        (
+            type("NoCredentialsError", (Exception,), {"__module__": "botocore.exceptions"})(),
+            "aws login",
+        ),
         (FakeClientError("AccessDeniedException", "no"), "access denied"),
         (FakeClientError("ThrottlingException", "slow down"), "Doing it failed: An error occurred"),
     ],
@@ -102,7 +105,12 @@ def test_expired_aws_login_session_asks_for_login() -> None:
     """What botocore raises when an `aws login` session can no longer refresh."""
     exceptions = pytest.importorskip("botocore.exceptions")
     error = exceptions.ClientError(
-        {"Error": {"Code": "ValidationException", "Message": "The provided authorization grant is invalid"}},
+        {
+            "Error": {
+                "Code": "ValidationException",
+                "Message": "The provided authorization grant is invalid",
+            }
+        },
         "CreateOAuth2Token",
     )
     assert "aws login" in explain("Reading the outputs", error)
@@ -125,7 +133,9 @@ def test_explain_with_a_real_botocore_client_error() -> None:
     assert "aws login" in explain("Reading the outputs", error)
 
 
-def test_credential_failure_while_creating_a_client_is_readable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_credential_failure_while_creating_a_client_is_readable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """boto3 loads credentials when the client is created, before any call."""
     boto3 = pytest.importorskip("boto3")
     exceptions = pytest.importorskip("botocore.exceptions")
@@ -187,7 +197,9 @@ def test_retrieve_requires_a_workspace() -> None:
         retrieve.parse_args(["a question"])
 
 
-def test_retrieve_sends_the_filter(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_retrieve_sends_the_filter(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     sent: dict[str, Any] = {}
 
     class FakeRuntime:
@@ -196,9 +208,13 @@ def test_retrieve_sends_the_filter(monkeypatch: pytest.MonkeyPatch, capsys: pyte
             return {"retrievalResults": []}
 
     monkeypatch.setattr(retrieve, "client", lambda service, region: FakeRuntime())
-    code = retrieve.main(["How?", "--workspace", "pellwick", "--layer", "human", "--knowledge-base-id", "KB1"])
+    code = retrieve.main(
+        ["How?", "--workspace", "pellwick", "--layer", "human", "--knowledge-base-id", "KB1"]
+    )
 
     assert code == 0
     assert sent["knowledgeBaseId"] == "KB1"
-    assert sent["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == build_filter("pellwick", "human")
+    assert sent["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == build_filter(
+        "pellwick", "human"
+    )
     assert "0 hit(s)" in capsys.readouterr().out

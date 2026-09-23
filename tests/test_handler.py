@@ -23,9 +23,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 import handler  # app/handler.py
+import pytest
 from handler import (
     BUDGET_SPENT_MESSAGE,
     KEY_HEADER,
@@ -95,7 +94,9 @@ def hit(
     return {
         "content": {"text": text},
         "location": {
-            "s3Location": {"uri": f"s3://andur-documents-000000000000-us-east-1/workspaces/{workspace}/{layer}/{name}"},
+            "s3Location": {
+                "uri": f"s3://andur-documents-000000000000-us-east-1/workspaces/{workspace}/{layer}/{name}"
+            },
             "type": "S3",
         },
         "metadata": {"workspace": workspace, "layer": layer, "source": "fictional"},
@@ -128,17 +129,35 @@ def guardrail_trace(
     if input_assessment is None:
         input_assessment = {
             "topicPolicy": {"topics": []},
-            "invocationMetrics": {"guardrailProcessingLatency": 120, "usage": guardrail_usage(1, 0, 0)},
+            "invocationMetrics": {
+                "guardrailProcessingLatency": 120,
+                "usage": guardrail_usage(1, 0, 0),
+            },
         }
     if output_assessment is None:
         output_assessment = {
             "contextualGroundingPolicy": {
                 "filters": [
-                    {"type": "GROUNDING", "threshold": 0.7, "score": 0.93, "action": "NONE", "detected": False},
-                    {"type": "RELEVANCE", "threshold": 0.7, "score": 0.88, "action": "NONE", "detected": False},
+                    {
+                        "type": "GROUNDING",
+                        "threshold": 0.7,
+                        "score": 0.93,
+                        "action": "NONE",
+                        "detected": False,
+                    },
+                    {
+                        "type": "RELEVANCE",
+                        "threshold": 0.7,
+                        "score": 0.88,
+                        "action": "NONE",
+                        "detected": False,
+                    },
                 ]
             },
-            "invocationMetrics": {"guardrailProcessingLatency": 300, "usage": guardrail_usage(1, 1, 3)},
+            "invocationMetrics": {
+                "guardrailProcessingLatency": 300,
+                "usage": guardrail_usage(1, 1, 3),
+            },
         }
     return {
         "guardrail": {
@@ -150,7 +169,9 @@ def guardrail_trace(
 
 
 def bedrock_response(
-    content: list[dict[str, Any]], stop_reason: str = "end_turn", trace: dict[str, Any] | None = None
+    content: list[dict[str, Any]],
+    stop_reason: str = "end_turn",
+    trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The shape the Bedrock converse API returns, with a guardrail trace that did nothing."""
     return {
@@ -162,11 +183,15 @@ def bedrock_response(
 
 
 def parameters(keys: dict[str, str]) -> list[dict[str, str]]:
-    return [{"Name": f"/andur/api-keys/{workspace}", "Value": key} for workspace, key in keys.items()]
+    return [
+        {"Name": f"/andur/api-keys/{workspace}", "Value": key} for workspace, key in keys.items()
+    ]
 
 
 class FakeAgentRuntime:
-    def __init__(self, results: list[dict[str, Any]] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, results: list[dict[str, Any]] | None = None, error: Exception | None = None
+    ) -> None:
         self.results = results if results is not None else []
         self.error = error
         self.calls: list[dict[str, Any]] = []
@@ -179,7 +204,9 @@ class FakeAgentRuntime:
 
 
 class FakeBedrockRuntime:
-    def __init__(self, response: dict[str, Any] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, response: dict[str, Any] | None = None, error: Exception | None = None
+    ) -> None:
         self.response = response or bedrock_response([{"text": "Use Settings > Export [1]."}])
         self.error = error
         self.calls: list[dict[str, Any]] = []
@@ -191,16 +218,32 @@ class FakeBedrockRuntime:
         return self.response
 
 
-def excerpt_guard_response(outputs: list[str] | None = None, pii_units: int = 1, masked: tuple[str, ...] = ()) -> dict[str, Any]:
+def excerpt_guard_response(
+    outputs: list[str] | None = None, pii_units: int = 1, masked: tuple[str, ...] = ()
+) -> dict[str, Any]:
     """What ApplyGuardrail returns: nothing to mask (``outputs`` None), or the masked text."""
     return {
-        "usage": {"topicPolicyUnits": 0, "sensitiveInformationPolicyUnits": pii_units, "contextualGroundingPolicyUnits": 0},
+        "usage": {
+            "topicPolicyUnits": 0,
+            "sensitiveInformationPolicyUnits": pii_units,
+            "contextualGroundingPolicyUnits": 0,
+        },
         "action": "NONE" if outputs is None else "GUARDRAIL_INTERVENED",
         "outputs": [] if outputs is None else [{"text": text} for text in outputs],
         "assessments": [
-            {"sensitiveInformationPolicy": {"piiEntities": [
-                {"match": "Anja Pell", "type": pii_type, "action": "ANONYMIZED", "detected": True} for pii_type in masked
-            ]}}
+            {
+                "sensitiveInformationPolicy": {
+                    "piiEntities": [
+                        {
+                            "match": "Anja Pell",
+                            "type": pii_type,
+                            "action": "ANONYMIZED",
+                            "detected": True,
+                        }
+                        for pii_type in masked
+                    ]
+                }
+            }
         ],
     }
 
@@ -208,7 +251,9 @@ def excerpt_guard_response(outputs: list[str] | None = None, pii_units: int = 1,
 class FakeGuardrail:
     """The excerpt guardrail's client: ApplyGuardrail only."""
 
-    def __init__(self, response: dict[str, Any] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, response: dict[str, Any] | None = None, error: Exception | None = None
+    ) -> None:
         self.response = response or excerpt_guard_response()
         self.error = error
         self.calls: list[dict[str, Any]] = []
@@ -223,7 +268,9 @@ class FakeGuardrail:
 class FakeSSM:
     """Parameter Store; ``pages`` is the store as it is now and can change between reads."""
 
-    def __init__(self, pages: list[list[dict[str, str]]] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, pages: list[list[dict[str, str]]] | None = None, error: Exception | None = None
+    ) -> None:
         self.pages = pages if pages is not None else []
         self.error = error
         self.calls: list[dict[str, Any]] = []
@@ -243,7 +290,10 @@ def conditional_check_failed(item: dict[str, Any] | None) -> Exception:
     """What DynamoDB raises when the update's condition is false."""
     exceptions = pytest.importorskip("botocore.exceptions")
     response: dict[str, Any] = {
-        "Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional request failed"}
+        "Error": {
+            "Code": "ConditionalCheckFailedException",
+            "Message": "The conditional request failed",
+        }
     }
     if item is not None:
         response["Item"] = item
@@ -370,9 +420,7 @@ class ConditionReader:
         return COMPARISONS[comparison](left, right)
 
     @staticmethod
-    def number(
-        token: str, item: Mapping[str, Any], values: Mapping[str, Any]
-    ) -> int | None:
+    def number(token: str, item: Mapping[str, Any], values: Mapping[str, Any]) -> int | None:
         """One side of a comparison: a placeholder or an attribute, as a whole number."""
         source = values if token.startswith(":") else item
         entry = source.get(token)
@@ -381,9 +429,7 @@ class ConditionReader:
         return int(entry["N"])
 
 
-def condition_holds(
-    expression: str, item: Mapping[str, Any], values: Mapping[str, Any]
-) -> bool:
+def condition_holds(expression: str, item: Mapping[str, Any], values: Mapping[str, Any]) -> bool:
     """Whether DynamoDB would let an update with this condition through."""
     reader = ConditionReader(expression)
     held = reader.either(item, values)
@@ -417,7 +463,9 @@ class FakeDynamoDB:
         values = kwargs.get("ExpressionAttributeValues", {})
         condition = kwargs.get("ConditionExpression")
         if condition is not None and not condition_holds(condition, before, values):
-            returned = before if kwargs.get("ReturnValuesOnConditionCheckFailure") == "ALL_OLD" else None
+            returned = (
+                before if kwargs.get("ReturnValuesOnConditionCheckFailure") == "ALL_OLD" else None
+            )
             raise conditional_check_failed(returned or None)
         after = apply_update(kwargs["UpdateExpression"], before, values)
         self.items[key] = after
@@ -469,7 +517,9 @@ def aws(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         monkeypatch.setenv(name, value)
     clients: dict[str, Any] = {
         "ssm": FakeSSM([parameters(KEYS)]),
-        "bedrock-agent-runtime": FakeAgentRuntime([hit(), hit(layer="inbox", name="draft--01.md", text="Draft.")]),
+        "bedrock-agent-runtime": FakeAgentRuntime(
+            [hit(), hit(layer="inbox", name="draft--01.md", text="Draft.")]
+        ),
         "bedrock-runtime": FakeBedrockRuntime(),
         "guardrail": FakeGuardrail(),
         "dynamodb": FakeDynamoDB(),
@@ -581,7 +631,10 @@ def test_the_most_passages_a_deployment_may_ask_for_fit_the_grounding_source() -
 
 def test_guardrail_and_prices_come_from_the_environment() -> None:
     assert (SETTINGS.guardrail_id, SETTINGS.guardrail_version) == ("gr-test", "1")
-    assert (SETTINGS.excerpt_guardrail_id, SETTINGS.excerpt_guardrail_version) == ("gr-excerpts", "2")
+    assert (SETTINGS.excerpt_guardrail_id, SETTINGS.excerpt_guardrail_version) == (
+        "gr-excerpts",
+        "2",
+    )
     assert SETTINGS.prices == handler.Prices(
         input_tokens=Decimal("0.00015"),
         output_tokens=Decimal("0.00065"),
@@ -615,7 +668,9 @@ def test_a_price_must_be_a_plain_decimal_in_range(variable: str, value: str) -> 
         handler.load_settings({**ENVIRONMENT, variable: value})
 
 
-@pytest.mark.parametrize("value", ["23.09.2026", "2026-9-23", "2026-02-30", "yesterday", "20260923"])
+@pytest.mark.parametrize(
+    "value", ["23.09.2026", "2026-9-23", "2026-02-30", "yesterday", "20260923"]
+)
 def test_the_price_date_is_a_real_iso_date(value: str) -> None:
     with pytest.raises(ConfigurationError, match="PRICE_DATE"):
         handler.load_settings({**ENVIRONMENT, "PRICE_DATE": value})
@@ -654,7 +709,13 @@ def test_body_is_read_as_json_also_when_base64_encoded() -> None:
 
 @pytest.mark.parametrize(
     "request_event",
-    [{"body": "{broken"}, {"body": None}, {}, {"body": "[1, 2]"}, {"body": "%%%", "isBase64Encoded": True}],
+    [
+        {"body": "{broken"},
+        {"body": None},
+        {},
+        {"body": "[1, 2]"},
+        {"body": "%%%", "isBase64Encoded": True},
+    ],
     ids=["broken", "none", "missing", "array", "bad-base64"],
 )
 def test_a_body_that_is_no_json_object_is_a_bad_request(request_event: dict[str, Any]) -> None:
@@ -672,7 +733,14 @@ def test_a_body_that_is_no_json_object_is_a_bad_request(request_event: dict[str,
         {"workspace": "a--b"},
         {"workspace": "quillmoor\n"},
     ],
-    ids=["missing", "empty", "not-a-string", "spaces-and-capitals", "double-hyphen", "trailing-newline"],
+    ids=[
+        "missing",
+        "empty",
+        "not-a-string",
+        "spaces-and-capitals",
+        "double-hyphen",
+        "trailing-newline",
+    ],
 )
 def test_workspace_must_be_a_valid_name(body: dict[str, Any]) -> None:
     with pytest.raises(BadRequest):
@@ -704,8 +772,16 @@ def test_an_outsized_workspace_name_is_400_and_reaches_neither_log_nor_answer(
 
 def test_question_is_stripped_and_limited() -> None:
     assert handler.requested_question({"question": "  How?  "}) == "How?"
-    assert len(handler.requested_question({"question": "x" * MAX_QUESTION_CHARACTERS})) == MAX_QUESTION_CHARACTERS
-    for body in ({}, {"question": None}, {"question": " \n "}, {"question": "x" * (MAX_QUESTION_CHARACTERS + 1)}):
+    assert (
+        len(handler.requested_question({"question": "x" * MAX_QUESTION_CHARACTERS}))
+        == MAX_QUESTION_CHARACTERS
+    )
+    for body in (
+        {},
+        {"question": None},
+        {"question": " \n "},
+        {"question": "x" * (MAX_QUESTION_CHARACTERS + 1)},
+    ):
         with pytest.raises(BadRequest):
             handler.requested_question(body)
 
@@ -779,7 +855,10 @@ def test_every_key_is_compared_even_after_a_match(monkeypatch: pytest.MonkeyPatc
 def test_keys_are_read_decrypted_across_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     ssm = FakeSSM([parameters({"quillmoor": "K1"}), parameters({"pellwick": "K2"})])
     monkeypatch.setattr(handler, "client", lambda service, region: ssm)
-    assert handler.read_workspace_keys("/andur/api-keys", "us-east-1") == {"quillmoor": "K1", "pellwick": "K2"}
+    assert handler.read_workspace_keys("/andur/api-keys", "us-east-1") == {
+        "quillmoor": "K1",
+        "pellwick": "K2",
+    }
     assert ssm.calls == [{"Path": "/andur/api-keys", "Recursive": False, "WithDecryption": True}]
 
 
@@ -808,18 +887,24 @@ def test_no_usable_keys_is_a_configuration_error(monkeypatch: pytest.MonkeyPatch
             handler.read_workspace_keys("/andur/api-keys", "us-east-1")
 
 
-def test_unreadable_keys_are_a_configuration_error_and_not_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unreadable_keys_are_a_configuration_error_and_not_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     failing = FakeSSM(error=client_error("AccessDeniedException", operation="GetParametersByPath"))
     monkeypatch.setattr(handler, "client", lambda service, region: failing)
     with pytest.raises(ConfigurationError, match="could not be read: access denied"):
         handler.workspace_keys("/andur/api-keys", "us-east-1")
     assert handler._key_cache.read_at is None
 
-    monkeypatch.setattr(handler, "client", lambda service, region: FakeSSM([parameters({"quillmoor": "K1"})]))
+    monkeypatch.setattr(
+        handler, "client", lambda service, region: FakeSSM([parameters({"quillmoor": "K1"})])
+    )
     assert handler.workspace_keys("/andur/api-keys", "us-east-1") == {"quillmoor": "K1"}
 
 
-def test_keys_are_kept_until_they_expire(monkeypatch: pytest.MonkeyPatch, cold_start: FakeClock) -> None:
+def test_keys_are_kept_until_they_expire(
+    monkeypatch: pytest.MonkeyPatch, cold_start: FakeClock
+) -> None:
     ssm = FakeSSM([parameters(KEYS)])
     monkeypatch.setattr(handler, "client", lambda service, region: ssm)
 
@@ -833,7 +918,9 @@ def test_keys_are_kept_until_they_expire(monkeypatch: pytest.MonkeyPatch, cold_s
     assert len(ssm.calls) == 2
 
 
-def test_a_deleted_key_stops_working_once_the_keys_expire(aws: dict[str, Any], cold_start: FakeClock) -> None:
+def test_a_deleted_key_stops_working_once_the_keys_expire(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
     assert call(event())[0] == 200
     aws["ssm"].pages = [parameters({"pellwick": KEYS["pellwick"]})]
 
@@ -841,7 +928,9 @@ def test_a_deleted_key_stops_working_once_the_keys_expire(aws: dict[str, Any], c
     assert call(event())[0] == 401
 
 
-def test_a_new_key_works_at_once_without_waiting_for_expiry(aws: dict[str, Any], cold_start: FakeClock) -> None:
+def test_a_new_key_works_at_once_without_waiting_for_expiry(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
     assert call(event())[0] == 200
     aws["ssm"].pages = [parameters({**KEYS, "newcomer": "newcomer-key-0003"})]
     cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
@@ -857,7 +946,9 @@ def test_an_unknown_key_rereads_the_keys_once_per_request_not_twice(aws: dict[st
     assert len(aws["ssm"].calls) == 1
 
 
-def test_a_flood_of_unknown_keys_rereads_at_most_once_per_interval(aws: dict[str, Any], cold_start: FakeClock) -> None:
+def test_a_flood_of_unknown_keys_rereads_at_most_once_per_interval(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
     call(event())
     cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
     for _ in range(20):
@@ -991,7 +1082,9 @@ def test_the_modules_import_and_read_requests_without_boto3() -> None:
         "import handler\n"
         "print(handler.requested_workspace({'workspace': 'quillmoor'}))\n"
     )
-    result = subprocess.run([sys.executable, "-c", code], cwd=REPOSITORY_ROOT, capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=REPOSITORY_ROOT, capture_output=True, text=True
+    )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "quillmoor"
 
@@ -1117,7 +1210,10 @@ def test_deleting_the_item_gives_the_key_a_fresh_budget(aws: dict[str, Any]) -> 
 def test_a_question_that_is_refused_costs_nothing(aws: dict[str, Any]) -> None:
     """The budget is the sixth check, behind the question — a 400 spends nothing."""
     assert call(event({"question": "", "workspace": "quillmoor"}))[0] == 400
-    assert call(event({"question": "x" * (MAX_QUESTION_CHARACTERS + 1), "workspace": "quillmoor"}))[0] == 400
+    assert (
+        call(event({"question": "x" * (MAX_QUESTION_CHARACTERS + 1), "workspace": "quillmoor"}))[0]
+        == 400
+    )
     assert aws["dynamodb"].calls == []
 
 
@@ -1226,7 +1322,9 @@ def test_two_keys_have_two_budgets(aws: dict[str, Any]) -> None:
     for _ in range(10):
         call(event())
     assert call(event())[0] == 402
-    assert call(event({"question": "How?", "workspace": "pellwick"}, key=KEYS["pellwick"]))[0] == 200
+    assert (
+        call(event({"question": "How?", "workspace": "pellwick"}, key=KEYS["pellwick"]))[0] == 200
+    )
 
 
 def test_a_spent_key_is_logged_as_refused_with_the_reason_and_without_the_key(
@@ -1250,8 +1348,16 @@ def test_a_spent_key_is_logged_as_refused_with_the_reason_and_without_the_key(
 
 def test_which_half_ran_out_is_read_from_the_item_the_condition_refused() -> None:
     now = 1_790_000_000
-    closed = {"expires_at": {"N": str(now)}, "questions_used": {"N": "3"}, "question_limit": {"N": "10"}}
-    spent = {"expires_at": {"N": str(now + 1)}, "questions_used": {"N": "10"}, "question_limit": {"N": "10"}}
+    closed = {
+        "expires_at": {"N": str(now)},
+        "questions_used": {"N": "3"},
+        "question_limit": {"N": "10"},
+    }
+    spent = {
+        "expires_at": {"N": str(now + 1)},
+        "questions_used": {"N": "10"},
+        "question_limit": {"N": "10"},
+    }
     assert handler.spent_message(closed, now) == WINDOW_CLOSED_MESSAGE
     assert handler.spent_message(spent, now) == QUESTIONS_SPENT_MESSAGE.format(limit=10)
     assert handler.spent_message({}, now) == BUDGET_SPENT_MESSAGE
@@ -1351,7 +1457,9 @@ def test_an_item_whose_own_window_outlasts_it_has_its_end_pushed_out(
 
     assert call(event())[0] == 200
     item = budget_item(aws)
-    end_of_the_item = started + 7 * SECONDS_PER_DAY + int(ENVIRONMENT["KEEP_DAYS"]) * SECONDS_PER_DAY
+    end_of_the_item = (
+        started + 7 * SECONDS_PER_DAY + int(ENVIRONMENT["KEEP_DAYS"]) * SECONDS_PER_DAY
+    )
     assert number(item, "expires_at") == started + 7 * SECONDS_PER_DAY
     assert number(item, handler.BUDGET_TTL_ATTRIBUTE) == end_of_the_item
     counted, repaired = aws["dynamodb"].calls
@@ -1375,7 +1483,9 @@ def test_the_repair_holds_and_is_not_written_a_second_time(
         "keep_seconds": {"N": str(SECONDS_PER_DAY)},
     }
     started = int(budget_clock())
-    end_of_the_item = started + 7 * SECONDS_PER_DAY + int(ENVIRONMENT["KEEP_DAYS"]) * SECONDS_PER_DAY
+    end_of_the_item = (
+        started + 7 * SECONDS_PER_DAY + int(ENVIRONMENT["KEEP_DAYS"]) * SECONDS_PER_DAY
+    )
 
     assert call(event())[0] == 200
     budget_clock.advance(SECONDS_PER_HOUR)
@@ -1404,7 +1514,6 @@ def test_a_repair_that_does_not_get_through_does_not_cost_the_answer(
     assert call(event())[0] == 200
     (line,) = [line for line in log_lines(caplog) if line["event"] == "budget-ttl-unrepaired"]
     assert line["detail"] == "ClientError: ThrottlingException"
-
 
 
 # --- Retrieval and prompt ------------------------------------------------
@@ -1457,15 +1566,25 @@ def test_source_file_name_leaves_out_the_bucket_and_its_account_id() -> None:
 
 def test_source_of_an_incomplete_hit_does_not_fail() -> None:
     assert handler.to_source(1, {}) == {
-        "number": 1, "file": "unknown", "layer": "unknown", "workspace": "unknown",
-        "score": None, "words": 0, "cited": False, "excerpt": "",
+        "number": 1,
+        "file": "unknown",
+        "layer": "unknown",
+        "workspace": "unknown",
+        "score": None,
+        "words": 0,
+        "cited": False,
+        "excerpt": "",
     }
 
 
 def test_sources_are_numbered_with_layer_and_file() -> None:
     table = "| Plan | Price |\n|---|---|\n| Team | €19 |"
-    sources = handler.build_sources([hit(text="First passage."), hit(layer="inbox", name="draft--01.md", text=table)])
-    assert sources.startswith("Sources:\n\n[1] layer: human | file: faq--03-projects-and-exports.md\nFirst passage.")
+    sources = handler.build_sources(
+        [hit(text="First passage."), hit(layer="inbox", name="draft--01.md", text=table)]
+    )
+    assert sources.startswith(
+        "Sources:\n\n[1] layer: human | file: faq--03-projects-and-exports.md\nFirst passage."
+    )
     assert sources.endswith("[2] layer: inbox | file: draft--01.md\n" + table)
 
 
@@ -1479,9 +1598,15 @@ def test_the_message_marks_sources_and_question_for_the_guardrail() -> None:
     content = handler.build_content("What does Team cost?", [hit(text="First passage.")])
     sources, label, question = content
     assert sources["guardContent"]["text"]["qualifiers"] == ["grounding_source"]
-    assert sources["guardContent"]["text"]["text"] == handler.build_sources([hit(text="First passage.")])
+    assert sources["guardContent"]["text"]["text"] == handler.build_sources(
+        [hit(text="First passage.")]
+    )
     assert label == {"text": "\n\nQuestion:"}
-    assert question == {"guardContent": {"text": {"text": "What does Team cost?", "qualifiers": ["query", "guard_content"]}}}
+    assert question == {
+        "guardContent": {
+            "text": {"text": "What does Team cost?", "qualifiers": ["query", "guard_content"]}
+        }
+    }
 
 
 def test_the_longest_question_fits_the_guardrail_query() -> None:
@@ -1496,7 +1621,9 @@ def test_an_outlier_passage_is_cut_in_the_prompt_with_a_note() -> None:
     prompt = handler.build_sources([hit(text=outlier), hit(text="Short.")])
     first_block = prompt.split("\n\n[2]")[0]
     assert len(first_block) < MAX_SOURCE_CHARACTERS + 200
-    assert f"[... cut: the passage is longer than {MAX_SOURCE_CHARACTERS} characters]" in first_block
+    assert (
+        f"[... cut: the passage is longer than {MAX_SOURCE_CHARACTERS} characters]" in first_block
+    )
     assert "[2] layer: human | file: faq--03-projects-and-exports.md\nShort." in prompt
 
 
@@ -1523,7 +1650,11 @@ def test_model_gets_system_rules_message_token_limit_and_guardrail() -> None:
     assert arguments["system"] == [{"text": handler.SYSTEM_PROMPT}]
     assert arguments["messages"] == [{"role": "user", "content": content}]
     assert arguments["inferenceConfig"] == {"maxTokens": MAX_ANSWER_TOKENS}
-    assert arguments["guardrailConfig"] == {"guardrailIdentifier": "gr-test", "guardrailVersion": "1", "trace": "enabled"}
+    assert arguments["guardrailConfig"] == {
+        "guardrailIdentifier": "gr-test",
+        "guardrailVersion": "1",
+        "trace": "enabled",
+    }
 
 
 def test_a_blocked_model_is_an_llm_error_with_a_hint() -> None:
@@ -1535,7 +1666,9 @@ def test_a_blocked_model_is_an_llm_error_with_a_hint() -> None:
 
 def test_a_model_timeout_is_an_llm_error() -> None:
     exceptions = pytest.importorskip("botocore.exceptions")
-    bedrock = FakeBedrockRuntime(error=exceptions.ReadTimeoutError(endpoint_url="https://bedrock-runtime"))
+    bedrock = FakeBedrockRuntime(
+        error=exceptions.ReadTimeoutError(endpoint_url="https://bedrock-runtime")
+    )
     with pytest.raises(LLMError, match="timeout"):
         handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
 
@@ -1551,10 +1684,15 @@ def test_extract_answer_skips_a_block_without_text() -> None:
 
 @pytest.mark.parametrize(
     ("stop_reason", "note"),
-    [("max_tokens", f"cut off: the limit of {MAX_ANSWER_TOKENS} tokens"), ("content_filtered", "content filter"),
-     ("guardrail_intervened", "guardrail")],
+    [
+        ("max_tokens", f"cut off: the limit of {MAX_ANSWER_TOKENS} tokens"),
+        ("content_filtered", "content filter"),
+        ("guardrail_intervened", "guardrail"),
+    ],
 )
-def test_extract_answer_marks_an_answer_the_model_did_not_finish(stop_reason: str, note: str) -> None:
+def test_extract_answer_marks_an_answer_the_model_did_not_finish(
+    stop_reason: str, note: str
+) -> None:
     result = handler.extract_answer(bedrock_response([{"text": "Start"}], stop_reason=stop_reason))
     assert result.startswith("Start\n\n[")
     assert note in result
@@ -1581,7 +1719,9 @@ def test_extract_answer_raises_on_an_empty_response() -> None:
 
 #: The input assessment of a tax question the topic filter refused.
 TAX_QUESTION_BLOCKED = {
-    "topicPolicy": {"topics": [{"name": "Tax advice", "type": "DENY", "action": "BLOCKED", "detected": True}]},
+    "topicPolicy": {
+        "topics": [{"name": "Tax advice", "type": "DENY", "action": "BLOCKED", "detected": True}]
+    },
     "invocationMetrics": {"guardrailProcessingLatency": 90, "usage": guardrail_usage(1, 0, 0)},
 }
 
@@ -1590,13 +1730,30 @@ PHONE_MASKED = {
     "sensitiveInformationPolicy": {
         "piiEntities": [
             {"match": "Ada Quill", "type": "NAME", "action": "ANONYMIZED", "detected": True},
-            {"match": "+44 20 7946 0958", "type": "PHONE", "action": "ANONYMIZED", "detected": True},
+            {
+                "match": "+44 20 7946 0958",
+                "type": "PHONE",
+                "action": "ANONYMIZED",
+                "detected": True,
+            },
         ]
     },
     "contextualGroundingPolicy": {
         "filters": [
-            {"type": "GROUNDING", "threshold": 0.7, "score": 0.97, "action": "NONE", "detected": False},
-            {"type": "RELEVANCE", "threshold": 0.7, "score": 0.91, "action": "NONE", "detected": False},
+            {
+                "type": "GROUNDING",
+                "threshold": 0.7,
+                "score": 0.97,
+                "action": "NONE",
+                "detected": False,
+            },
+            {
+                "type": "RELEVANCE",
+                "threshold": 0.7,
+                "score": 0.91,
+                "action": "NONE",
+                "detected": False,
+            },
         ]
     },
     "invocationMetrics": {"guardrailProcessingLatency": 250, "usage": guardrail_usage(1, 1, 3)},
@@ -1606,8 +1763,20 @@ PHONE_MASKED = {
 UNGROUNDED = {
     "contextualGroundingPolicy": {
         "filters": [
-            {"type": "GROUNDING", "threshold": 0.7, "score": 0.12, "action": "BLOCKED", "detected": True},
-            {"type": "RELEVANCE", "threshold": 0.7, "score": 0.9, "action": "NONE", "detected": False},
+            {
+                "type": "GROUNDING",
+                "threshold": 0.7,
+                "score": 0.12,
+                "action": "BLOCKED",
+                "detected": True,
+            },
+            {
+                "type": "RELEVANCE",
+                "threshold": 0.7,
+                "score": 0.9,
+                "action": "NONE",
+                "detected": False,
+            },
         ]
     },
     "invocationMetrics": {"guardrailProcessingLatency": 260, "usage": guardrail_usage(1, 1, 3)},
@@ -1620,14 +1789,20 @@ def test_a_guardrail_that_did_nothing_reports_its_scores_and_units() -> None:
         "policies": [],
         "grounding_score": 0.93,
         "relevance_score": 0.88,
-        "units": {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 3},
+        "units": {
+            "topicPolicyUnits": 2,
+            "sensitiveInformationPolicyUnits": 1,
+            "contextualGroundingPolicyUnits": 3,
+        },
         "question_refused": False,
     }
 
 
 def test_a_refused_topic_is_blocked_and_named() -> None:
     response = bedrock_response(
-        [{"text": "Refused."}], "guardrail_intervened", guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED)
+        [{"text": "Refused."}],
+        "guardrail_intervened",
+        guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED),
     )
     guardrail = handler.read_guardrail(response)
     assert (guardrail["action"], guardrail["policies"]) == ("blocked", ["topic:Tax advice"])
@@ -1636,7 +1811,9 @@ def test_a_refused_topic_is_blocked_and_named() -> None:
 
 def test_masked_personal_details_are_named_by_type_and_never_by_what_matched() -> None:
     response = bedrock_response(
-        [{"text": "Call {NAME} on {PHONE} [1]."}], "guardrail_intervened", guardrail_trace(output_assessment=PHONE_MASKED)
+        [{"text": "Call {NAME} on {PHONE} [1]."}],
+        "guardrail_intervened",
+        guardrail_trace(output_assessment=PHONE_MASKED),
     )
     guardrail = handler.read_guardrail(response)
     assert (guardrail["action"], guardrail["policies"]) == ("masked", ["pii:NAME", "pii:PHONE"])
@@ -1645,7 +1822,9 @@ def test_masked_personal_details_are_named_by_type_and_never_by_what_matched() -
 
 def test_an_ungrounded_answer_is_blocked_with_its_score() -> None:
     response = bedrock_response(
-        [{"text": "Withheld."}], "guardrail_intervened", guardrail_trace(output_assessment=UNGROUNDED)
+        [{"text": "Withheld."}],
+        "guardrail_intervened",
+        guardrail_trace(output_assessment=UNGROUNDED),
     )
     guardrail = handler.read_guardrail(response)
     assert (guardrail["action"], guardrail["policies"]) == ("blocked", ["grounding"])
@@ -1655,7 +1834,9 @@ def test_an_ungrounded_answer_is_blocked_with_its_score() -> None:
 
 def test_blocking_outranks_masking() -> None:
     both = {**PHONE_MASKED, "contextualGroundingPolicy": UNGROUNDED["contextualGroundingPolicy"]}
-    response = bedrock_response([{"text": "Withheld."}], "guardrail_intervened", guardrail_trace(output_assessment=both))
+    response = bedrock_response(
+        [{"text": "Withheld."}], "guardrail_intervened", guardrail_trace(output_assessment=both)
+    )
     guardrail = handler.read_guardrail(response)
     assert guardrail["action"] == "blocked"
     assert guardrail["policies"] == ["grounding", "pii:NAME", "pii:PHONE"]
@@ -1671,21 +1852,32 @@ def test_an_intervention_without_a_trace_is_named_as_such_and_its_units_are_unkn
 
 def test_a_masked_answer_says_so_and_a_blocked_one_is_the_guardrail_message_alone() -> None:
     masked = bedrock_response([{"text": "Call {PHONE} [1]."}], "guardrail_intervened")
-    assert handler.extract_answer(masked, "masked") == "Call {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["masked"]
+    assert (
+        handler.extract_answer(masked, "masked")
+        == "Call {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["masked"]
+    )
     blocked = bedrock_response([{"text": "Andur does not advise on this."}], "guardrail_intervened")
     assert handler.extract_answer(blocked, "blocked") == "Andur does not advise on this."
-    assert handler.extract_answer(blocked, "intervened").endswith(handler.STOP_NOTES["guardrail_intervened"])
+    assert handler.extract_answer(blocked, "intervened").endswith(
+        handler.STOP_NOTES["guardrail_intervened"]
+    )
 
 
 def test_the_cost_is_tokens_and_units_times_their_prices_rounded_to_six_places() -> None:
     usage = {"input_tokens": 1624, "output_tokens": 50}
-    units = {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 3}
+    units = {
+        "topicPolicyUnits": 2,
+        "sensitiveInformationPolicyUnits": 1,
+        "contextualGroundingPolicyUnits": 3,
+    }
     # 1624 x 0.00015 + 50 x 0.00065 + 2 x 0.15 + 1 x 0.10 + 3 x 0.10, per thousand
     # = (0.2436 + 0.0325 + 0.3 + 0.1 + 0.3) / 1000 = 0.0009761
     assert handler.answer_cost(SETTINGS.prices, usage, units) == 0.000976
     assert handler.answer_cost(SETTINGS.prices, usage, None) is None
     zero = {name: 0 for name in handler.PRICED_UNITS}
-    assert handler.answer_cost(SETTINGS.prices, {"input_tokens": 0, "output_tokens": 0}, zero) == 0.0
+    assert (
+        handler.answer_cost(SETTINGS.prices, {"input_tokens": 0, "output_tokens": 0}, zero) == 0.0
+    )
 
 
 def test_the_cost_is_rounded_half_even_at_the_sixth_place() -> None:
@@ -1738,12 +1930,17 @@ def test_cited_layers_come_from_cited_sources_only_most_trusted_first() -> None:
 
 
 def test_an_answer_carries_sources_layers_model_usage_and_latency(aws: dict[str, Any]) -> None:
-    aws["bedrock-runtime"].response = bedrock_response([{"text": "Settings > Export [1]. A draft adds more [2]."}])
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Settings > Export [1]. A draft adds more [2]."}]
+    )
     status, body = call(event())
 
     assert status == 200
     assert body["answer"] == "Settings > Export [1]. A draft adds more [2]."
-    assert [(s["number"], s["layer"], s["cited"]) for s in body["sources"]] == [(1, "human", True), (2, "inbox", True)]
+    assert [(s["number"], s["layer"], s["cited"]) for s in body["sources"]] == [
+        (1, "human", True),
+        (2, "inbox", True),
+    ]
     assert {s["workspace"] for s in body["sources"]} == {"quillmoor"}
     assert body["layers"] == ["human", "inbox"]
     assert body["model"] == ENVIRONMENT["MODEL_ID"]
@@ -1755,13 +1952,24 @@ def test_an_answer_carries_sources_layers_model_usage_and_latency(aws: dict[str,
     assert body["price_date"] == "2026-09-23"
     assert isinstance(body["latency_ms"], int)
     assert set(body) == {
-        "answer", "sources", "layers", "model", "stop_reason", "usage", "guardrail", "cost_usd", "price_date",
+        "answer",
+        "sources",
+        "layers",
+        "model",
+        "stop_reason",
+        "usage",
+        "guardrail",
+        "cost_usd",
+        "price_date",
         "latency_ms",
     }
 
 
-def test_a_tax_question_comes_back_as_the_guardrail_message_and_is_still_a_200(aws: dict[str, Any]) -> None:
-    """A refusal by the guardrail is an answer, not an error: the key's question is spent either way."""
+def test_a_tax_question_comes_back_as_the_guardrail_message_and_is_still_a_200(
+    aws: dict[str, Any],
+) -> None:
+    """A refusal by the guardrail is an answer, not an error: the key's question is spent
+    either way."""
     aws["bedrock-runtime"].response = {
         "output": {"message": {"content": [{"text": "Andur does not advise on this."}]}},
         "stopReason": "guardrail_intervened",
@@ -1798,7 +2006,9 @@ def test_a_refused_question_gets_no_sources_and_its_excerpts_are_never_guarded(
 def test_an_answer_withheld_by_the_grounding_check_keeps_its_sources(aws: dict[str, Any]) -> None:
     """Only a refused question loses them; a withheld answer still shows what was searched."""
     aws["bedrock-runtime"].response = bedrock_response(
-        [{"text": "Withheld."}], "guardrail_intervened", guardrail_trace(output_assessment=UNGROUNDED)
+        [{"text": "Withheld."}],
+        "guardrail_intervened",
+        guardrail_trace(output_assessment=UNGROUNDED),
     )
     _, body = call(event())
     assert len(body["sources"]) == 2
@@ -1811,7 +2021,9 @@ def test_excerpts_go_through_the_excerpt_guardrail_in_one_block(aws: dict[str, A
         hit(layer="inbox", name="draft--01.md", text="Write to workshop@pellwick.example."),
     ]
     aws["guardrail"].response = excerpt_guard_response(
-        ["{NAME} answers the phone from 08:00.\nWrite to {EMAIL}."], pii_units=1, masked=("NAME", "EMAIL")
+        ["{NAME} answers the phone from 08:00.\nWrite to {EMAIL}."],
+        pii_units=1,
+        masked=("NAME", "EMAIL"),
     )
     _, body = call(event())
     (request,) = aws["guardrail"].calls
@@ -1819,7 +2031,11 @@ def test_excerpts_go_through_the_excerpt_guardrail_in_one_block(aws: dict[str, A
     assert request["guardrailVersion"] == "2"
     assert request["source"] == "OUTPUT"
     assert request["content"] == [
-        {"text": {"text": "Anja answers the phone from 08:00.\nWrite to workshop@pellwick.example."}}
+        {
+            "text": {
+                "text": "Anja answers the phone from 08:00.\nWrite to workshop@pellwick.example."
+            }
+        }
     ]
     assert [source["excerpt"] for source in body["sources"]] == [
         "{NAME} answers the phone from 08:00.",
@@ -1863,7 +2079,9 @@ def test_a_masked_text_that_does_not_split_back_drops_every_excerpt(
     assert [line for line in log_lines(caplog) if line["event"] == "excerpt-guard-unusable"]
 
 
-@pytest.mark.parametrize("action", ["BLOCKED", "", None, "SOMETHING_NEW"], ids=["blocked", "empty", "missing", "unknown"])
+@pytest.mark.parametrize(
+    "action", ["BLOCKED", "", None, "SOMETHING_NEW"], ids=["blocked", "empty", "missing", "unknown"]
+)
 def test_an_action_other_than_none_or_intervened_drops_every_excerpt(
     aws: dict[str, Any], caplog: pytest.LogCaptureFixture, action: str | None
 ) -> None:
@@ -1889,7 +2107,9 @@ def test_an_action_other_than_none_or_intervened_drops_every_excerpt(
 
 def test_a_split_that_does_not_fit_keeps_the_units_counted(aws: dict[str, Any]) -> None:
     """The call was billed although its text was of no use: the cost is an amount, not null."""
-    aws["guardrail"].response = excerpt_guard_response(["only one line"], pii_units=2, masked=("NAME",))
+    aws["guardrail"].response = excerpt_guard_response(
+        ["only one line"], pii_units=2, masked=("NAME",)
+    )
     _, body = call(event())
     assert [source["excerpt"] for source in body["sources"]] == [None, None]
     # 0.000976 for the answer, plus two PII units at 0.10 per thousand.
@@ -1901,7 +2121,9 @@ def test_a_failed_excerpt_guardrail_drops_every_excerpt_and_the_cost_is_unknown(
 ) -> None:
     """Fail closed: an answer without its passages' openings, never with them unmasked."""
     caplog.set_level(logging.INFO, logger="andur")
-    aws["guardrail"].error = client_error("ThrottlingException", "near 'Anja Pell'", operation="ApplyGuardrail")
+    aws["guardrail"].error = client_error(
+        "ThrottlingException", "near 'Anja Pell'", operation="ApplyGuardrail"
+    )
     status, body = call(event())
     assert status == 200
     assert body["answer"] == "Use Settings > Export [1]."
@@ -1913,7 +2135,11 @@ def test_a_failed_excerpt_guardrail_drops_every_excerpt_and_the_cost_is_unknown(
 
 
 def test_excerpt_units_count_as_pii_units() -> None:
-    units = {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 3}
+    units = {
+        "topicPolicyUnits": 2,
+        "sensitiveInformationPolicyUnits": 1,
+        "contextualGroundingPolicyUnits": 3,
+    }
     assert handler.add_units(units, 2)["sensitiveInformationPolicyUnits"] == 3
     assert units["sensitiveInformationPolicyUnits"] == 1
     assert handler.add_units(units, None) is None
@@ -1925,7 +2151,9 @@ def test_the_unmasked_answer_in_the_trace_reaches_neither_body_nor_log(
 ) -> None:
     caplog.set_level(logging.INFO, logger="andur")
     aws["bedrock-runtime"].response = bedrock_response(
-        [{"text": "Call {NAME} on {PHONE} [1]."}], "guardrail_intervened", guardrail_trace(output_assessment=PHONE_MASKED)
+        [{"text": "Call {NAME} on {PHONE} [1]."}],
+        "guardrail_intervened",
+        guardrail_trace(output_assessment=PHONE_MASKED),
     )
     status, body = call(event())
     assert status == 200
@@ -1934,18 +2162,26 @@ def test_the_unmasked_answer_in_the_trace_reaches_neither_body_nor_log(
         assert "Ada Quill" not in text and "7946" not in text
 
 
-def test_the_request_goes_to_the_workspace_and_model_from_the_environment(aws: dict[str, Any]) -> None:
+def test_the_request_goes_to_the_workspace_and_model_from_the_environment(
+    aws: dict[str, Any],
+) -> None:
     call(event())
     (retrieve,) = aws["bedrock-agent-runtime"].calls
     assert retrieve["knowledgeBaseId"] == "KB123"
-    assert retrieve["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"]["equals"]["value"] == "quillmoor"
+    assert (
+        retrieve["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"]["equals"]["value"]
+        == "quillmoor"
+    )
     assert retrieve["retrievalConfiguration"]["vectorSearchConfiguration"]["numberOfResults"] == 6
     (converse,) = aws["bedrock-runtime"].calls
     assert converse["modelId"] == ENVIRONMENT["MODEL_ID"]
 
 
 def test_a_passage_of_another_workspace_never_reaches_the_model(aws: dict[str, Any]) -> None:
-    aws["bedrock-agent-runtime"].results = [hit(), hit(workspace="pellwick", text="Pellwick secret.")]
+    aws["bedrock-agent-runtime"].results = [
+        hit(),
+        hit(workspace="pellwick", text="Pellwick secret."),
+    ]
     status, body = call(event())
     assert status == 200
     assert [source["workspace"] for source in body["sources"]] == ["quillmoor"]
@@ -1987,8 +2223,17 @@ def test_only_foreign_hits_count_as_no_hits(aws: dict[str, Any]) -> None:
         (event("{not json"), 400),
         (event(method="GET"), 405),
     ],
-    ids=["wrong-key", "no-key", "two-keys-joined-by-comma", "other-workspace", "empty-question",
-         "long-question", "no-workspace", "broken-json", "get"],
+    ids=[
+        "wrong-key",
+        "no-key",
+        "two-keys-joined-by-comma",
+        "other-workspace",
+        "empty-question",
+        "long-question",
+        "no-workspace",
+        "broken-json",
+        "get",
+    ],
 )
 def test_refused_requests_get_a_status_and_one_sentence(
     aws: dict[str, Any], request_event: dict[str, Any], status: int
@@ -2062,7 +2307,9 @@ def test_a_broken_configuration_tells_the_caller_nothing_but_the_log_everything(
     assert "NUMBER_OF_RESULTS" in line["error"]
 
 
-def test_a_bug_is_500_without_a_traceback_in_the_body(aws: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_bug_is_500_without_a_traceback_in_the_body(
+    aws: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
     def broken(*_: Any) -> Any:
         raise ZeroDivisionError("a bug")
 
@@ -2116,18 +2363,32 @@ def test_an_answer_logs_one_line_with_tokens_hits_dropped_and_latency(
 @pytest.mark.parametrize(
     ("request_event", "status", "workspace"),
     [
-        (event({"question": "What is the secret plan?", "workspace": "quillmoor"}, key="wrong"), 401, "quillmoor"),
+        (
+            event({"question": "What is the secret plan?", "workspace": "quillmoor"}, key="wrong"),
+            401,
+            "quillmoor",
+        ),
         (event({"question": "What is the secret plan?", "workspace": "pellwick"}), 403, "pellwick"),
-        (event({"question": "What is the secret plan?", "workspace": "quillmoor"}), 200, "quillmoor"),
+        (
+            event({"question": "What is the secret plan?", "workspace": "quillmoor"}),
+            200,
+            "quillmoor",
+        ),
     ],
     ids=["401", "403", "200"],
 )
 def test_every_request_is_logged_with_its_workspace_and_never_with_the_question(
-    aws: dict[str, Any], caplog: pytest.LogCaptureFixture, request_event: dict[str, Any], status: int, workspace: str
+    aws: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+    request_event: dict[str, Any],
+    status: int,
+    workspace: str,
 ) -> None:
     caplog.set_level(logging.INFO, logger="andur")
     call(request_event)
-    request_lines = [line for line in log_lines(caplog) if line["event"] in {"answered", "refused", "failed"}]
+    request_lines = [
+        line for line in log_lines(caplog) if line["event"] in {"answered", "refused", "failed"}
+    ]
     assert [(line["status"], line["workspace"]) for line in request_lines] == [(status, workspace)]
     assert "secret plan" not in caplog.text
     assert KEYS["quillmoor"] not in caplog.text
@@ -2144,7 +2405,8 @@ def test_a_bedrock_failure_is_logged_by_its_code_and_never_by_its_message(
     """
     caplog.set_level(logging.INFO, logger="andur")
     aws["bedrock-runtime"].error = client_error(
-        "ValidationException", "malformed input near 'the secret plan' (arn:aws:bedrock:us-east-1:123456789012:thing)"
+        "ValidationException",
+        "malformed input near 'the secret plan' (arn:aws:bedrock:us-east-1:123456789012:thing)",
     )
     _, body = call(event())
     (line,) = [line for line in log_lines(caplog) if line["event"] == "converse-failed"]
@@ -2159,7 +2421,8 @@ def test_a_retrieval_failure_is_logged_by_its_code_and_never_by_its_message(
     """The same for the search: a retrieve message can quote the question."""
     caplog.set_level(logging.INFO, logger="andur")
     aws["bedrock-agent-runtime"].error = client_error(
-        "ValidationException", "bad query 'the secret plan' (arn:aws:bedrock:us-east-1:123456789012:thing)"
+        "ValidationException",
+        "bad query 'the secret plan' (arn:aws:bedrock:us-east-1:123456789012:thing)",
     )
     _, body = call(event())
     (line,) = [line for line in log_lines(caplog) if line["event"] == "retrieve-failed"]
@@ -2178,7 +2441,11 @@ def test_a_crash_is_one_json_line_with_the_traceback_as_a_field(
 
     monkeypatch.setattr(handler, "answer_question", broken)
     call(event())
-    (record,) = [record for record in caplog.records if record.name == "andur" and "crashed" in record.getMessage()]
+    (record,) = [
+        record
+        for record in caplog.records
+        if record.name == "andur" and "crashed" in record.getMessage()
+    ]
     message = record.getMessage()
     assert "\n" not in message
     line = json.loads(message)
@@ -2187,7 +2454,9 @@ def test_a_crash_is_one_json_line_with_the_traceback_as_a_field(
     assert record.exc_info is None
 
 
-def test_every_log_line_is_single_line_json(aws: dict[str, Any], caplog: pytest.LogCaptureFixture) -> None:
+def test_every_log_line_is_single_line_json(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.INFO, logger="andur")
     call(event({"question": "Zeilen\numbruch?", "workspace": "quillmoor"}))
     call(event(key="wrong"))

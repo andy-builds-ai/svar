@@ -10,7 +10,16 @@ import urllib.request
 from typing import Any
 
 from scripts import utf8_output
-from scripts.aws import REGION, STACK_NAME, AwsProblem, client, error_code, explained, read_stack_outputs, resolve
+from scripts.aws import (
+    REGION,
+    STACK_NAME,
+    AwsProblem,
+    client,
+    error_code,
+    explained,
+    read_stack_outputs,
+    resolve,
+)
 
 #: Set this to use a key you already have instead of reading Parameter Store.
 API_KEY_ENVIRONMENT_VARIABLE = "ANDUR_API_KEY"
@@ -134,9 +143,12 @@ def main(argv: list[str] | None = None) -> int:
         wanted["ApiKeyParameterPath"] = None
     try:
         settings = resolve(
-            wanted, lambda: read_stack_outputs(client("cloudformation", args.region), args.stack_name)
+            wanted,
+            lambda: read_stack_outputs(client("cloudformation", args.region), args.stack_name),
         )
-        key = given_key or read_key(client("ssm", args.region), settings["ApiKeyParameterPath"], args.workspace)
+        key = given_key or read_key(
+            client("ssm", args.region), settings["ApiKeyParameterPath"], args.workspace
+        )
         url = ask_url(settings[WEB_URL_OUTPUT])
         status, body = send(build_request(url, key, args.question, args.workspace))
     except AwsProblem as problem:

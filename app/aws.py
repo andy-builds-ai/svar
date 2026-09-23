@@ -89,7 +89,11 @@ _THROTTLING_CODES = {
     "TooManyRequestsException",
     "ServiceQuotaExceededException",
 }
-_UNAVAILABLE_CODES = {"ServiceUnavailableException", "InternalServerException", "ModelNotReadyException"}
+_UNAVAILABLE_CODES = {
+    "ServiceUnavailableException",
+    "InternalServerException",
+    "ModelNotReadyException",
+}
 
 
 def error_detail(exc: BaseException) -> str:

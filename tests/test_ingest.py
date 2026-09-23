@@ -126,7 +126,9 @@ def test_valid_sidecar_has_no_problems(tmp_path: Path) -> None:
         ({"workspace": "quillmoor"}, "metadataAttributes is missing"),
         (sidecar_for("quillmoor", "human", license=None), "missing keys license"),
         (
-            sidecar_for("quillmoor", "human", team={"value": {"type": "STRING", "stringValue": "x"}}),
+            sidecar_for(
+                "quillmoor", "human", team={"value": {"type": "STRING", "stringValue": "x"}}
+            ),
             "unexpected keys team",
         ),
         (sidecar_for("other", "human"), "workspace is 'other', but the folder is 'quillmoor'"),
@@ -135,7 +137,10 @@ def test_valid_sidecar_has_no_problems(tmp_path: Path) -> None:
             sidecar_for(
                 "quillmoor",
                 "human",
-                source={"value": {"type": "STRING", "stringValue": "fictional"}, "includeForEmbedding": True},
+                source={
+                    "value": {"type": "STRING", "stringValue": "fictional"},
+                    "includeForEmbedding": True,
+                },
             ),
             "source must have includeForEmbedding: false",
         ),
@@ -143,13 +148,24 @@ def test_valid_sidecar_has_no_problems(tmp_path: Path) -> None:
             sidecar_for(
                 "quillmoor",
                 "human",
-                source={"value": {"type": "NUMBER", "numberValue": 1}, "includeForEmbedding": False},
+                source={
+                    "value": {"type": "NUMBER", "numberValue": 1},
+                    "includeForEmbedding": False,
+                },
             ),
             "source must be a non-empty STRING value",
         ),
     ],
-    ids=["broken-json", "no-attributes", "missing-key", "extra-key", "wrong-workspace",
-         "wrong-layer", "embedded", "not-a-string"],
+    ids=[
+        "broken-json",
+        "no-attributes",
+        "missing-key",
+        "extra-key",
+        "wrong-workspace",
+        "wrong-layer",
+        "embedded",
+        "not-a-string",
+    ],
 )
 def test_invalid_sidecar_names_the_problem(tmp_path: Path, data: Any, expected: str) -> None:
     problems = check_sidecar(write_sidecar(tmp_path, data), "quillmoor", "human")
@@ -187,23 +203,43 @@ def test_discover_can_limit_to_one_workspace(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("build", "expected"),
     [
-        (lambda root: add_document(root, "quillmoor", "human", sidecar=None), "sidecar doc.md.metadata.json is missing"),
+        (
+            lambda root: add_document(root, "quillmoor", "human", sidecar=None),
+            "sidecar doc.md.metadata.json is missing",
+        ),
         (lambda root: add_document(root, "quillmoor", "drafts"), "unknown layer 'drafts'"),
-        (lambda root: add_document(root, "Quill Moor", "human"), "workspace name must be lowercase"),
+        (
+            lambda root: add_document(root, "Quill Moor", "human"),
+            "workspace name must be lowercase",
+        ),
         (lambda root: add_document(root, "quillmoor", "human", name="scan.png"), "file type .png"),
         (
-            lambda root: (root / "quillmoor" / "human").mkdir(parents=True)
-            or (root / "quillmoor" / "human" / "gone.md.metadata.json").write_text("{}"),
+            lambda root: (
+                (root / "quillmoor" / "human").mkdir(parents=True)
+                or (root / "quillmoor" / "human" / "gone.md.metadata.json").write_text("{}")
+            ),
             "sidecar without a document",
         ),
         (
-            lambda root: (root / "quillmoor").mkdir() or (root / "quillmoor" / "loose.md").write_text("x"),
+            lambda root: (
+                (root / "quillmoor").mkdir() or (root / "quillmoor" / "loose.md").write_text("x")
+            ),
             "files must sit in a layer folder",
         ),
-        (lambda root: (root / "stray.md").write_text("x"), "files must sit in <workspace>/<layer>/"),
+        (
+            lambda root: (root / "stray.md").write_text("x"),
+            "files must sit in <workspace>/<layer>/",
+        ),
     ],
-    ids=["missing-sidecar", "invalid-layer", "bad-workspace-name", "unsupported-type",
-         "orphan-sidecar", "file-in-workspace", "file-at-top"],
+    ids=[
+        "missing-sidecar",
+        "invalid-layer",
+        "bad-workspace-name",
+        "unsupported-type",
+        "orphan-sidecar",
+        "file-in-workspace",
+        "file-at-top",
+    ],
 )
 def test_discover_reports_layout_problems(tmp_path: Path, build: Any, expected: str) -> None:
     build(tmp_path)
@@ -261,7 +297,8 @@ def test_headings_inside_code_fences_do_not_split() -> None:
     text = (
         "# API\n\n" + words(100) + "\n"
         "\n## Example\n\n```bash\n## not a heading, a shell comment\ncurl x\n```\n\n"
-        + words(120) + "\n"
+        + words(120)
+        + "\n"
     )
     sections = split_markdown(text)
     assert [slug for slug, _ in sections] == ["api", "example"]
@@ -314,8 +351,12 @@ def test_counts_per_workspace_and_layer(tmp_path: Path) -> None:
     counts = count_documents(documents)
     sections = count_sections(documents)
 
-    assert counts == Counter({("quillmoor", "human"): 2, ("quillmoor", "inbox"): 1, ("pellwick", "human"): 1})
-    assert sections == Counter({("quillmoor", "human"): 4, ("quillmoor", "inbox"): 1, ("pellwick", "human"): 1})
+    assert counts == Counter(
+        {("quillmoor", "human"): 2, ("quillmoor", "inbox"): 1, ("pellwick", "human"): 1}
+    )
+    assert sections == Counter(
+        {("quillmoor", "human"): 4, ("quillmoor", "inbox"): 1, ("pellwick", "human"): 1}
+    )
     assert format_counts(counts, sections) == [
         "  pellwick: 1 documents -> 1 sections (human 1 -> 1, agent 0 -> 0, inbox 0 -> 0)",
         "  quillmoor: 3 documents -> 5 sections (human 2 -> 4, agent 0 -> 0, inbox 1 -> 1)",
@@ -327,7 +368,12 @@ def test_the_demo_corpus_passes_the_check() -> None:
     documents, problems = discover(REPOSITORY / "knowledge")
     assert problems == []
     assert count_documents(documents) == Counter(
-        {("quillmoor", "human"): 25, ("quillmoor", "agent"): 5, ("quillmoor", "inbox"): 3, ("pellwick", "human"): 4}
+        {
+            ("quillmoor", "human"): 25,
+            ("quillmoor", "agent"): 5,
+            ("quillmoor", "inbox"): 3,
+            ("pellwick", "human"): 4,
+        }
     )
 
 
@@ -383,7 +429,10 @@ class FakeS3:
         """Two pages, so a prune that reads only the first one would show."""
         keys = sorted(key for key in self.objects if key.startswith(Prefix))
         half = len(keys) // 2
-        return [{"Contents": [{"Key": key} for key in part]} if part else {} for part in (keys[:half], keys[half:])]
+        return [
+            {"Contents": [{"Key": key} for key in part]} if part else {}
+            for part in (keys[:half], keys[half:])
+        ]
 
     def delete_objects(self, Bucket: str, Delete: dict[str, Any]) -> dict[str, Any]:
         self.deletes.append([entry["Key"] for entry in Delete["Objects"]])
@@ -428,7 +477,9 @@ def test_every_section_gets_an_exact_copy_of_the_document_sidecar(tmp_path: Path
 
 
 def test_non_markdown_files_are_uploaded_whole(tmp_path: Path) -> None:
-    add_document(tmp_path, "pellwick", "human", name="prices.txt", text="## Not split\n" + words(600))
+    add_document(
+        tmp_path, "pellwick", "human", name="prices.txt", text="## Not split\n" + words(600)
+    )
     documents, _ = discover(tmp_path)
     keys = [item.key for item in upload_items(documents[0])]
     assert keys == [
@@ -492,14 +543,14 @@ def test_a_key_s3_refuses_to_delete_is_an_aws_problem() -> None:
         delete_keys(Refusing(), "bucket", ["workspaces/x/human/a.md"])
 
 
-def run_main_against(
-    s3: FakeS3, argv: list[str], monkeypatch: pytest.MonkeyPatch
-) -> int:
+def run_main_against(s3: FakeS3, argv: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
     """`main` with the fake bucket, a finished job, and no stack to read."""
     agent = FakeAgent(["COMPLETE"])
     clients = {"s3": s3, "bedrock-agent": agent}
     monkeypatch.setattr(ingest, "client", lambda service, region: clients[service])
-    return main([*argv, "--bucket", "bucket", "--knowledge-base-id", "KB", "--data-source-id", "DS"])
+    return main(
+        [*argv, "--bucket", "bucket", "--knowledge-base-id", "KB", "--data-source-id", "DS"]
+    )
 
 
 def test_main_lists_stale_objects_and_deletes_nothing_by_default(
@@ -508,7 +559,10 @@ def test_main_lists_stale_objects_and_deletes_nothing_by_default(
     s3, _ = uploaded_bucket(tmp_path)
     assert run_main_against(s3, ["--source", str(tmp_path)], monkeypatch) == 0
     out = capsys.readouterr().out
-    assert "3 object(s) in the bucket are no longer in the folder and would be deleted with --delete:" in out
+    assert (
+        "3 object(s) in the bucket are no longer in the folder and would be deleted with --delete:"
+        in out
+    )
     assert "  workspaces/pellwick/inbox/old.md" in out
     assert s3.deletes == []
     assert "workspaces/pellwick/inbox/old.md" in s3.objects
@@ -557,12 +611,20 @@ class FakeAgent:
         self.polls = 0
 
     def _job(self, status: str) -> dict[str, Any]:
-        return {"ingestionJob": {"ingestionJobId": "job-1", "status": status, "statistics": self.statistics}}
+        return {
+            "ingestionJob": {
+                "ingestionJobId": "job-1",
+                "status": status,
+                "statistics": self.statistics,
+            }
+        }
 
     def start_ingestion_job(self, knowledgeBaseId: str, dataSourceId: str) -> dict[str, Any]:
         return self._job(self.statuses[0])
 
-    def get_ingestion_job(self, knowledgeBaseId: str, dataSourceId: str, ingestionJobId: str) -> dict[str, Any]:
+    def get_ingestion_job(
+        self, knowledgeBaseId: str, dataSourceId: str, ingestionJobId: str
+    ) -> dict[str, Any]:
         self.polls += 1
         return self._job(self.statuses[min(self.polls, len(self.statuses) - 1)])
 
@@ -577,23 +639,38 @@ def test_job_is_polled_until_a_final_status() -> None:
 def test_job_wait_gives_up_after_the_timeout() -> None:
     agent = FakeAgent(["IN_PROGRESS"])
     with pytest.raises(AwsProblem, match="still IN_PROGRESS"):
-        run_ingestion_job(agent, "kb", "ds", poll_seconds=5, timeout_seconds=10,
-                          sleep=lambda _: None, log=lambda _: None)
+        run_ingestion_job(
+            agent,
+            "kb",
+            "ds",
+            poll_seconds=5,
+            timeout_seconds=10,
+            sleep=lambda _: None,
+            log=lambda _: None,
+        )
 
 
 @pytest.mark.parametrize(
     ("status", "failed", "expected"),
     [("COMPLETE", 0, True), ("COMPLETE", 2, False), ("FAILED", 0, False), ("STOPPED", 0, False)],
 )
-def test_job_success_needs_complete_and_no_failed_documents(status: str, failed: int, expected: bool) -> None:
-    job = {"ingestionJobId": "job-1", "status": status, "statistics": {"numberOfDocumentsFailed": failed}}
+def test_job_success_needs_complete_and_no_failed_documents(
+    status: str, failed: int, expected: bool
+) -> None:
+    job = {
+        "ingestionJobId": "job-1",
+        "status": status,
+        "statistics": {"numberOfDocumentsFailed": failed},
+    }
     assert job_succeeded(job) is expected
 
 
 # --- Command line without AWS --------------------------------------------
 
 
-def test_main_check_only_returns_zero_for_a_valid_folder(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_check_only_returns_zero_for_a_valid_folder(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     add_document(tmp_path, "quillmoor", "human")
     add_document(tmp_path, "quillmoor", "agent", name="long.md", text=sectioned_text(2))
     assert main(["--source", str(tmp_path), "--check"]) == 0
@@ -622,7 +699,10 @@ def test_main_reports_an_aws_problem_without_traceback(
     add_document(tmp_path, "quillmoor", "human")
 
     def expired(*_: Any) -> None:
-        raise AwsProblem("Reading the outputs failed: the AWS login is missing or expired. Sign in again with `aws login`, then rerun.")
+        raise AwsProblem(
+            "Reading the outputs failed: the AWS login is missing or expired. "
+            "Sign in again with `aws login`, then rerun."
+        )
 
     monkeypatch.setattr(ingest, "client", expired)
     assert main(["--source", str(tmp_path)]) == 2

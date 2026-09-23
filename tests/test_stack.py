@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import pytest
+import aws  # app/aws.py, imported by its Lambda name (tests/conftest.py)
 
 # Imported, not skipped past. `aws-cdk-lib` is a hard dependency in
 # pyproject.toml, and it has to stay one: with an `importorskip` here, an
@@ -21,12 +21,10 @@ import pytest
 # a red line anywhere. A missing dependency is a broken environment and has
 # to look like one.
 import aws_cdk as cdk
+import handler  # app/handler.py, likewise
+import pytest
 from aws_cdk.assertions import Match, Template
 
-from scripts import ask
-
-import aws  # app/aws.py, imported by its Lambda name (tests/conftest.py)
-import handler  # app/handler.py, likewise
 from infra.stacks.andur_stack import (
     ANSWER_FUNCTION_NAME,
     ANSWER_MAX_CONCURRENCY,
@@ -34,9 +32,9 @@ from infra.stacks.andur_stack import (
     ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
     API_KEY_PARAMETER_PATH,
+    ASK_PATH,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
-    ASK_PATH,
     BUDGET_KEY_ATTRIBUTE,
     BUDGET_TABLE_NAME,
     BUDGET_TTL_ATTRIBUTE,
@@ -47,11 +45,11 @@ from infra.stacks.andur_stack import (
     DEFAULT_QUESTION_LIMIT,
     DEFAULT_WINDOW_HOURS,
     DENIED_TOPICS,
-    EXCERPT_GUARDRAIL_NAME,
     DEPLOY_PROPERTY,
     DISTANCE_METRIC,
     EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_ID,
+    EXCERPT_GUARDRAIL_NAME,
     GROUNDING_THRESHOLD,
     GUARDRAIL_NAME,
     HSTS_MAX_AGE_DAYS,
@@ -78,7 +76,7 @@ from infra.stacks.andur_stack import (
     AndurStack,
     replacement_safe_name,
 )
-
+from scripts import ask
 
 #: The file `cdk deploy` reads its context from. The tests read the same file,
 #: so that what is synthesised here is what would be deployed.
@@ -151,9 +149,7 @@ def documents_bucket(stack: AndurStack, template: Template) -> Mapping[str, Any]
     return resource_of(stack, template, stack.documents_bucket)["Properties"]
 
 
-def test_documents_bucket_blocks_all_public_access(
-    stack: AndurStack, template: Template
-) -> None:
+def test_documents_bucket_blocks_all_public_access(stack: AndurStack, template: Template) -> None:
     assert documents_bucket(stack, template)["PublicAccessBlockConfiguration"] == {
         "BlockPublicAcls": True,
         "BlockPublicPolicy": True,
@@ -232,7 +228,12 @@ def test_vector_index_name_carries_its_configuration(template: Template) -> None
 
 def test_replacement_safe_name_changes_with_every_setting() -> None:
     """Any change that replaces a resource must also rename it, or the two collide."""
-    settings = [VECTOR_DATA_TYPE, EMBEDDING_DIMENSION, DISTANCE_METRIC, NON_FILTERABLE_METADATA_KEYS]
+    settings = [
+        VECTOR_DATA_TYPE,
+        EMBEDDING_DIMENSION,
+        DISTANCE_METRIC,
+        NON_FILTERABLE_METADATA_KEYS,
+    ]
     variants = [
         ["float16", *settings[1:]],
         [settings[0], 512, *settings[2:]],
@@ -321,9 +322,7 @@ def test_resources_are_wired_by_reference(stack: AndurStack, template: Template)
     assert data_source["DataSourceConfiguration"]["S3Configuration"]["BucketArn"] == get_att(
         stack, stack.documents_bucket.node.default_child, "Arn"
     )
-    assert data_source["KnowledgeBaseId"] == get_att(
-        stack, stack.knowledge_base, "KnowledgeBaseId"
-    )
+    assert data_source["KnowledgeBaseId"] == get_att(stack, stack.knowledge_base, "KnowledgeBaseId")
 
 
 # --- Data source ---------------------------------------------------------
@@ -336,9 +335,7 @@ def test_data_source_crawls_only_the_workspace_prefix(template: Template) -> Non
             "DataSourceConfiguration": Match.object_like(
                 {
                     "Type": "S3",
-                    "S3Configuration": Match.object_like(
-                        {"InclusionPrefixes": [WORKSPACE_PREFIX]}
-                    ),
+                    "S3Configuration": Match.object_like({"InclusionPrefixes": [WORKSPACE_PREFIX]}),
                 }
             )
         },
@@ -365,9 +362,7 @@ def test_chunking_is_fixed_size_as_configured(template: Template) -> None:
 # --- Permissions ---------------------------------------------------------
 
 
-def test_role_may_only_read_our_own_documents_bucket(
-    stack: AndurStack, template: Template
-) -> None:
+def test_role_may_only_read_our_own_documents_bucket(stack: AndurStack, template: Template) -> None:
     bucket_arn = get_att(stack, stack.documents_bucket.node.default_child, "Arn")
     same_account = {"StringEquals": {"aws:ResourceAccount": {"Ref": "AWS::AccountId"}}}
 
@@ -400,13 +395,20 @@ def all_policy_statements(template: Template) -> list[tuple[str, dict[str, Any]]
     statements: list[tuple[str, dict[str, Any]]] = []
     for logical_id, role in template.find_resources("AWS::IAM::Role").items():
         for policy in role["Properties"].get("Policies", []):
-            statements += [(logical_id, statement) for statement in policy["PolicyDocument"]["Statement"]]
+            statements += [
+                (logical_id, statement) for statement in policy["PolicyDocument"]["Statement"]
+            ]
     for logical_id, policy in template.find_resources("AWS::IAM::Policy").items():
-        statements += [(logical_id, statement) for statement in policy["Properties"]["PolicyDocument"]["Statement"]]
+        statements += [
+            (logical_id, statement)
+            for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        ]
     return statements
 
 
-def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(template: Template) -> None:
+def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(
+    template: Template,
+) -> None:
     """Two actions that cannot be scoped; nothing else gets to use that excuse.
 
     ``bedrock:ListFoundationModels`` takes no resource at all. CloudFront
@@ -443,7 +445,9 @@ def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
     constructs. Every role the stack defines itself carries inline policies
     only, and both of these run during a deploy and never afterwards.
     """
-    provider_role = stack.node.find_child("ApiKeyProvider").node.find_child("framework-onEvent").role
+    provider_role = (
+        stack.node.find_child("ApiKeyProvider").node.find_child("framework-onEvent").role
+    )
     copier_role = stack.site_files.handler_role
     expected = {
         stack.get_logical_id(provider_role.node.default_child),
@@ -457,12 +461,17 @@ def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
     assert set(with_managed) == expected
     for managed_arns in with_managed.values():
         (managed_arn,) = managed_arns
-        assert joined_last_part(managed_arn) == ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        assert (
+            joined_last_part(managed_arn)
+            == ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        )
 
 
 def test_role_may_only_touch_our_own_vector_index(stack: AndurStack, template: Template) -> None:
     """No wildcard on s3vectors — one index, five actions."""
-    (statement,) = role_policies(stack, template, stack.knowledge_base_role)["UseVectorIndex"]["Statement"]
+    (statement,) = role_policies(stack, template, stack.knowledge_base_role)["UseVectorIndex"][
+        "Statement"
+    ]
     assert sorted(statement["Action"]) == [
         "s3vectors:DeleteVectors",
         "s3vectors:GetIndex",
@@ -473,7 +482,9 @@ def test_role_may_only_touch_our_own_vector_index(stack: AndurStack, template: T
     assert statement["Resource"] == {"Fn::GetAtt": ["VectorIndex", "IndexArn"]}
 
 
-def test_role_can_only_be_assumed_by_bedrock_in_this_account(stack: AndurStack, template: Template) -> None:
+def test_role_can_only_be_assumed_by_bedrock_in_this_account(
+    stack: AndurStack, template: Template
+) -> None:
     """Without the source conditions the role is a confused-deputy hole."""
     role = resource_of(stack, template, stack.knowledge_base_role)
     (statement,) = role["Properties"]["AssumeRolePolicyDocument"]["Statement"]
@@ -531,7 +542,9 @@ def test_vector_bucket_output_is_a_name_not_an_arn(template: Template) -> None:
 # --- Answer function (build step 3) --------------------------------------
 
 
-def test_answer_function_runs_the_handler_on_the_newest_runtime(stack: AndurStack, template: Template) -> None:
+def test_answer_function_runs_the_handler_on_the_newest_runtime(
+    stack: AndurStack, template: Template
+) -> None:
     properties = resource_of(stack, template, stack.answer_function)["Properties"]
     assert properties["FunctionName"] == ANSWER_FUNCTION_NAME
     assert properties["Runtime"] == "python3.14"
@@ -569,7 +582,9 @@ def test_cloudfront_gives_up_before_the_function_does() -> None:
     assert ORIGIN_RESPONSE_TIMEOUT_SECONDS < aws.worst_case_seconds()
 
 
-def test_answer_function_runs_at_most_a_few_requests_at_once(stack: AndurStack, template: Template) -> None:
+def test_answer_function_runs_at_most_a_few_requests_at_once(
+    stack: AndurStack, template: Template
+) -> None:
     """The hard cap on Lambda time and model calls behind an address anyone may find."""
     properties = resource_of(stack, template, stack.answer_function)["Properties"]
     assert properties["ReservedConcurrentExecutions"] == ANSWER_MAX_CONCURRENCY == 5
@@ -578,7 +593,9 @@ def test_answer_function_runs_at_most_a_few_requests_at_once(stack: AndurStack, 
 def test_answer_function_is_configured_only_through_its_environment(
     stack: AndurStack, template: Template
 ) -> None:
-    variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"]["Variables"]
+    variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"][
+        "Variables"
+    ]
     assert variables == {
         "KNOWLEDGE_BASE_ID": get_att(stack, stack.knowledge_base, "KnowledgeBaseId"),
         "MODEL_ID": ANSWER_MODEL_ID,
@@ -608,7 +625,9 @@ def test_the_model_id_is_configuration_not_handler_code() -> None:
         assert ANSWER_MODEL_ID not in module.read_text(encoding="utf-8"), module.name
 
 
-def test_answer_role_has_six_permissions_each_on_one_resource(stack: AndurStack, template: Template) -> None:
+def test_answer_role_has_six_permissions_each_on_one_resource(
+    stack: AndurStack, template: Template
+) -> None:
     policies = role_policies(stack, template, stack.answer_role)
     assert set(policies) == {
         "ReadApiKeys",
@@ -639,7 +658,11 @@ def test_answer_role_has_six_permissions_each_on_one_resource(stack: AndurStack,
             "bedrock:GuardrailIdentifier": {
                 "Fn::Join": [
                     "",
-                    [get_att(stack, stack.guardrail, "GuardrailArn"), ":", get_att(stack, stack.guardrail_version, "Version")],
+                    [
+                        get_att(stack, stack.guardrail, "GuardrailArn"),
+                        ":",
+                        get_att(stack, stack.guardrail_version, "Version"),
+                    ],
                 ]
             }
         }
@@ -652,7 +675,9 @@ def test_answer_role_has_six_permissions_each_on_one_resource(stack: AndurStack,
 
     (write_logs,) = policies["WriteLogs"]["Statement"]
     assert sorted(write_logs["Action"]) == ["logs:CreateLogStream", "logs:PutLogEvents"]
-    assert write_logs["Resource"] == get_att(stack, stack.answer_log_group.node.default_child, "Arn")
+    assert write_logs["Resource"] == get_att(
+        stack, stack.answer_log_group.node.default_child, "Arn"
+    )
 
 
 def test_answer_role_has_no_managed_policy(stack: AndurStack, template: Template) -> None:
@@ -677,7 +702,9 @@ def test_the_function_url_needs_signed_requests(stack: AndurStack, template: Tem
 def test_exactly_one_output_is_a_function_url(stack: AndurStack, template: Template) -> None:
     url_id = stack.get_logical_id(stack.function_url.node.default_child)
     url_outputs = [
-        name for name, output in template.find_outputs("*").items() if url_id in json.dumps(output["Value"])
+        name
+        for name, output in template.find_outputs("*").items()
+        if url_id in json.dumps(output["Value"])
     ]
     assert url_outputs == ["FunctionUrl"]
     assert template.find_outputs("FunctionUrl")["FunctionUrl"]["Value"] == get_att(
@@ -784,7 +811,9 @@ def test_the_ask_path_posts_to_the_function_and_is_never_cached(
     assert behavior["CachePolicyId"] == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
     assert behavior["OriginRequestPolicyId"] == "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 
-    function_origin = [o for o in distribution_config(stack, template)["Origins"] if "CustomOriginConfig" in o]
+    function_origin = [
+        o for o in distribution_config(stack, template)["Origins"] if "CustomOriginConfig" in o
+    ]
     (origin,) = function_origin
     assert behavior["TargetOriginId"] == origin["Id"]
     assert origin["CustomOriginConfig"]["OriginProtocolPolicy"] == "https-only"
@@ -794,8 +823,12 @@ def test_cloudfront_waits_as_long_as_an_account_may_without_asking(
     stack: AndurStack, template: Template
 ) -> None:
     """The response-timeout quota is 1-120 seconds; more needs an approved increase."""
-    (origin,) = [o for o in distribution_config(stack, template)["Origins"] if "CustomOriginConfig" in o]
-    assert origin["CustomOriginConfig"]["OriginReadTimeout"] == ORIGIN_RESPONSE_TIMEOUT_SECONDS == 120
+    (origin,) = [
+        o for o in distribution_config(stack, template)["Origins"] if "CustomOriginConfig" in o
+    ]
+    assert (
+        origin["CustomOriginConfig"]["OriginReadTimeout"] == ORIGIN_RESPONSE_TIMEOUT_SECONDS == 120
+    )
 
 
 def security_headers(template: Template) -> Mapping[str, Any]:
@@ -804,9 +837,7 @@ def security_headers(template: Template) -> Mapping[str, Any]:
     return policy["Properties"]["ResponseHeadersPolicyConfig"]["SecurityHeadersConfig"]
 
 
-def test_both_behaviours_send_the_security_headers(
-    stack: AndurStack, template: Template
-) -> None:
+def test_both_behaviours_send_the_security_headers(stack: AndurStack, template: Template) -> None:
     """The page and the answer, one policy — the distribution is the only free place for it."""
     config = distribution_config(stack, template)
     headers = stack.node.find_child("SecurityHeaders")
@@ -826,9 +857,7 @@ def test_the_page_says_what_it_may_load_and_who_may_frame_it(template: Template)
     """
     policy = security_headers(template)["ContentSecurityPolicy"]
     assert policy["Override"] is True
-    directives = dict(
-        part.split(" ", 1) for part in policy["ContentSecurityPolicy"].split("; ")
-    )
+    directives = dict(part.split(" ", 1) for part in policy["ContentSecurityPolicy"].split("; "))
     assert directives["default-src"] == "'none'"
     assert directives["frame-ancestors"] == "'none'"
     assert directives["script-src"] == directives["style-src"] == "'self'"
@@ -1044,11 +1073,16 @@ def test_two_guardrails_each_with_one_version(stack: AndurStack, template: Templ
     template.resource_count_is("AWS::Bedrock::Guardrail", 2)
     template.resource_count_is("AWS::Bedrock::GuardrailVersion", 2)
     assert resource_of(stack, template, stack.guardrail)["Properties"]["Name"] == GUARDRAIL_NAME
-    assert resource_of(stack, template, stack.excerpt_guardrail)["Properties"]["Name"] == EXCERPT_GUARDRAIL_NAME
+    assert (
+        resource_of(stack, template, stack.excerpt_guardrail)["Properties"]["Name"]
+        == EXCERPT_GUARDRAIL_NAME
+    )
     version = resource_of(stack, template, stack.guardrail_version)["Properties"]
     assert version["GuardrailIdentifier"] == get_att(stack, stack.guardrail, "GuardrailId")
     excerpt_version = resource_of(stack, template, stack.excerpt_guardrail_version)["Properties"]
-    assert excerpt_version["GuardrailIdentifier"] == get_att(stack, stack.excerpt_guardrail, "GuardrailId")
+    assert excerpt_version["GuardrailIdentifier"] == get_att(
+        stack, stack.excerpt_guardrail, "GuardrailId"
+    )
 
 
 def test_the_excerpt_guardrail_masks_the_same_details_and_does_nothing_else(
@@ -1060,15 +1094,19 @@ def test_the_excerpt_guardrail_masks_the_same_details_and_does_nothing_else(
     assert "ContextualGroundingPolicyConfig" not in properties
     assert "ContentPolicyConfig" not in properties and "WordPolicyConfig" not in properties
     entities = properties["SensitiveInformationPolicyConfig"]["PiiEntitiesConfig"]
-    answer_entities = resource_of(stack, template, stack.guardrail)["Properties"]["SensitiveInformationPolicyConfig"][
-        "PiiEntitiesConfig"
-    ]
+    answer_entities = resource_of(stack, template, stack.guardrail)["Properties"][
+        "SensitiveInformationPolicyConfig"
+    ]["PiiEntitiesConfig"]
     assert entities == answer_entities
     assert 1 <= len(properties["BlockedOutputsMessaging"]) <= 500
 
 
-def test_the_four_topics_are_refused_in_question_and_answer(stack: AndurStack, template: Template) -> None:
-    topics = resource_of(stack, template, stack.guardrail)["Properties"]["TopicPolicyConfig"]["TopicsConfig"]
+def test_the_four_topics_are_refused_in_question_and_answer(
+    stack: AndurStack, template: Template
+) -> None:
+    topics = resource_of(stack, template, stack.guardrail)["Properties"]["TopicPolicyConfig"][
+        "TopicsConfig"
+    ]
     assert [topic["Name"] for topic in topics] == [
         "Legal advice",
         "Tax advice",
@@ -1096,18 +1134,30 @@ def test_topics_stay_inside_what_bedrock_accepts() -> None:
     assert 1 <= len(BLOCKED_OUTPUT_MESSAGE) <= 500
 
 
-def test_personal_details_are_masked_in_the_answer_only(stack: AndurStack, template: Template) -> None:
-    config = resource_of(stack, template, stack.guardrail)["Properties"]["SensitiveInformationPolicyConfig"]
+def test_personal_details_are_masked_in_the_answer_only(
+    stack: AndurStack, template: Template
+) -> None:
+    config = resource_of(stack, template, stack.guardrail)["Properties"][
+        "SensitiveInformationPolicyConfig"
+    ]
     entities = config["PiiEntitiesConfig"]
-    assert [entity["Type"] for entity in entities] == list(MASKED_PII_TYPES) == ["NAME", "EMAIL", "PHONE", "ADDRESS"]
+    assert (
+        [entity["Type"] for entity in entities]
+        == list(MASKED_PII_TYPES)
+        == ["NAME", "EMAIL", "PHONE", "ADDRESS"]
+    )
     for entity in entities:
         assert entity["Action"] == "ANONYMIZE"
         assert (entity["OutputEnabled"], entity["OutputAction"]) == (True, "ANONYMIZE")
         assert entity["InputEnabled"] is False
 
 
-def test_grounding_and_relevance_are_checked_at_documented_thresholds(stack: AndurStack, template: Template) -> None:
-    config = resource_of(stack, template, stack.guardrail)["Properties"]["ContextualGroundingPolicyConfig"]
+def test_grounding_and_relevance_are_checked_at_documented_thresholds(
+    stack: AndurStack, template: Template
+) -> None:
+    config = resource_of(stack, template, stack.guardrail)["Properties"][
+        "ContextualGroundingPolicyConfig"
+    ]
     filters = {check["Type"]: check for check in config["FiltersConfig"]}
     assert set(filters) == {"GROUNDING", "RELEVANCE"}
     assert filters["GROUNDING"]["Threshold"] == GROUNDING_THRESHOLD == 0.7
@@ -1139,7 +1189,9 @@ def test_a_changed_setting_makes_a_new_guardrail_version(monkeypatch: pytest.Mon
     assert len(after) <= 200
 
 
-def test_a_changed_output_action_makes_new_versions_of_both_guardrails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_changed_output_action_makes_new_versions_of_both_guardrails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The digest covers the built properties, not a summary of them.
 
     An output action was never in the summary the digest used to be taken
@@ -1172,7 +1224,9 @@ def test_a_changed_output_action_makes_new_versions_of_both_guardrails(monkeypat
             )
             for entity in real_policy().pii_entities_config
         ]
-        return bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty(pii_entities_config=entities)
+        return bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty(
+            pii_entities_config=entities
+        )
 
     answer_before, excerpt_before = descriptions()
     monkeypatch.setattr(andur_stack, "masking_policy", blocking_policy)
@@ -1270,12 +1324,15 @@ def test_every_workspace_is_a_name_the_function_accepts() -> None:
 
 
 def test_no_key_value_is_in_the_template(template: Template) -> None:
-    """CloudFormation cannot hold a SecureString; a plain parameter would put the key into cdk.out."""
+    """CloudFormation cannot hold a SecureString; a plain parameter would put the key into
+    cdk.out."""
     template.resource_count_is("AWS::SSM::Parameter", 0)
     template.resource_count_is("AWS::SecretsManager::Secret", 0)
 
 
-def test_key_function_may_only_write_keys_under_the_path(stack: AndurStack, template: Template) -> None:
+def test_key_function_may_only_write_keys_under_the_path(
+    stack: AndurStack, template: Template
+) -> None:
     policies = role_policies(stack, template, stack.node.find_child("ApiKeyFunctionRole"))
     assert set(policies) == {"ManageApiKeys", "WriteLogs"}
     (statement,) = policies["ManageApiKeys"]["Statement"]
@@ -1301,6 +1358,8 @@ def test_every_function_logs_into_a_log_group_of_the_stack(template: Template) -
         assert function["Properties"]["LoggingConfig"]["LogGroup"]["Ref"] in log_group_ids
 
 
-def test_answer_log_group_has_the_name_lambda_would_give_it(stack: AndurStack, template: Template) -> None:
+def test_answer_log_group_has_the_name_lambda_would_give_it(
+    stack: AndurStack, template: Template
+) -> None:
     properties = resource_of(stack, template, stack.answer_log_group)["Properties"]
     assert properties["LogGroupName"] == f"/aws/lambda/{ANSWER_FUNCTION_NAME}"

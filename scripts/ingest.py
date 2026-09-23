@@ -259,7 +259,9 @@ def _visible(entries: Iterable[Path]) -> list[Path]:
     return sorted(entry for entry in entries if not entry.name.startswith("."))
 
 
-def _check_layer_folder(folder: Path, workspace: str, layer: str) -> tuple[list[Document], list[str]]:
+def _check_layer_folder(
+    folder: Path, workspace: str, layer: str
+) -> tuple[list[Document], list[str]]:
     documents: list[Document] = []
     problems: list[str] = []
     entries = _visible(folder.iterdir())
@@ -318,14 +320,18 @@ def discover(source: Path, only_workspace: str | None = None) -> tuple[list[Docu
             continue
         for layer_entry in _visible(entry.iterdir()):
             if layer_entry.is_file():
-                problems.append(f"{layer_entry}: files must sit in a layer folder ({', '.join(LAYERS)})")
+                problems.append(
+                    f"{layer_entry}: files must sit in a layer folder ({', '.join(LAYERS)})"
+                )
             elif layer_entry.name not in LAYERS:
                 problems.append(
                     f"{layer_entry}: unknown layer {layer_entry.name!r}, expected one of "
                     f"{', '.join(LAYERS)}"
                 )
             else:
-                found, layer_problems = _check_layer_folder(layer_entry, workspace, layer_entry.name)
+                found, layer_problems = _check_layer_folder(
+                    layer_entry, workspace, layer_entry.name
+                )
                 documents.extend(found)
                 problems.extend(layer_problems)
 
@@ -423,7 +429,9 @@ def remote_keys(s3: Any, bucket: str, prefix: str) -> list[str]:
     return sorted(keys)
 
 
-def stale_keys(s3: Any, bucket: str, documents: Iterable[Document], only_workspace: str | None = None) -> list[str]:
+def stale_keys(
+    s3: Any, bucket: str, documents: Iterable[Document], only_workspace: str | None = None
+) -> list[str]:
     """Objects under the documents prefix that no local document produces any more."""
     prefix = BUCKET_PREFIX + (f"{only_workspace}/" if only_workspace else "")
     expected = {item.key for document in documents for item in upload_items(document)}
@@ -454,7 +462,10 @@ def format_stale(keys: list[str], deleted: bool) -> list[str]:
     if deleted:
         head = f"Deleted {len(keys)} object(s) that are no longer in the folder:"
     else:
-        head = f"{len(keys)} object(s) in the bucket are no longer in the folder and would be deleted with --delete:"
+        head = (
+            f"{len(keys)} object(s) in the bucket are no longer in the folder "
+            "and would be deleted with --delete:"
+        )
     return [head] + [f"  {key}" for key in keys]
 
 
@@ -518,7 +529,10 @@ JOB_STATISTICS = (
 
 
 def job_succeeded(job: dict[str, Any]) -> bool:
-    return job["status"] == "COMPLETE" and job.get("statistics", {}).get("numberOfDocumentsFailed", 0) == 0
+    return (
+        job["status"] == "COMPLETE"
+        and job.get("statistics", {}).get("numberOfDocumentsFailed", 0) == 0
+    )
 
 
 def format_job(job: dict[str, Any]) -> list[str]:
@@ -537,16 +551,26 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         prog="python -m scripts.ingest",
         description="Upload a local knowledge folder to Andur and sync the knowledge base.",
     )
-    parser.add_argument("--source", type=Path, default=Path("knowledge"),
-                        help="folder laid out as <workspace>/<layer>/<file> (default: knowledge)")
-    parser.add_argument("--workspace", help="upload only this workspace (the sync still covers all)")
-    parser.add_argument("--check", action="store_true",
-                        help="only check the folder; no AWS calls")
-    parser.add_argument("--delete", action="store_true",
-                        help="delete objects the folder no longer has; without it they are only listed")
+    parser.add_argument(
+        "--source",
+        type=Path,
+        default=Path("knowledge"),
+        help="folder laid out as <workspace>/<layer>/<file> (default: knowledge)",
+    )
+    parser.add_argument(
+        "--workspace", help="upload only this workspace (the sync still covers all)"
+    )
+    parser.add_argument("--check", action="store_true", help="only check the folder; no AWS calls")
+    parser.add_argument(
+        "--delete",
+        action="store_true",
+        help="delete objects the folder no longer has; without it they are only listed",
+    )
     parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
     parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
-    parser.add_argument("--bucket", help="documents bucket; default: stack output DocumentsBucketName")
+    parser.add_argument(
+        "--bucket", help="documents bucket; default: stack output DocumentsBucketName"
+    )
     parser.add_argument("--knowledge-base-id", help="default: stack output KnowledgeBaseId")
     parser.add_argument("--data-source-id", help="default: stack output DataSourceId")
     return parser.parse_args(argv)

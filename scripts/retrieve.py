@@ -5,7 +5,15 @@ import sys
 from typing import Any
 
 from scripts import utf8_output
-from scripts.aws import REGION, STACK_NAME, AwsProblem, client, explained, read_stack_outputs, resolve
+from scripts.aws import (
+    REGION,
+    STACK_NAME,
+    AwsProblem,
+    client,
+    explained,
+    read_stack_outputs,
+    resolve,
+)
 from scripts.ingest import LAYERS
 
 EXCERPT_CHARACTERS = 160
@@ -36,7 +44,11 @@ def format_hit(rank: int, result: dict[str, Any]) -> list[str]:
 
 
 def retrieve(
-    agent_runtime: Any, knowledge_base_id: str, question: str, search_filter: dict[str, Any], results: int
+    agent_runtime: Any,
+    knowledge_base_id: str,
+    question: str,
+    search_filter: dict[str, Any],
+    results: int,
 ) -> list[dict[str, Any]]:
     with explained("Retrieving from the knowledge base"):
         response = agent_runtime.retrieve(

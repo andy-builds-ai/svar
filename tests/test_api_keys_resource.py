@@ -2,9 +2,9 @@
 
 from typing import Any
 
+import handler as answer_handler  # app/handler.py, by its Lambda name (tests/conftest.py)
 import pytest
 
-import handler as answer_handler  # app/handler.py, by its Lambda name (tests/conftest.py)
 from infra.api_keys import handler
 
 PATH = "/andur/api-keys"
@@ -37,7 +37,9 @@ class FakeSSM:
         self.deleted.append(Name)
 
 
-def lifecycle(request_type: str, physical_id: str | None = None, properties: dict[str, str] = PROPERTIES) -> dict[str, Any]:
+def lifecycle(
+    request_type: str, physical_id: str | None = None, properties: dict[str, str] = PROPERTIES
+) -> dict[str, Any]:
     event: dict[str, Any] = {"RequestType": request_type, "ResourceProperties": properties}
     if physical_id is not None:
         event["PhysicalResourceId"] = physical_id
@@ -127,8 +129,11 @@ def test_delete_leaves_a_key_alone_that_this_resource_never_created() -> None:
     ],
     ids=["outside-the-path", "not-a-string", "no-name", "no-properties"],
 )
-def test_delete_with_invalid_properties_succeeds_and_deletes_nothing(properties: dict[str, Any] | None) -> None:
-    """Create would have failed on the same properties, so there is no key — and a failing Delete sticks a stack."""
+def test_delete_with_invalid_properties_succeeds_and_deletes_nothing(
+    properties: dict[str, Any] | None,
+) -> None:
+    """Create would have failed on the same properties, so there is no key — and a failing
+    Delete sticks a stack."""
     ssm = FakeSSM()
     handler.on_event(lifecycle("Create"), None, ssm)
     event: dict[str, Any] = {"RequestType": "Delete", "PhysicalResourceId": f"{PATH}/quillmoor"}
@@ -176,4 +181,8 @@ def test_delete_survives_a_client_that_cannot_even_be_built(
 )
 def test_a_parameter_outside_the_key_path_is_refused(name: str) -> None:
     with pytest.raises(ValueError, match="not directly under"):
-        handler.on_event(lifecycle("Create", properties={"ParameterName": name, "ParameterPath": PATH}), None, FakeSSM())
+        handler.on_event(
+            lifecycle("Create", properties={"ParameterName": name, "ParameterPath": PATH}),
+            None,
+            FakeSSM(),
+        )
