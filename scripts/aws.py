@@ -1,16 +1,9 @@
-"""AWS plumbing shared by the scripts: clients, stack outputs, readable errors.
-
-boto3 is imported lazily, inside `client`. Everything in the scripts that only
-looks at local files — and the tests for it — works without boto3 installed.
-"""
+"""AWS plumbing shared by the scripts: clients, stack outputs, readable errors."""
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
-#: The stack name and region `infra/app.py` deploys to. Pinned here for the
-#: same reason as there: a shell profile pointing at another region must not
-#: send the scripts looking for the stack in the wrong place.
 STACK_NAME = "AndurStack"
 REGION = "us-east-1"
 
@@ -23,19 +16,13 @@ _CREDENTIAL_ERROR_CODES = {
     "InvalidSignatureException",
 }
 
-#: Operations botocore calls on its own to refresh an `aws login` session.
-#: Any error from them means the login itself has run out.
 _LOGIN_REFRESH_OPERATIONS = {"CreateOAuth2Token"}
 
 LOGIN_HINT = "Sign in again with `aws login`, then rerun."
 
 
 class AwsProblem(Exception):
-    """An AWS step failed for a reason the user can act on.
-
-    The message is written for the terminal: what failed, why, what to do.
-    The scripts print it instead of a traceback.
-    """
+    """An AWS step failed for a reason the user can act on."""
 
 
 def client(service: str, region: str) -> Any:
@@ -46,8 +33,6 @@ def client(service: str, region: str) -> Any:
         raise AwsProblem(
             "boto3 is not installed. Run `pip install -e .` in the repository root."
         ) from exc
-    # Creating a client already loads the credentials, so a missing login
-    # surfaces here, not at the first call.
     with explained(f"Connecting to AWS ({service})"):
         return boto3.client(service, region_name=region)
 
@@ -61,12 +46,7 @@ def error_code(exc: BaseException | None) -> str | None:
 
 
 def is_login_problem(exc: BaseException) -> bool:
-    """True when the credentials are missing or expired, not the request wrong.
-
-    Three shapes: an AWS error code saying so; an error from the operation
-    that refreshes an `aws login` session; or a botocore-side exception such
-    as NoCredentialsError or LoginRefreshRequired, recognised by its name.
-    """
+    """True when the credentials are missing or expired, not the request wrong."""
     code = error_code(exc)
     if code is not None:
         return (
@@ -92,11 +72,7 @@ def explain(action: str, exc: BaseException) -> str:
 
 @contextmanager
 def explained(action: str) -> Iterator[None]:
-    """Re-raise botocore exceptions as `AwsProblem` with a readable message.
-
-    Only exceptions that come from botocore are translated. Anything else is a
-    bug in the script and keeps its traceback.
-    """
+    """Re-raise botocore exceptions as `AwsProblem` with a readable message."""
     try:
         yield
     except Exception as exc:
@@ -129,12 +105,7 @@ def read_stack_outputs(cloudformation: Any, stack_name: str) -> dict[str, str]:
 def resolve(
     overrides: Mapping[str, str | None], load_outputs: Any
 ) -> dict[str, str]:
-    """Fill in every setting not given on the command line from the stack outputs.
-
-    ``overrides`` maps an output key (``KnowledgeBaseId``, ...) to the value
-    passed as an argument, or None. The stack is only asked when at least one
-    value is missing, so a fully specified call needs no CloudFormation access.
-    """
+    """Fill in every setting not given on the command line from the stack outputs."""
     missing = [key for key, value in overrides.items() if not value]
     outputs = load_outputs() if missing else {}
     resolved: dict[str, str] = {}

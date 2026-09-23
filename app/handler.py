@@ -1,45 +1,4 @@
-"""The Andur question handler: one Lambda function behind a Function URL.
-
-    POST <web url>/ask
-    X-Andur-Key: <workspace key>
-    {"question": "How do I export project data?", "workspace": "quillmoor"}
-
-A request runs five steps, and each can end it with its own status code:
-
-1. Read the request and check that its key belongs to the workspace it names
-   (400, 401, 403, 405).
-2. Count the question against that key's budget: so many questions, and a
-   window that starts with the first one. A key with nothing left is refused
-   before anything is paid for (402).
-3. Retrieve passages from the knowledge base, filtered to that workspace.
-   No passage means no model call: a 200 that says so, and no model to pay
-   for. The question is spent either way — it passed the budget in step 2.
-4. Ask the answering model to answer from the numbered passages only, through
-   the guardrail on the same call (502 if Bedrock fails). The guardrail
-   refuses legal, tax and medical advice and questions about people, masks
-   names, e-mail addresses, phone numbers and addresses in the answer, and
-   withholds an answer the passages do not carry.
-5. Return the answer, every passage with its layer, the layers of the
-   passages the answer cites, the model, the token usage, what the guardrail
-   did, what the answer cost with the date of the prices, and the latency.
-
-Errors come back as ``{"error": "<one sentence>"}`` — never a traceback, and
-for a broken configuration only a fixed sentence; the cause goes to the log.
-Every request is logged as one JSON line with its workspace. The question
-itself is never logged, with one exception: the traceback of a `crashed`
-line can carry an exception message, and a message can quote what it choked
-on.
-
-`LLMError`, `extract_answer` with its stopReason check and the botocore catch
-come from the learning chatbot (rag_chatbot.py); `load_settings` does there
-what `check_provider` did: check the configuration before any network call.
-Adapted to Lambda: an error ends the request with an HTTP status instead of a
-console line.
-
-Lambda packages this whole folder and imports its modules by their plain
-names, ``handler`` and ``aws``; the tests do the same (tests/conftest.py).
-AWS clients, timeouts and error causes live in aws.py.
-"""
+"""The Andur question handler: one Lambda function behind a Function URL."""
 
 import base64
 import binascii
@@ -68,26 +27,12 @@ logger.setLevel(logging.INFO)
 #: The three layers a document can come from, in the order they are trusted.
 LAYERS = ("human", "agent", "inbox")
 
-#: Same rule as ``WORKSPACE_NAME`` in scripts/ingest.py; a test keeps them
-#: equal. ``\Z`` and not ``$``: ``$`` also matches in front of a closing
-#: newline, so ``"quillmoor\n"`` would pass for a workspace name.
 WORKSPACE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
-#: A workspace name longer than this is refused before the pattern runs. The
-#: name is the one thing from outside a request that reaches a log line and an
-#: error sentence, so its length is capped before it gets anywhere near
-#: either. Same value in scripts/ingest.py; a test keeps them equal.
 MAX_WORKSPACE_CHARACTERS = 64
 
-#: A question longer than this is refused before anything is paid for.
 MAX_QUESTION_CHARACTERS = 1000
 
-#: Where the workspace key travels. Not ``Authorization``: CloudFront signs
-#: every request it forwards to the function URL (origin access control,
-#: signing behaviour ``always``) and overwrites the caller's ``Authorization``
-#: header with its own SigV4 signature. A key sent there would never arrive.
-#: Matched in lowercase — HTTP header names are case-insensitive, and a
-#: Function URL hands them over lowercased.
 KEY_HEADER = "X-Andur-Key"
 
 #: Answers are a few sentences; this only stops a runaway answer.
@@ -96,21 +41,10 @@ MAX_ANSWER_TOKENS = 1024
 #: How much of each passage the response carries as its excerpt.
 EXCERPT_CHARACTERS = 300
 
-#: How much of one passage goes into the prompt. A hit is a section of at
-#: most 450 words or a chunk of one; the longest section with a table, which
-#: retrieve returns whole, has 2,874 characters (measured 17.09.2026). The
-#: limit only stops an outlier from pulling pages into the prompt.
 MAX_SOURCE_CHARACTERS = 3000
 
-#: Upper bound for the number of passages a deployment may configure. The
-#: passages go to the guardrail as its grounding source, which takes at most
-#: 100,000 characters (contextual grounding page of the Bedrock user guide,
-#: read 23.09.2026). Thirty passages of `MAX_SOURCE_CHARACTERS` with their
-#: headers and cut notes stay below that; a hundred would not.
 MAX_RESULTS = 30
 
-#: Upper bounds for the budget a deployment may configure. They only catch a
-#: typo in an environment variable; a real budget is far below either.
 MAX_QUESTION_LIMIT = 10_000
 MAX_WINDOW_HOURS = 24 * 365
 MAX_KEEP_DAYS = 3650
@@ -118,40 +52,24 @@ MAX_KEEP_DAYS = 3650
 SECONDS_PER_HOUR = 3600
 SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
 
-#: How long a warm function trusts the keys it has read. A deleted or
-#: replaced key stops working at the latest after this long.
 KEY_CACHE_SECONDS = 300
 
-#: An unknown key makes the function read the keys again, so that a key
-#: created a moment ago works at once — but not more often than this, so a
-#: flood of wrong keys cannot become a flood of Parameter Store reads.
 KEY_RELOAD_MIN_SECONDS = 10
 
 #: What the handler answers itself when retrieval finds no passage.
 NO_SOURCES_ANSWER = "No sources in this workspace match the question."
 
-#: The sentence the prompt tells the model to answer with when the sources do
-#: not answer the question. The handler only writes it into the prompt; it
-#: does not check whether the model used it.
 NOT_IN_SOURCES_ANSWER = "The sources do not answer this question."
 
 #: The only thing a caller learns about a broken configuration.
 NOT_CONFIGURED_MESSAGE = "The service is not configured."
 
-#: What a caller reads when a key has nothing left. Which half ran out is
-#: worth saying: waiting helps in neither case, but somebody who asked three
-#: questions should not be told they asked ten. The third sentence is for a
-#: refusal whose item did not come back with it.
 QUESTIONS_SPENT_MESSAGE = "This key's {limit} questions are used up; a new key is needed."
 WINDOW_CLOSED_MESSAGE = "This key's time window has closed; a new key is needed."
 BUDGET_SPENT_MESSAGE = "This key's budget is used up; a new key is needed."
 
-#: The highest price per thousand a deployment may configure, in USD. It only
-#: catches a slip in an environment variable; every real price is far below.
 MAX_PRICE_PER_THOUSAND = Decimal(10)
 
-#: How many decimal places `cost_usd` keeps. A question costs about a tenth
-#: of a cent, so six places show it to a thousandth of that.
 COST_DECIMAL_PLACES = 6
 
 #: Notes added to an answer the model did not finish on its own.
@@ -161,10 +79,6 @@ STOP_NOTES = {
     "guardrail_intervened": "[Answer stopped: a guardrail intervened.]",
 }
 
-#: What the guardrail did to an answer, and the note the answer gets for it.
-#: A blocked answer is replaced by the guardrail's own message, which says
-#: why; a note under it would say it twice. A masked answer is the model's
-#: answer with personal details replaced by their type, such as ``{PHONE}``.
 GUARDRAIL_NOTES = {
     "blocked": None,
     "masked": "[Personal details in this answer are masked.]",
@@ -183,7 +97,7 @@ class HandlerError(Exception):
 
     @property
     def public_message(self) -> str:
-        """What the caller reads. The full message always goes to the log."""
+        """What the caller reads."""
         return str(self)
 
 
@@ -192,13 +106,7 @@ class BadRequest(HandlerError):
 
 
 class Unauthorized(HandlerError):
-    """No key, or a key that belongs to no workspace.
-
-    No ``WWW-Authenticate`` header: that names an HTTP authentication scheme
-    for the ``Authorization`` header, and the key does not travel there
-    (`KEY_HEADER`). Announcing ``Bearer`` would send a browser to a login
-    prompt for a header nothing reads.
-    """
+    """No key, or a key that belongs to no workspace."""
 
     status = 401
 
@@ -208,13 +116,7 @@ class Forbidden(HandlerError):
 
 
 class BudgetSpent(HandlerError):
-    """A valid key for the right workspace, with nothing left to spend.
-
-    402 rather than 401, 403 or 429. The key is valid, so not 401; it opens
-    this workspace, so not 403; and 429 is the function's concurrency limit,
-    which says "too many at once, try again in a moment" — the opposite of
-    what this means. Waiting does not bring a spent key back.
-    """
+    """A valid key for the right workspace, with nothing left to spend."""
 
     status = 402
 
@@ -235,16 +137,7 @@ class ConfigurationError(HandlerError):
 
 
 class NoWorkspaceKeys(ConfigurationError):
-    """The key path is readable and holds no usable key.
-
-    A different thing from "the keys could not be read", and the difference
-    decides what a warm instance does with the keys it already has. Reading
-    failed means the keys in hand are only old, so they go on deciding
-    (`workspace_keys`). An empty path means they are *gone* — every parameter
-    under it was deleted, which is how every workspace's key is rotated at
-    once — and a key that no longer exists may not open anything. So this one
-    is never caught as a reason to keep using stale keys; it clears them.
-    """
+    """The key path is readable and holds no usable key."""
 
 
 class RetrievalError(HandlerError):
@@ -264,11 +157,7 @@ class LLMError(HandlerError):
 
 @dataclass(frozen=True)
 class Prices:
-    """USD per 1,000 tokens of the answering model, or per 1,000 guardrail text units.
-
-    A text unit is up to 1,000 characters of text one guardrail policy
-    reads. Only the three policies the stack configures have a price here.
-    """
+    """USD per 1,000 tokens of the answering model, or per 1,000 guardrail text units."""
 
     input_tokens: Decimal
     output_tokens: Decimal
@@ -295,7 +184,6 @@ class Settings:
     excerpt_guardrail_id: str
     excerpt_guardrail_version: str
     prices: Prices
-    #: The day the prices were read off the pricing page, ``YYYY-MM-DD``.
     price_date: str
 
 
@@ -324,12 +212,7 @@ ENVIRONMENT_VARIABLES = {
 
 
 def whole_number(variable: str, text: str, lowest: int, highest: int) -> int:
-    """A setting that has to be a whole number in a range; the error names the variable.
-
-    ``isascii()`` as well as ``isdigit()``: ``"²"`` and the digits of other
-    scripts pass ``isdigit()`` but not ``int()``, and the caller would get a
-    bare ``ValueError`` instead of a message naming the variable to fix.
-    """
+    """A setting that has to be a whole number in a range; the error names the variable."""
     if not (text.isascii() and text.isdigit()) or not lowest <= int(text) <= highest:
         raise ConfigurationError(
             f"{variable} must be a whole number from {lowest} to {highest}, not {text!r}."
@@ -362,11 +245,7 @@ def price_day(text: str) -> str:
 
 
 def load_settings(environ: Mapping[str, str]) -> Settings:
-    """Read and check the settings; no network call.
-
-    Raises `ConfigurationError` naming the first variable that is missing or
-    wrong, so the log says what to fix.
-    """
+    """Read and check the settings; no network call."""
     values: dict[str, str] = {}
     for name, variable in ENVIRONMENT_VARIABLES.items():
         value = environ.get(variable, "").strip()
@@ -383,16 +262,11 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         raise ConfigurationError(
             f"API_KEY_PARAMETER_PATH must start with a slash and not end with one, not {path!r}."
         )
-    # An item that goes before its own window closes would hand the key a
-    # fresh budget while the old one is still running.
     if keep_days * SECONDS_PER_DAY <= window_hours * SECONDS_PER_HOUR:
         raise ConfigurationError(
             f"KEEP_DAYS ({keep_days}) must outlast WINDOW_HOURS ({window_hours}): a budget "
             "whose item disappears before its window closes is no budget."
         )
-    # A numbered version and never DRAFT: the draft changes whenever somebody
-    # edits the guardrail in the console, and the guard on an answer should be
-    # the one the stack deployed.
     for name in ("guardrail_version", "excerpt_guardrail_version"):
         if not (values[name].isascii() and values[name].isdigit()):
             raise ConfigurationError(
@@ -436,11 +310,7 @@ def require_post(event: Mapping[str, Any]) -> None:
 
 
 def read_body(event: Mapping[str, Any]) -> dict[str, Any]:
-    """The request body as a JSON object.
-
-    A Function URL hands over the body as text, or base64-encoded when the
-    client declared it binary.
-    """
+    """The request body as a JSON object."""
     raw = event.get("body") or ""
     if event.get("isBase64Encoded"):
         try:
@@ -457,13 +327,7 @@ def read_body(event: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def requested_workspace(body: Mapping[str, Any]) -> str:
-    """The workspace the request names, checked against the naming rule.
-
-    The length goes first, before the pattern and before the name is kept for
-    the log line. A megabyte of somebody's choosing should not travel any
-    further into the function than it has to, and the error it earns says
-    nothing back.
-    """
+    """The workspace the request names, checked against the naming rule."""
     workspace = body.get("workspace")
     if not isinstance(workspace, str) or not workspace:
         raise BadRequest('The body has no "workspace".')
@@ -488,13 +352,7 @@ def requested_question(body: Mapping[str, Any]) -> str:
 
 
 def request_key(headers: Mapping[str, str] | None) -> str:
-    """The workspace key from the `KEY_HEADER` header.
-
-    The value is taken as it stands, minus surrounding whitespace: it is a
-    key, not a scheme and a token. Two headers of the same name arrive joined
-    by a comma, which no key contains, so such a value is simply not a key
-    and ends as 401 in `authorize`.
-    """
+    """The workspace key from the `KEY_HEADER` header."""
     lowered = {name.lower(): value for name, value in (headers or {}).items()}
     key = lowered.get(KEY_HEADER.lower(), "").strip()
     if not key:
@@ -515,11 +373,7 @@ def log_event(event: str, **fields: Any) -> None:
 
 @functools.cache
 def log_sdk_versions() -> None:
-    """Log the boto3 and botocore versions the runtime brings, once per cold start.
-
-    The function does not package its own boto3, so this line is where a
-    runtime too old for an API it calls would show.
-    """
+    """Log the boto3 and botocore versions the runtime brings, once per cold start."""
     log_event("cold-start", **aws.sdk_versions())
 
 
@@ -537,10 +391,7 @@ def client(service: str, region: str) -> Any:
 
 
 def keys_by_workspace(parameters: Sequence[Mapping[str, Any]], path: str) -> dict[str, str]:
-    """Turn Parameter Store entries ``<path>/<workspace>`` into ``{workspace: key}``.
-
-    An entry whose last part is not a valid workspace name is left out.
-    """
+    """Turn Parameter Store entries ``<path>/<workspace>`` into ``{workspace: key}``."""
     prefix = path + "/"
     keys: dict[str, str] = {}
     for parameter in parameters:
@@ -560,11 +411,7 @@ def shared_key_workspaces(keys: Mapping[str, str]) -> set[str]:
 
 
 def read_workspace_keys(path: str, region: str) -> dict[str, str]:
-    """Every usable workspace key, read and decrypted from Parameter Store.
-
-    A key stored for two workspaces could not tell them apart, so it opens
-    neither; the log names both.
-    """
+    """Every usable workspace key, read and decrypted from Parameter Store."""
     ssm = client("ssm", region)
     parameters: list[Mapping[str, Any]] = []
     try:
@@ -591,28 +438,17 @@ class KeyCache:
     """The keys a warm function instance has read, and when."""
 
     keys: dict[str, str] = field(default_factory=dict)
-    #: When the keys were last read successfully; None before the first read.
     read_at: float | None = None
-    #: When a read was last attempted, successful or not.
     tried_at: float | None = None
 
 
 _key_cache = KeyCache()
 
-#: The clock the key cache runs on. Monotonic, so a changed system time does
-#: not age the keys; tests replace it.
 clock: Callable[[], float] = time.monotonic
 
 
 def reload_workspace_keys(path: str, region: str) -> dict[str, str]:
-    """Read the keys now and keep them.
-
-    When reading fails, nothing is kept — the keys in hand are old, not
-    wrong. When the path is readable and empty, the keys in hand are wrong:
-    they were deleted, and what is thrown away here is exactly what would
-    otherwise go on opening workspaces. The instance is then where a cold one
-    is, and answers 500 until keys exist again.
-    """
+    """Read the keys now and keep them."""
     _key_cache.tried_at = clock()
     try:
         keys = read_workspace_keys(path, region)
@@ -624,23 +460,7 @@ def reload_workspace_keys(path: str, region: str) -> dict[str, str]:
 
 
 def workspace_keys(path: str, region: str) -> dict[str, str]:
-    """The workspace keys, read again once they are `KEY_CACHE_SECONDS` old.
-
-    A failed reread of expired keys does not shut the door: the keys already
-    read go on deciding, and the next attempt waits `KEY_RELOAD_MIN_SECONDS`,
-    the same brake an unknown key runs into. Parameter Store being briefly
-    unreachable would otherwise turn every request into a 500, and the keys
-    in hand are not wrong — only old. The price is that a key deleted during
-    such an outage keeps working past its five minutes.
-
-    An empty key path is not that case and is not caught here
-    (`NoWorkspaceKeys`): the store answered, and its answer is that there are
-    no keys. Going on with the deleted ones would make the one way to retire
-    every key at once — delete the parameters — do nothing at all.
-
-    A function that has never read any keys has nothing to fall back on. That
-    stays a 500.
-    """
+    """The workspace keys, read again once they are `KEY_CACHE_SECONDS` old."""
     if _key_cache.read_at is None:
         return reload_workspace_keys(path, region)
     if clock() - _key_cache.read_at < KEY_CACHE_SECONDS:
@@ -661,11 +481,7 @@ def may_reload_keys() -> bool:
 
 
 def workspace_for_key(presented: str, keys: Mapping[str, str]) -> str | None:
-    """The workspace a key belongs to, or None.
-
-    Every stored key is compared, each with `hmac.compare_digest`, so the time
-    a check takes does not tell how much of a key was right or which one matched.
-    """
+    """The workspace a key belongs to, or None."""
     owner = None
     presented_bytes = presented.encode("utf-8")
     for workspace, key in keys.items():
@@ -680,20 +496,11 @@ def check_access(key: str, workspace: str, keys: Mapping[str, str]) -> None:
     if owner is None:
         raise Unauthorized("The key is not valid.")
     if owner != workspace:
-        # The name may go back out: by here it has passed
-        # `MAX_WORKSPACE_CHARACTERS` and `WORKSPACE_NAME`, so it is at most 64
-        # characters of lowercase letters, digits and hyphens — nothing that
-        # can carry markup into a page that shows this sentence.
         raise Forbidden(f"This key does not open the workspace {workspace}.")
 
 
 def authorize(key: str, workspace: str, settings: Settings) -> None:
-    """Check the key against the keys; an unknown key has them read again first.
-
-    The reread happens at most once per request, and not when the keys were
-    just read. If it fails, the keys already read still decide: an unknown key
-    gets its 401, not a 500.
-    """
+    """Check the key against the keys; an unknown key has them read again first."""
     path, region = settings.key_parameter_path, settings.region
     keys = workspace_keys(path, region)
     if workspace_for_key(key, keys) is None and may_reload_keys():
@@ -706,34 +513,11 @@ def authorize(key: str, workspace: str, settings: Settings) -> None:
     check_access(key, workspace, keys)
 
 
-# --- Key budgets ---------------------------------------------------------
-#
-# A key is an allowance, not a password: so many questions, and a window that
-# starts with the first one. The count cannot live in the function — every
-# request may run in a different instance, and five may run at once — so it
-# lives in one DynamoDB item per key, and the check and the count are a single
-# conditional write.
-
-
-#: The clock the budget runs on. Not the monotonic clock above: an expiry is a
-#: moment every instance has to agree on, and instances come and go. Tests
-#: replace it.
 wall_clock: Callable[[], float] = time.time
 
-#: The item's partition key and the attribute DynamoDB's TTL watches. The
-#: stack creates the table with exactly these names; a test keeps them equal.
 BUDGET_KEY_ATTRIBUTE = "key_hash"
 BUDGET_TTL_ATTRIBUTE = "delete_after"
 
-#: Check and count in one write. Every operand on the right resolves against
-#: the item as it was *before* this update — DynamoDB applies the actions of
-#: one expression together, not left to right ("Using update expressions":
-#: "an action's right-hand operand always refers to the pre-update value of an
-#: attribute"). So the first question writes ``first_used_at`` and the window,
-#: and every later one recomputes ``expires_at`` to the value it already has.
-#: ``window_seconds`` and ``keep_seconds`` are written from the defaults only
-#: when the item does not carry its own — that is how a budget set per key
-#: before the first question overrides them.
 BUDGET_UPDATE_EXPRESSION = (
     "SET questions_used = if_not_exists(questions_used, :zero) + :one,"
     " workspace = if_not_exists(workspace, :workspace),"
@@ -745,33 +529,6 @@ BUDGET_UPDATE_EXPRESSION = (
     " delete_after = if_not_exists(first_used_at, :now) + if_not_exists(keep_seconds, :keep)"
 )
 
-#: The limit itself. A question passes while the key has one left and its
-#: window is still open; before the first question there is nothing spent yet,
-#: whether the item exists (an operator set a budget) or not. DynamoDB
-#: evaluates this on the item, so five requests at once cannot all read
-#: "nine used" and all go through.
-#:
-#: An attribute that is not there is the reason for the two
-#: ``attribute_not_exists`` in the middle. In DynamoDB a comparison against a
-#: missing attribute is false, not an error, so an item that carries
-#: ``first_used_at`` but has lost ``questions_used`` or ``question_limit`` —
-#: a hand-written item, a half-finished edit — would make both sides of the
-#: OR false and refuse every question this key ever asks again, until the TTL
-#: removes the item a year later. Letting such a question through costs one
-#: question and repairs the item: the update writes the missing attribute
-#: from the defaults in the same call, and the next question is measured
-#: against it. The same for ``expires_at``.
-#:
-#: Nothing is loosened while the item is whole. With all three attributes
-#: present this says exactly what it said before: fewer questions used than
-#: allowed, and a window that has not closed.
-#:
-#: The update expression and the earlier, shorter form of this condition were
-#: run against the real table on 17.09.2026, 21:00: DynamoDB took both, wrote
-#: the items and refused the eleventh question. So neither the attribute names
-#: nor `workspace` collide with a reserved word, and no placeholder needs an
-#: ``ExpressionAttributeNames`` alias. This longer form adds no new name, only
-#: ``attribute_not_exists`` and brackets around what was already there.
 BUDGET_CONDITION = (
     "attribute_not_exists(first_used_at)"
     " OR ("
@@ -784,12 +541,7 @@ BUDGET_CONDITION = (
 
 
 def key_hash(key: str) -> str:
-    """The name a key goes by in the budget table: its SHA-256, as hex.
-
-    Never the key itself. A key is 32 random bytes (infra/api_keys/handler.py),
-    so nothing walks the hash back to it, and the table can be read, dumped or
-    pasted into a ticket without a key falling out of it.
-    """
+    """The name a key goes by in the budget table: its SHA-256, as hex."""
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
@@ -816,12 +568,7 @@ def budget_number(item: Mapping[str, Any], name: str) -> int | None:
 
 
 def spent_message(item: Mapping[str, Any], now: int) -> str:
-    """Which half of the budget ran out, read from the item the condition refused.
-
-    Time first: a closed window is the true answer whatever the counter says,
-    while "your questions are used up" would be wrong for a key that asked
-    three. An item that did not come back gets the sentence without a reason.
-    """
+    """Which half of the budget ran out, read from the item the condition refused."""
     expires_at = budget_number(item, "expires_at")
     if expires_at is not None and now >= expires_at:
         return WINDOW_CLOSED_MESSAGE
@@ -838,50 +585,13 @@ def refused_item(exc: BaseException) -> Mapping[str, Any]:
     return item if isinstance(item, Mapping) else {}
 
 
-#: Pushes the item's own end past the end of its window, and makes that hold.
-#:
-#: Both operands are read after the counting update has written them, so
-#: ``window_seconds`` and ``expires_at`` are there; ``:keep`` is the deployed
-#: default, which `load_settings` has already proven to outlast the default
-#: window.
-#:
-#: ``keep_seconds`` is the half that makes this stick. Writing only
-#: ``delete_after`` would be undone by the very next question: the counting
-#: update writes ``delete_after`` unconditionally from ``keep_seconds``, so a
-#: too-short ``keep_seconds`` would pull it back every time and the repair
-#: would run again, two writes per question for as long as the key lives —
-#: and whichever question's repair was throttled would leave the item short.
-#: With ``keep_seconds`` set to the window plus the default, the counting
-#: update computes ``first_used_at + window_seconds + keep``, which is
-#: ``expires_at + keep``: the same number this writes, from then on by
-#: itself.
 BUDGET_TTL_REPAIR_EXPRESSION = (
     "SET keep_seconds = window_seconds + :keep, delete_after = expires_at + :keep"
 )
 
 
 def keep_the_item_past_its_window(settings: Settings, key: str, item: Mapping[str, Any]) -> None:
-    """Make sure the item outlasts the window it carries, and say so when it did not.
-
-    An item is what makes a spent key stay spent. If it disappears while its
-    own window is still open, the key comes back with a full budget and the
-    window it was given means nothing — exactly what `load_settings` refuses
-    to start for the deployed defaults. It cannot refuse it for an item: an
-    operator writes ``window_seconds`` and ``keep_seconds`` by hand
-    (app/README.md), the two are not checked against each other anywhere in
-    DynamoDB, and a ``SET`` action takes two operands, so the update cannot
-    write the later of the two by itself.
-
-    So it is checked here, on what the update wrote back, and put right with
-    one more write. That write happens only for an item that is wrong, and
-    only once: it raises ``keep_seconds`` as well as ``delete_after``, so from
-    the next question on the counting update arrives at the same number on its
-    own and this does nothing. A normal question makes no second call.
-
-    The question is paid for by the time this runs, so nothing here may end
-    the request. A repair that does not get through goes to the log and the
-    answer goes out.
-    """
+    """Make sure the item outlasts the window it carries, and say so when it did not."""
     expires_at, delete_after = budget_number(item, "expires_at"), budget_number(item, "delete_after")
     if expires_at is None or delete_after is None or delete_after > expires_at:
         return
@@ -901,23 +611,7 @@ def keep_the_item_past_its_window(settings: Settings, key: str, item: Mapping[st
 
 
 def charge_question(settings: Settings, workspace: str, key: str) -> None:
-    """Count this question against the key's budget, or refuse it.
-
-    One conditional `UpdateItem` does both: it raises the counter only while
-    the key has a question left and its window is open, and on the first
-    question it writes when that window started and when it ends. There is no
-    read before the write, so concurrent requests cannot all see the same
-    count and all pass.
-
-    A table that cannot be reached is a broken configuration, not a free pass.
-    Without the counter there is no limit, and a key without a limit on a
-    public URL is the thing the budget exists to prevent.
-
-    ``ALL_NEW`` costs no second call and no extra capacity — the write has
-    happened either way — and it is the only look this function gets at the
-    numbers an operator wrote into the item; `keep_the_item_past_its_window`
-    is what that look is for.
-    """
+    """Count this question against the key's budget, or refuse it."""
     now = int(wall_clock())
     try:
         written = client("dynamodb", settings.region).update_item(
@@ -970,11 +664,7 @@ def retrieve_passages(
 
 
 def keep_workspace(results: Sequence[Mapping[str, Any]], workspace: str) -> tuple[list[Mapping[str, Any]], int]:
-    """Drop every passage whose workspace is not the requested one; return what is left and how many went.
-
-    The retrieval filter already keeps workspaces apart. This is the second
-    lock behind it: a passage from another company never reaches the model.
-    """
+    """Drop every passage whose workspace is not the requested one; return what is left and how many went."""
     kept = [result for result in results if result.get("metadata", {}).get("workspace") == workspace]
     return kept, len(results) - len(kept)
 
@@ -993,10 +683,7 @@ def excerpt(text: str) -> str:
 
 
 def file_name(result: Mapping[str, Any]) -> str:
-    """The file a passage comes from, without the bucket path.
-
-    Only the last part of the S3 URI: the bucket name carries the account id.
-    """
+    """The file a passage comes from, without the bucket path."""
     uri = result.get("location", {}).get("s3Location", {}).get("uri", "")
     return uri.rsplit("/", 1)[-1] or "unknown"
 
@@ -1030,14 +717,6 @@ Rules:
 - If the sources do not answer the question, reply with exactly this sentence and nothing else: {NOT_IN_SOURCES_ANSWER}
 - Answer in the language of the question, in a few sentences."""
 
-# Which layer an answer stands on is not left to the model. Tested 17.09.2026
-# with Nemotron: a rule to say "not confirmed" for inbox sources was ignored,
-# and a fixed closing sentence was added even to answers without any inbox
-# source. The response field ``layers`` is derived from the citations instead.
-# That is why the rule against commenting on the sources matters: without it
-# the model wrote "[3] and [4] do not contain pricing information", and both
-# counted as cited.
-
 
 def capped(text: str) -> str:
     """The text, cut at a word boundary after `MAX_SOURCE_CHARACTERS`, with a note when cut."""
@@ -1058,25 +737,7 @@ def build_sources(results: Sequence[Mapping[str, Any]]) -> str:
 
 
 def build_content(question: str, results: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """The user message as three content blocks: sources, a label, the question.
-
-    The model reads all three in order. The guardrail reads them by their
-    qualifiers (contextual grounding page of the Bedrock user guide, read
-    23.09.2026):
-
-    * the sources are ``grounding_source`` only: the reference the answer is
-      checked against, and nothing the topic or PII filters look at. A phone
-      number in a document reaches the model and is masked in the answer,
-      not in the passage.
-    * the question is ``query`` and ``guard_content``: the query the answer
-      has to be relevant to, and text the topic filter reads, so a tax
-      question is refused before the model is paid for.
-    * the label in between is plain text, which the guardrail skips once any
-      block of the message is a guard block.
-
-    The question stands alone in its block because a query may be at most
-    1,000 characters, and so may a question (`MAX_QUESTION_CHARACTERS`).
-    """
+    """The user message as three content blocks: sources, a label, the question."""
     return [
         {"guardContent": {"text": {"text": build_sources(results), "qualifiers": ["grounding_source"]}}},
         {"text": "\n\nQuestion:"},
@@ -1088,16 +749,8 @@ def build_content(question: str, results: Sequence[Mapping[str, Any]]) -> list[d
 
 
 def ask_model(bedrock_runtime: Any, settings: Settings, content: list[dict[str, Any]]) -> dict[str, Any]:
-    """Send the system rules and the message to the model through the guardrail; return Bedrock's raw response.
-
-    The guardrail rides on the same call: Nemotron 3 Super lists Guardrails
-    among its features on the ``bedrock-runtime`` endpoint (model card in the
-    Bedrock user guide, read 23.09.2026), so no separate ``ApplyGuardrail``
-    call is needed. ``trace`` is on because the trace is the only place that
-    says which policy acted and how many text units each one read, which is
-    the cost of the guardrail. Its ``modelOutput`` field holds the answer as
-    the model wrote it, before masking; nothing here ever reads it.
-    """
+    """Send the system rules and the message to the model through the guardrail; return Bedrock's raw
+    response."""
     try:
         return bedrock_runtime.converse(
             modelId=settings.model_id,
@@ -1119,13 +772,7 @@ def ask_model(bedrock_runtime: Any, settings: Settings, content: list[dict[str, 
 
 
 def extract_answer(response: Mapping[str, Any], guardrail_action: str = "none") -> str:
-    """Pick the first content block that carries text, not blindly the first one.
-
-    An answer that is empty or only whitespace is no answer. One the model did
-    not finish on its own gets a note saying why. When the guardrail stepped
-    in, its trace says whether it blocked or masked (`read_guardrail`), and
-    the note follows that; a stop without a trace keeps the general note.
-    """
+    """Pick the first content block that carries text, not blindly the first one."""
     blocks = response.get("output", {}).get("message", {}).get("content", [])
     text = next((block["text"] for block in blocks if "text" in block), None)
     stop_reason = response.get("stopReason", "unknown")
@@ -1149,9 +796,6 @@ def read_usage(response: Mapping[str, Any]) -> dict[str, int]:
 
 # --- Guardrail and cost --------------------------------------------------
 
-#: The guardrail usage fields with a price, and the `Prices` field for each.
-#: The trace reports other policies too (content, word, regex); the stack
-#: configures none of them, so they read zero units.
 PRICED_UNITS = {
     "topicPolicyUnits": "topic_units",
     "sensitiveInformationPolicyUnits": "sensitive_information_units",
@@ -1169,23 +813,7 @@ def guardrail_assessments(response: Mapping[str, Any]) -> list[Mapping[str, Any]
 
 
 def read_guardrail(response: Mapping[str, Any]) -> dict[str, Any]:
-    """What the guardrail did, read from its trace, and never a matched text.
-
-    ``action`` is ``blocked`` when any policy blocked, ``masked`` when the
-    only thing done was masking personal details, ``intervened`` when Bedrock
-    says the guardrail stepped in but the trace does not say how, and
-    ``none`` otherwise. ``policies`` names what acted: ``topic:<name>``,
-    ``pii:<type>``, ``grounding``, ``relevance``. The two scores are the
-    contextual grounding check's, whether it acted or not; they are what a
-    threshold is tuned by. ``units`` is the sum of the text units every
-    assessment reports, or None when none reports any: then the guardrail's
-    cost is unknown, and a cost of zero would be a wrong number.
-    ``question_refused`` is true when the input assessment blocked: the
-    question itself was refused and the model never saw it.
-
-    A PII entry carries the text it matched in ``match``. That is personal
-    data out of a company's documents, and it is never read here.
-    """
+    """What the guardrail did, read from its trace, and never a matched text."""
     blocked: list[str] = []
     masked: list[str] = []
     scores: dict[str, float | None] = {"grounding_score": None, "relevance_score": None}
@@ -1230,27 +858,7 @@ def read_guardrail(response: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def mask_excerpts(guardrail_client: Any, settings: Settings, sources: list[dict[str, Any]]) -> dict[str, Any]:
-    """Mask the personal details in the sources' excerpts, in place; return what was masked and its units.
-
-    The answer's guardrail reads the model's answer only, and an excerpt is
-    the opening of a passage as it stands in the documents. So the excerpts
-    go through a second guardrail with one policy, the same masking, in one
-    ``ApplyGuardrail`` call as the model's output. One text block, one excerpt
-    per line: an excerpt has no line break of its own (`excerpt`), and one
-    block of 1,800 characters is two text units where six blocks would be six.
-
-    Fails closed: a source without its opening is less useful, an unmasked
-    one is what this is here to stop. Only two answers keep the excerpts:
-    ``NONE`` (nothing to mask, the excerpts stay as they are) and
-    ``GUARDRAIL_INTERVENED`` with one output that splits back into exactly as
-    many lines as went in. Every excerpt becomes None
-
-    * when the call fails — ``units`` is then None, because nothing says what
-      was billed, and the answer's ``cost_usd`` is null;
-    * when the action is anything else or missing, or the masked text does
-      not split back — ``units`` stays what the response reports, because the
-      call went through and was billed, and ``cost_usd`` stays an amount.
-    """
+    """Mask the personal details in the sources' excerpts, in place; return what was masked and its units."""
     if not sources:
         return {"policies": [], "units": 0}
     try:
@@ -1307,13 +915,7 @@ def add_units(units: Mapping[str, int] | None, excerpt_units: int | None) -> dic
 
 
 def answer_cost(prices: Prices, usage: Mapping[str, int], units: Mapping[str, int] | None) -> float | None:
-    """What one answer cost in USD: model tokens and guardrail units, each times its price per thousand.
-
-    Rounded to `COST_DECIMAL_PLACES`. None when the guardrail's units are
-    unknown: half a bill is not the bill. Retrieval, the question's
-    embedding and the Lambda time are not in it; together they are less than
-    a hundredth of a cent (README, "What it costs").
-    """
+    """What one answer cost in USD: model tokens and guardrail units, each times its price per thousand."""
     if units is None:
         return None
     total = (
@@ -1334,12 +936,7 @@ _RANGE = re.compile(rf"(\d+)\s*[{_DASH}]\s*(\d+)")
 
 
 def cited_numbers(answer: str, number_of_sources: int) -> set[int]:
-    """The source numbers an answer cites.
-
-    Understands ``[2]``, ``[2][3]``, ``[2, 3]``, ``[2; 3]`` and ranges ``[1-3]``
-    with a hyphen, en dash or em dash. Numbers outside 1..number_of_sources are
-    ignored — a model can invent one, and a date is no citation.
-    """
+    """The source numbers an answer cites."""
     numbers: set[int] = set()
     for match in _CITATION.finditer(answer):
         for part in re.split(r"[,;]", match.group(1)):
@@ -1371,8 +968,6 @@ class RequestRecord:
     dropped: int = 0
     #: What `read_guardrail` found. Scores and units go to the log line only.
     guardrail: dict[str, Any] = field(default_factory=dict)
-    #: Passages that reached the model. Not the number of sources in the
-    #: response: a refused question returns none, but the search ran.
     hits: int = 0
     #: Personal details the excerpt guardrail masked, by type.
     excerpt_policies: list[str] = field(default_factory=list)
@@ -1414,8 +1009,6 @@ def answer_question(settings: Settings, workspace: str, question: str, record: R
     guardrail = read_guardrail(response)
     answer = extract_answer(response, guardrail["action"])
     usage = read_usage(response)
-    # A refused question gets no sources: nothing was answered from them, and
-    # their excerpts would be the documents' text next to a refusal.
     if guardrail["question_refused"]:
         sources: list[dict[str, Any]] = []
         excerpts = {"policies": [], "units": 0}
@@ -1454,18 +1047,7 @@ def http_response(status: int, body: Mapping[str, Any], headers: Mapping[str, st
 
 
 def handle(event: Mapping[str, Any], record: RequestRecord) -> dict[str, Any]:
-    """Run one request through every check and return the response body.
-
-    The workspace goes into ``record`` as soon as it is known, so that even a
-    refused request is logged with it. The order of the checks decides which
-    error a broken request gets: method, body, workspace, settings, key,
-    question, budget. Settings sit in the middle because everything after
-    them needs them, and a deployment that is set up wrong is a 500 whatever
-    the request looks like. The budget comes last, and for two reasons: a
-    question the handler would refuse anyway must not cost the key anything,
-    and a caller without a valid key learns nothing about what a key may
-    spend.
-    """
+    """Run one request through every check and return the response body."""
     require_post(event)
     body = read_body(event)
     workspace = requested_workspace(body)
@@ -1496,14 +1078,6 @@ def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         )
         return http_response(error.status, {"error": error.public_message}, error.headers)
     except Exception:
-        # A bug, or an AWS response outside its contract. The handler reads
-        # Bedrock's and the Function URL's payloads by their documented shape
-        # rather than checking every field: those are contract data from AWS,
-        # not caller input, and a shape that changes is a bug to see in the
-        # log, not a case to carry in every function.
-        #
-        # The traceback goes to the log only, as a field, so the log line
-        # stays one line.
         log_event("crashed", status=500, workspace=record.workspace, traceback=traceback.format_exc())
         return http_response(500, {"error": "The function failed unexpectedly; the details are in its log."})
 

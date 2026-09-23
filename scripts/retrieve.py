@@ -1,17 +1,4 @@
-"""Ask the knowledge base a question inside one workspace and print the hits.
-
-    python -m scripts.retrieve "How do I export project data?" --workspace quillmoor
-    python -m scripts.retrieve "What changed recently?" --workspace quillmoor --layer agent
-
-This is retrieval only — no model writes an answer. It shows which chunks a
-question finds, with the workspace and layer each chunk carries. That makes
-it the proof that the workspace filter keeps companies apart.
-
-A workspace is required on purpose: there is no way to search across all
-companies from here.
-
-Exit codes: 0 done (also when there are no hits), 2 an AWS step failed.
-"""
+"""Ask the knowledge base a question inside one workspace and print the hits."""
 
 import argparse
 import sys

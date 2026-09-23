@@ -1,22 +1,4 @@
-"""Ask Andur a question through the web address and print the answer with its sources.
-
-    python -m scripts.ask "How do I export project data?" --workspace quillmoor
-    python -m scripts.ask "How will the bulk export work?" --workspace quillmoor --json
-
-It sends exactly what the page or curl would send: a POST to ``<WebUrl>/ask``
-with the workspace key in its own header and the SHA-256 of the body in
-``x-amz-content-sha256``. Both are what the way in demands: CloudFront signs
-every request it passes to the function URL, which overwrites an
-``Authorization`` header of ours and leaves no room for an unsigned body.
-
-The address comes from the stack outputs; the key from Parameter Store, or
-from the environment variable ANDUR_API_KEY when that is set. The key is never
-printed. The function URL itself is not a way in — it answers 403 to anything
-but CloudFront.
-
-Exit codes: 0 answered, 1 the function refused or failed (status and reason
-are printed), 2 an AWS step or the connection failed.
-"""
+"""Ask Andur a question through the web address and print the answer with its sources."""
 
 import argparse
 import hashlib
@@ -42,16 +24,8 @@ ASK_PATH = "/ask"
 #: The header the workspace key travels in — ``KEY_HEADER`` in app/handler.py.
 KEY_HEADER = "X-Andur-Key"
 
-#: Where the SHA-256 of the body goes. A signed request to a Lambda function
-#: URL may not carry an unsigned payload, and CloudFront signs every request
-#: it forwards, so the caller has to hand the hash over.
 BODY_HASH_HEADER = "x-amz-content-sha256"
 
-#: Longer than the function's own timeout (``ANSWER_TIMEOUT_SECONDS`` in the
-#: stack, 180 s), so a slow answer arrives as an answer of some kind rather
-#: than as a timeout here. In practice CloudFront gives up first, at 120 s,
-#: and turns a slow answer into a 504. Not imported from the stack, because
-#: that would pull in the CDK; a test keeps the layers in order.
 HTTP_TIMEOUT_SECONDS = 200
 
 

@@ -1,29 +1,4 @@
-"""Fill the knowledge base from a local folder.
-
-    python -m scripts.ingest                      # all of knowledge/
-    python -m scripts.ingest --workspace pellwick # one workspace
-    python -m scripts.ingest --check              # validate only, no AWS
-
-The folder is laid out the way the documents bucket expects::
-
-    <source>/<workspace>/<layer>/<document>
-    <source>/<workspace>/<layer>/<document>.metadata.json
-
-Three steps, each stopping the run if it fails:
-
-1. **Check** every document and its sidecar locally (docs/metadata.md). One
-   bad file stops the run before anything is uploaded, so the bucket never
-   holds half a corpus.
-2. **Upload** to ``s3://<bucket>/workspaces/<workspace>/<layer>/``. Markdown
-   documents go up split into sections, one file per section with a copy of
-   the document's sidecar (see `split_markdown` for why and how); other file
-   types go up whole. An object whose content is already in the bucket is
-   skipped, so a rerun creates no new object versions and nothing twice.
-3. **Sync**: start an ingestion job and wait until it is finished.
-
-Exit codes: 0 done, 1 the local folder has problems, 2 an AWS step failed,
-3 the ingestion job failed or could not index every document.
-"""
+"""Fill the knowledge base from a local folder."""
 
 import argparse
 import hashlib
@@ -51,26 +26,16 @@ from scripts.aws import (
 
 # --- The layout contract (docs/metadata.md) ------------------------------
 
-#: Same value as ``WORKSPACE_PREFIX`` in the stack; a test keeps them equal.
-#: Not imported from there, because that would pull in the CDK.
 BUCKET_PREFIX = "workspaces/"
 
 LAYERS = ("human", "agent", "inbox")
 SIDECAR_SUFFIX = ".metadata.json"
 REQUIRED_KEYS = ("workspace", "layer", "source", "license")
 
-#: Lowercase, no spaces: letters and digits, single hyphens in between.
-#: ``\Z`` and not ``$``, which would also match in front of a closing newline.
 WORKSPACE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
-#: A workspace name is at most this long. Same value as in app/handler.py,
-#: where the limit keeps an outsized name out of the log; a test keeps the two
-#: equal, so a folder that uploads here is a folder the function can be asked
-#: about.
 MAX_WORKSPACE_CHARACTERS = 64
 
-#: File types a Bedrock knowledge base can read, with the content type the
-#: upload sets. Anything else would only fail later, inside the sync.
 CONTENT_TYPES = {
     ".md": "text/markdown; charset=utf-8",
     ".txt": "text/plain; charset=utf-8",
@@ -106,25 +71,10 @@ class Document:
         return self.path.with_name(self.path.name + SIDECAR_SUFFIX)
 
 
-# --- Splitting Markdown into sections ------------------------------------
-#
-# Bedrock returned whole documents from retrieve for every demo document that
-# contains a Markdown table — with fixed-size and with hierarchical chunking,
-# whatever the chunk size (measured 17.09.2026, see "Retrieval findings" in
-# the README). The cause is not documented, and the foundation-model parser
-# does not remove it (measured the same day). Splitting before the upload does
-# not depend on it: if Bedrock hands back a whole file, the file is a section.
-
-#: A section shorter than this is joined to its neighbour: a lone heading or a
-#: two-line paragraph is not worth a hit of its own.
 MIN_SECTION_WORDS = 80
 
-#: A section longer than this is split again at its ``### `` headings, so that
-#: a section Bedrock returns whole is still about a page at most.
 MAX_SECTION_WORDS = 450
 
-#: Separates the original file stem from the section part of the name:
-#: ``faq.md`` becomes ``faq--01-accounts-and-access.md``.
 SECTION_SEPARATOR = "--"
 
 _SLUG_MAX_CHARACTERS = 40
@@ -135,11 +85,7 @@ def _words(text: str) -> int:
 
 
 def _split_at(lines: list[str], prefix: str) -> list[list[str]]:
-    """Cut lines into blocks, each starting at a heading with ``prefix``.
-
-    Lines inside fenced code blocks are never headings: an API example with a
-    ``## `` comment must not split a section.
-    """
+    """Cut lines into blocks, each starting at a heading with ``prefix``."""
     blocks: list[list[str]] = [[]]
     in_fence = False
     for line in lines:
@@ -152,11 +98,7 @@ def _split_at(lines: list[str], prefix: str) -> list[list[str]]:
 
 
 def _join_short(blocks: list[list[str]]) -> list[list[str]]:
-    """Join blocks under `MIN_SECTION_WORDS` to their predecessor.
-
-    The first block has no predecessor; if it is short, it goes in front of
-    the block after it instead.
-    """
+    """Join blocks under `MIN_SECTION_WORDS` to their predecessor."""
     joined: list[list[str]] = []
     carried: list[str] = []
     for block in blocks:
@@ -182,12 +124,7 @@ def slugify(heading: str) -> str:
 
 
 def _naming_heading(lines: list[str]) -> str | None:
-    """The heading a section is named after.
-
-    The ``## `` or ``### `` heading the block opens with; else the first ``## ``
-    in it (a short intro joined in front of a section); else the ``# `` title.
-    A ``### `` further down never names the block.
-    """
+    """The heading a section is named after."""
     first = next((line for line in lines if line.strip()), "")
     if first.startswith(("## ", "### ")):
         return first
@@ -199,13 +136,7 @@ def _naming_heading(lines: list[str]) -> str | None:
 
 
 def _with_context(block: list[str], context: list[str]) -> str:
-    """The block's text, preceded by the context lines it does not already contain.
-
-    A context line found anywhere in the block is left out, not only one at
-    its start: a short intro joined in front of a section carries the title
-    first and the section heading after it, and prepending the heading again
-    would put it above the title.
-    """
+    """The block's text, preceded by the context lines it does not already contain."""
     missing = [line for line in context if line not in block]
     head = "\n\n".join(missing)
     body = "\n".join(block).strip("\n")
@@ -213,19 +144,7 @@ def _with_context(block: list[str], context: list[str]) -> str:
 
 
 def split_markdown(text: str) -> list[tuple[str, str]]:
-    """Split a Markdown document into ``(slug, text)`` sections.
-
-    1. Cut at every ``## `` heading outside code fences.
-    2. Join sections under `MIN_SECTION_WORDS` to the one before (the first
-       to the one after).
-    3. Cut sections over `MAX_SECTION_WORDS` again at ``### `` and join short
-       pieces the same way. A section with no ``### `` stays as it is.
-    4. Start every section with the document's ``# `` title — and pieces of
-       step 3 also with their ``## `` heading — so a hit read on its own still
-       says where it comes from.
-
-    A document without ``## `` headings is one section.
-    """
+    """Split a Markdown document into ``(slug, text)`` sections."""
     lines = text.splitlines()
     title = next((line for line in lines if line.startswith("# ")), None)
     title_context = [title] if title else []
@@ -258,11 +177,7 @@ class UploadItem:
 
 
 def upload_items(document: Document) -> list[UploadItem]:
-    """What a document becomes in the bucket: sections or the whole file, each with its sidecar.
-
-    Every section carries an exact copy of the document's sidecar, so its
-    workspace, layer, source and licence are the document's.
-    """
+    """What a document becomes in the bucket: sections or the whole file, each with its sidecar."""
     sidecar = document.sidecar.read_bytes()
     suffix = document.path.suffix.lower()
     if suffix != ".md":
@@ -374,10 +289,7 @@ def _check_layer_folder(folder: Path, workspace: str, layer: str) -> tuple[list[
 
 
 def discover(source: Path, only_workspace: str | None = None) -> tuple[list[Document], list[str]]:
-    """Every valid document under ``source``, and every problem found on the way.
-
-    The caller uploads nothing unless the problem list is empty.
-    """
+    """Every valid document under ``source``, and every problem found on the way."""
     if not source.is_dir():
         return [], [f"{source}: folder not found"]
 
@@ -466,11 +378,7 @@ class UploadCounts:
 
 
 def _remote_md5(s3: Any, bucket: str, key: str) -> str | None:
-    """The MD5 of the object at ``key``, or None if there is no object.
-
-    For single-part uploads to a bucket with S3-managed encryption, the ETag
-    is the MD5 of the content. That is how every object here is written.
-    """
+    """The MD5 of the object at ``key``, or None if there is no object."""
     try:
         with explained(f"Checking s3://{bucket}/{key}"):
             response = s3.head_object(Bucket=bucket, Key=key)
@@ -500,7 +408,57 @@ def upload(
     return counts
 
 
-# --- Step 3: sync --------------------------------------------------------
+# --- Step 3: prune -------------------------------------------------------
+
+#: DeleteObjects takes at most this many keys per call.
+DELETE_BATCH = 1000
+
+
+def remote_keys(s3: Any, bucket: str, prefix: str) -> list[str]:
+    """Every object key under ``prefix``, sorted."""
+    keys: list[str] = []
+    with explained(f"Listing s3://{bucket}/{prefix}"):
+        for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+            keys.extend(item["Key"] for item in page.get("Contents", []))
+    return sorted(keys)
+
+
+def stale_keys(s3: Any, bucket: str, documents: Iterable[Document], only_workspace: str | None = None) -> list[str]:
+    """Objects under the documents prefix that no local document produces any more."""
+    prefix = BUCKET_PREFIX + (f"{only_workspace}/" if only_workspace else "")
+    expected = {item.key for document in documents for item in upload_items(document)}
+    return [key for key in remote_keys(s3, bucket, prefix) if key not in expected]
+
+
+def delete_keys(s3: Any, bucket: str, keys: list[str]) -> None:
+    """Delete ``keys`` from the bucket; any key S3 refuses is an `AwsProblem`."""
+    for start in range(0, len(keys), DELETE_BATCH):
+        batch = keys[start : start + DELETE_BATCH]
+        with explained(f"Deleting {len(batch)} object(s) from s3://{bucket}"):
+            response = s3.delete_objects(
+                Bucket=bucket, Delete={"Objects": [{"Key": key} for key in batch], "Quiet": True}
+            )
+        errors = response.get("Errors", [])
+        if errors:
+            first = errors[0]
+            raise AwsProblem(
+                f"{len(errors)} object(s) could not be deleted from s3://{bucket}, "
+                f"the first {first.get('Key')} ({first.get('Code')})."
+            )
+
+
+def format_stale(keys: list[str], deleted: bool) -> list[str]:
+    """The objects that are no longer in the folder, and what happened to them."""
+    if not keys:
+        return ["No object in the bucket is missing from the folder."]
+    if deleted:
+        head = f"Deleted {len(keys)} object(s) that are no longer in the folder:"
+    else:
+        head = f"{len(keys)} object(s) in the bucket are no longer in the folder and would be deleted with --delete:"
+    return [head] + [f"  {key}" for key in keys]
+
+
+# --- Step 4: sync --------------------------------------------------------
 
 FINAL_JOB_STATUSES = {"COMPLETE", "FAILED", "STOPPED"}
 
@@ -514,10 +472,7 @@ def run_ingestion_job(
     sleep: Callable[[float], None] = time.sleep,
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
-    """Start an ingestion job and return it once it has reached a final status.
-
-    The job always covers the whole data source, not only what was uploaded.
-    """
+    """Start an ingestion job and return it once it has reached a final status."""
     ids = {"knowledgeBaseId": knowledge_base_id, "dataSourceId": data_source_id}
     try:
         with explained("Starting the ingestion job"):
@@ -587,6 +542,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--workspace", help="upload only this workspace (the sync still covers all)")
     parser.add_argument("--check", action="store_true",
                         help="only check the folder; no AWS calls")
+    parser.add_argument("--delete", action="store_true",
+                        help="delete objects the folder no longer has; without it they are only listed")
     parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
     parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
     parser.add_argument("--bucket", help="documents bucket; default: stack output DocumentsBucketName")
@@ -622,8 +579,14 @@ def main(argv: list[str] | None = None) -> int:
             lambda: read_stack_outputs(client("cloudformation", args.region), args.stack_name),
         )
         bucket = settings["DocumentsBucketName"]
-        counts = upload(client("s3", args.region), bucket, documents)
+        s3 = client("s3", args.region)
+        counts = upload(s3, bucket, documents)
         print(f"Files uploaded: {counts.uploaded}, unchanged and skipped: {counts.unchanged}")
+        stale = stale_keys(s3, bucket, documents, args.workspace)
+        if args.delete and stale:
+            delete_keys(s3, bucket, stale)
+        for line in format_stale(stale, deleted=args.delete):
+            print(line)
         job = run_ingestion_job(
             client("bedrock-agent", args.region),
             settings["KnowledgeBaseId"],

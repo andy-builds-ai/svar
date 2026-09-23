@@ -21,6 +21,7 @@ from scripts.ingest import (
     check_sidecar,
     count_documents,
     count_sections,
+    delete_keys,
     discover,
     format_counts,
     job_succeeded,
@@ -30,6 +31,7 @@ from scripts.ingest import (
     section_filename,
     slugify,
     split_markdown,
+    stale_keys,
     upload,
     upload_items,
 )
@@ -362,6 +364,7 @@ class FakeS3:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
         self.puts: list[str] = []
+        self.deletes: list[list[str]] = []
 
     def head_object(self, Bucket: str, Key: str) -> dict[str, str]:
         if Key not in self.objects:
@@ -371,6 +374,22 @@ class FakeS3:
     def put_object(self, Bucket: str, Key: str, Body: bytes, ContentType: str) -> None:
         self.objects[Key] = Body
         self.puts.append(Key)
+
+    def get_paginator(self, operation: str) -> "FakeS3":
+        assert operation == "list_objects_v2"
+        return self
+
+    def paginate(self, Bucket: str, Prefix: str) -> list[dict[str, Any]]:
+        """Two pages, so a prune that reads only the first one would show."""
+        keys = sorted(key for key in self.objects if key.startswith(Prefix))
+        half = len(keys) // 2
+        return [{"Contents": [{"Key": key} for key in part]} if part else {} for part in (keys[:half], keys[half:])]
+
+    def delete_objects(self, Bucket: str, Delete: dict[str, Any]) -> dict[str, Any]:
+        self.deletes.append([entry["Key"] for entry in Delete["Objects"]])
+        for entry in Delete["Objects"]:
+            self.objects.pop(entry["Key"], None)
+        return {}
 
 
 def test_upload_puts_documents_and_sidecars_then_skips_them_on_rerun(tmp_path: Path) -> None:
@@ -416,6 +435,102 @@ def test_non_markdown_files_are_uploaded_whole(tmp_path: Path) -> None:
         "workspaces/pellwick/human/prices.txt",
         "workspaces/pellwick/human/prices.txt.metadata.json",
     ]
+
+
+# --- Prune -------------------------------------------------------------
+
+
+def uploaded_bucket(tmp_path: Path) -> tuple[FakeS3, list[Document]]:
+    """A bucket holding two workspaces' documents, plus objects the folder no longer has."""
+    add_document(tmp_path, "quillmoor", "human", name="a.md")
+    add_document(tmp_path, "pellwick", "human", name="b.md")
+    documents, _ = discover(tmp_path)
+    s3 = FakeS3()
+    upload(s3, "bucket", documents, log=lambda _: None)
+    s3.objects["workspaces/quillmoor/human/gone--01-gone.md"] = b"old"
+    s3.objects["workspaces/quillmoor/human/gone--01-gone.md.metadata.json"] = b"{}"
+    s3.objects["workspaces/pellwick/inbox/old.md"] = b"old"
+    s3.objects["outside/the/prefix.md"] = b"not ours"
+    return s3, documents
+
+
+def test_stale_keys_are_what_the_bucket_has_and_the_folder_does_not(tmp_path: Path) -> None:
+    s3, documents = uploaded_bucket(tmp_path)
+    assert stale_keys(s3, "bucket", documents) == [
+        "workspaces/pellwick/inbox/old.md",
+        "workspaces/quillmoor/human/gone--01-gone.md",
+        "workspaces/quillmoor/human/gone--01-gone.md.metadata.json",
+    ]
+
+
+def test_one_workspace_prunes_only_inside_that_workspace(tmp_path: Path) -> None:
+    """A partial upload must not take the other workspaces for stale."""
+    s3, documents = uploaded_bucket(tmp_path)
+    quillmoor = [document for document in documents if document.workspace == "quillmoor"]
+    assert stale_keys(s3, "bucket", quillmoor, only_workspace="quillmoor") == [
+        "workspaces/quillmoor/human/gone--01-gone.md",
+        "workspaces/quillmoor/human/gone--01-gone.md.metadata.json",
+    ]
+
+
+def test_delete_goes_in_batches_of_at_most_a_thousand() -> None:
+    s3 = FakeS3()
+    keys = [f"workspaces/quillmoor/human/{n:04d}.md" for n in range(2001)]
+    for key in keys:
+        s3.objects[key] = b"x"
+    delete_keys(s3, "bucket", keys)
+    assert [len(batch) for batch in s3.deletes] == [1000, 1000, 1]
+    assert s3.objects == {}
+
+
+def test_a_key_s3_refuses_to_delete_is_an_aws_problem() -> None:
+    class Refusing(FakeS3):
+        def delete_objects(self, Bucket: str, Delete: dict[str, Any]) -> dict[str, Any]:
+            return {"Errors": [{"Key": "workspaces/x/human/a.md", "Code": "AccessDenied"}]}
+
+    with pytest.raises(AwsProblem, match="1 object.*AccessDenied"):
+        delete_keys(Refusing(), "bucket", ["workspaces/x/human/a.md"])
+
+
+def run_main_against(
+    s3: FakeS3, argv: list[str], monkeypatch: pytest.MonkeyPatch
+) -> int:
+    """`main` with the fake bucket, a finished job, and no stack to read."""
+    agent = FakeAgent(["COMPLETE"])
+    clients = {"s3": s3, "bedrock-agent": agent}
+    monkeypatch.setattr(ingest, "client", lambda service, region: clients[service])
+    return main([*argv, "--bucket", "bucket", "--knowledge-base-id", "KB", "--data-source-id", "DS"])
+
+
+def test_main_lists_stale_objects_and_deletes_nothing_by_default(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s3, _ = uploaded_bucket(tmp_path)
+    assert run_main_against(s3, ["--source", str(tmp_path)], monkeypatch) == 0
+    out = capsys.readouterr().out
+    assert "3 object(s) in the bucket are no longer in the folder and would be deleted with --delete:" in out
+    assert "  workspaces/pellwick/inbox/old.md" in out
+    assert s3.deletes == []
+    assert "workspaces/pellwick/inbox/old.md" in s3.objects
+
+
+def test_main_deletes_stale_objects_with_delete_and_never_outside_the_prefix(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s3, _ = uploaded_bucket(tmp_path)
+    assert run_main_against(s3, ["--source", str(tmp_path), "--delete"], monkeypatch) == 0
+    assert "Deleted 3 object(s) that are no longer in the folder:" in capsys.readouterr().out
+    assert not any("gone" in key or "old.md" in key for key in s3.objects)
+    assert "outside/the/prefix.md" in s3.objects
+    assert "workspaces/quillmoor/human/a--01-a-md.md" in s3.objects
+
+
+def test_main_says_so_when_nothing_is_stale(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    add_document(tmp_path, "quillmoor", "human", name="a.md")
+    assert run_main_against(FakeS3(), ["--source", str(tmp_path), "--delete"], monkeypatch) == 0
+    assert "No object in the bucket is missing from the folder." in capsys.readouterr().out
 
 
 def test_upload_replaces_a_changed_document_under_the_same_key(tmp_path: Path) -> None:
