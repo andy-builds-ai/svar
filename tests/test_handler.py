@@ -19,6 +19,7 @@ import operator
 import subprocess
 import sys
 from collections.abc import Iterator, Mapping
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,16 @@ ENVIRONMENT = {
     "QUESTION_LIMIT": "10",
     "WINDOW_HOURS": "48",
     "KEEP_DAYS": "365",
+    "GUARDRAIL_ID": "gr-test",
+    "GUARDRAIL_VERSION": "1",
+    "EXCERPT_GUARDRAIL_ID": "gr-excerpts",
+    "EXCERPT_GUARDRAIL_VERSION": "2",
+    "PRICE_INPUT_PER_1K_TOKENS": "0.00015",
+    "PRICE_OUTPUT_PER_1K_TOKENS": "0.00065",
+    "PRICE_TOPIC_PER_1K_UNITS": "0.15",
+    "PRICE_PII_PER_1K_UNITS": "0.10",
+    "PRICE_GROUNDING_PER_1K_UNITS": "0.10",
+    "PRICE_DATE": "2026-09-23",
 }
 SETTINGS = handler.load_settings(ENVIRONMENT)
 KEYS = {"quillmoor": "quillmoor-key-0001", "pellwick": "pellwick-key-0002"}
@@ -92,12 +103,61 @@ def hit(
     }
 
 
-def bedrock_response(content: list[dict[str, Any]], stop_reason: str = "end_turn") -> dict[str, Any]:
-    """The shape the Bedrock converse API returns."""
+def guardrail_usage(topic: int = 1, pii: int = 1, grounding: int = 3) -> dict[str, int]:
+    """The ``usage`` of one assessment's ``invocationMetrics``, as the trace reports it."""
+    return {
+        "topicPolicyUnits": topic,
+        "contentPolicyUnits": 0,
+        "wordPolicyUnits": 0,
+        "sensitiveInformationPolicyUnits": pii,
+        "sensitiveInformationPolicyFreeUnits": 0,
+        "contextualGroundingPolicyUnits": grounding,
+    }
+
+
+def guardrail_trace(
+    input_assessment: dict[str, Any] | None = None,
+    output_assessment: dict[str, Any] | None = None,
+    model_output: str = "Call Ada Quill on +44 20 7946 0958 [1].",
+) -> dict[str, Any]:
+    """A guardrail trace as Converse returns it with ``trace: enabled``.
+
+    The input is read by the topic filter only; the output by all three
+    policies. ``modelOutput`` is the answer before masking.
+    """
+    if input_assessment is None:
+        input_assessment = {
+            "topicPolicy": {"topics": []},
+            "invocationMetrics": {"guardrailProcessingLatency": 120, "usage": guardrail_usage(1, 0, 0)},
+        }
+    if output_assessment is None:
+        output_assessment = {
+            "contextualGroundingPolicy": {
+                "filters": [
+                    {"type": "GROUNDING", "threshold": 0.7, "score": 0.93, "action": "NONE", "detected": False},
+                    {"type": "RELEVANCE", "threshold": 0.7, "score": 0.88, "action": "NONE", "detected": False},
+                ]
+            },
+            "invocationMetrics": {"guardrailProcessingLatency": 300, "usage": guardrail_usage(1, 1, 3)},
+        }
+    return {
+        "guardrail": {
+            "modelOutput": [model_output],
+            "inputAssessment": {"gr-test": input_assessment},
+            "outputAssessments": {"gr-test": [output_assessment]},
+        }
+    }
+
+
+def bedrock_response(
+    content: list[dict[str, Any]], stop_reason: str = "end_turn", trace: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """The shape the Bedrock converse API returns, with a guardrail trace that did nothing."""
     return {
         "output": {"message": {"content": content}},
         "stopReason": stop_reason,
         "usage": {"inputTokens": 1624, "outputTokens": 50, "totalTokens": 1674},
+        "trace": trace if trace is not None else guardrail_trace(),
     }
 
 
@@ -125,6 +185,35 @@ class FakeBedrockRuntime:
         self.calls: list[dict[str, Any]] = []
 
     def converse(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return self.response
+
+
+def excerpt_guard_response(outputs: list[str] | None = None, pii_units: int = 1, masked: tuple[str, ...] = ()) -> dict[str, Any]:
+    """What ApplyGuardrail returns: nothing to mask (``outputs`` None), or the masked text."""
+    return {
+        "usage": {"topicPolicyUnits": 0, "sensitiveInformationPolicyUnits": pii_units, "contextualGroundingPolicyUnits": 0},
+        "action": "NONE" if outputs is None else "GUARDRAIL_INTERVENED",
+        "outputs": [] if outputs is None else [{"text": text} for text in outputs],
+        "assessments": [
+            {"sensitiveInformationPolicy": {"piiEntities": [
+                {"match": "Anja Pell", "type": pii_type, "action": "ANONYMIZED", "detected": True} for pii_type in masked
+            ]}}
+        ],
+    }
+
+
+class FakeGuardrail:
+    """The excerpt guardrail's client: ApplyGuardrail only."""
+
+    def __init__(self, response: dict[str, Any] | None = None, error: Exception | None = None) -> None:
+        self.response = response or excerpt_guard_response()
+        self.error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def apply_guardrail(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
         if self.error:
             raise self.error
@@ -382,6 +471,7 @@ def aws(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "ssm": FakeSSM([parameters(KEYS)]),
         "bedrock-agent-runtime": FakeAgentRuntime([hit(), hit(layer="inbox", name="draft--01.md", text="Draft.")]),
         "bedrock-runtime": FakeBedrockRuntime(),
+        "guardrail": FakeGuardrail(),
         "dynamodb": FakeDynamoDB(),
     }
     monkeypatch.setattr(handler, "client", lambda service, region: clients[service])
@@ -472,10 +562,63 @@ def test_a_missing_setting_is_named(variable: str) -> None:
         handler.load_settings(environment)
 
 
-@pytest.mark.parametrize("value", ["0", "101", "six", "-1", "6.5"])
+@pytest.mark.parametrize("value", ["0", "31", "101", "six", "-1", "6.5"])
 def test_number_of_results_must_be_a_sensible_whole_number(value: str) -> None:
     with pytest.raises(ConfigurationError, match="NUMBER_OF_RESULTS"):
         handler.load_settings({**ENVIRONMENT, "NUMBER_OF_RESULTS": value})
+
+
+def test_the_most_passages_a_deployment_may_ask_for_fit_the_grounding_source() -> None:
+    """The guardrail takes at most 100,000 characters of grounding source.
+
+    Thirty passages, every one cut at its limit, with a header naming a long
+    file: if that fits, every configurable number of results does.
+    """
+    long_name = "a-rather-long-file-name-for-a-document--" + "x" * 60 + ".md"
+    results = [hit(name=long_name, text="word " * 2000) for _ in range(handler.MAX_RESULTS)]
+    assert len(handler.build_sources(results)) < 100_000
+
+
+def test_guardrail_and_prices_come_from_the_environment() -> None:
+    assert (SETTINGS.guardrail_id, SETTINGS.guardrail_version) == ("gr-test", "1")
+    assert (SETTINGS.excerpt_guardrail_id, SETTINGS.excerpt_guardrail_version) == ("gr-excerpts", "2")
+    assert SETTINGS.prices == handler.Prices(
+        input_tokens=Decimal("0.00015"),
+        output_tokens=Decimal("0.00065"),
+        topic_units=Decimal("0.15"),
+        sensitive_information_units=Decimal("0.10"),
+        grounding_units=Decimal("0.10"),
+    )
+    assert SETTINGS.price_date == "2026-09-23"
+
+
+@pytest.mark.parametrize("variable", ["GUARDRAIL_VERSION", "EXCERPT_GUARDRAIL_VERSION"])
+@pytest.mark.parametrize("value", ["DRAFT", "", "1.0", "v1", "²"])
+def test_the_guardrail_version_is_a_number_and_never_the_draft(variable: str, value: str) -> None:
+    with pytest.raises(ConfigurationError, match=variable):
+        handler.load_settings({**ENVIRONMENT, variable: value})
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "PRICE_INPUT_PER_1K_TOKENS",
+        "PRICE_OUTPUT_PER_1K_TOKENS",
+        "PRICE_TOPIC_PER_1K_UNITS",
+        "PRICE_PII_PER_1K_UNITS",
+        "PRICE_GROUNDING_PER_1K_UNITS",
+    ],
+)
+@pytest.mark.parametrize("value", ["cheap", "-0.1", "11", "NaN", "Infinity", "0,15"])
+def test_a_price_must_be_a_plain_decimal_in_range(variable: str, value: str) -> None:
+    with pytest.raises(ConfigurationError, match=variable):
+        handler.load_settings({**ENVIRONMENT, variable: value})
+
+
+@pytest.mark.parametrize("value", ["23.09.2026", "2026-9-23", "2026-02-30", "yesterday", "20260923"])
+def test_the_price_date_is_a_real_iso_date(value: str) -> None:
+    with pytest.raises(ConfigurationError, match="PRICE_DATE"):
+        handler.load_settings({**ENVIRONMENT, "PRICE_DATE": value})
 
 
 @pytest.mark.parametrize("path", ["/andur/api-keys/", "andur/api-keys"])
@@ -1319,20 +1462,38 @@ def test_source_of_an_incomplete_hit_does_not_fail() -> None:
     }
 
 
-def test_prompt_numbers_the_sources_and_ends_with_the_question() -> None:
+def test_sources_are_numbered_with_layer_and_file() -> None:
     table = "| Plan | Price |\n|---|---|\n| Team | €19 |"
-    prompt = handler.build_prompt(
-        "What does Team cost?",
-        [hit(text="First passage."), hit(layer="inbox", name="draft--01.md", text=table)],
-    )
-    assert prompt.startswith("Sources:\n\n[1] layer: human | file: faq--03-projects-and-exports.md\nFirst passage.")
-    assert "[2] layer: inbox | file: draft--01.md\n" + table in prompt
-    assert prompt.endswith("\n\nQuestion: What does Team cost?")
+    sources = handler.build_sources([hit(text="First passage."), hit(layer="inbox", name="draft--01.md", text=table)])
+    assert sources.startswith("Sources:\n\n[1] layer: human | file: faq--03-projects-and-exports.md\nFirst passage.")
+    assert sources.endswith("[2] layer: inbox | file: draft--01.md\n" + table)
+
+
+def test_the_message_marks_sources_and_question_for_the_guardrail() -> None:
+    """Sources are only the grounding reference; the question is the query and is guarded.
+
+    The qualifiers decide what each policy reads. Were the sources guarded,
+    a phone number in a document would be masked before the model saw it,
+    and a document about taxes would be refused as a tax question.
+    """
+    content = handler.build_content("What does Team cost?", [hit(text="First passage.")])
+    sources, label, question = content
+    assert sources["guardContent"]["text"]["qualifiers"] == ["grounding_source"]
+    assert sources["guardContent"]["text"]["text"] == handler.build_sources([hit(text="First passage.")])
+    assert label == {"text": "\n\nQuestion:"}
+    assert question == {"guardContent": {"text": {"text": "What does Team cost?", "qualifiers": ["query", "guard_content"]}}}
+
+
+def test_the_longest_question_fits_the_guardrail_query() -> None:
+    """A guardrail query may be 1,000 characters; the question block holds the question alone."""
+    question = "x" * MAX_QUESTION_CHARACTERS
+    (_, _, block) = handler.build_content(question, [hit()])
+    assert len(block["guardContent"]["text"]["text"]) <= 1000
 
 
 def test_an_outlier_passage_is_cut_in_the_prompt_with_a_note() -> None:
     outlier = "word " * 2000
-    prompt = handler.build_prompt("How?", [hit(text=outlier), hit(text="Short.")])
+    prompt = handler.build_sources([hit(text=outlier), hit(text="Short.")])
     first_block = prompt.split("\n\n[2]")[0]
     assert len(first_block) < MAX_SOURCE_CHARACTERS + 200
     assert f"[... cut: the passage is longer than {MAX_SOURCE_CHARACTERS} characters]" in first_block
@@ -1353,20 +1514,22 @@ def test_system_prompt_holds_the_rules_the_response_relies_on() -> None:
 # --- Model ---------------------------------------------------------------
 
 
-def test_model_gets_system_rules_prompt_and_token_limit() -> None:
+def test_model_gets_system_rules_message_token_limit_and_guardrail() -> None:
     bedrock = FakeBedrockRuntime()
-    handler.ask_model(bedrock, "model-x", "Sources: ...")
+    content = [{"text": "Sources: ..."}]
+    handler.ask_model(bedrock, SETTINGS, content)
     (arguments,) = bedrock.calls
-    assert arguments["modelId"] == "model-x"
+    assert arguments["modelId"] == ENVIRONMENT["MODEL_ID"]
     assert arguments["system"] == [{"text": handler.SYSTEM_PROMPT}]
-    assert arguments["messages"] == [{"role": "user", "content": [{"text": "Sources: ..."}]}]
+    assert arguments["messages"] == [{"role": "user", "content": content}]
     assert arguments["inferenceConfig"] == {"maxTokens": MAX_ANSWER_TOKENS}
+    assert arguments["guardrailConfig"] == {"guardrailIdentifier": "gr-test", "guardrailVersion": "1", "trace": "enabled"}
 
 
 def test_a_blocked_model_is_an_llm_error_with_a_hint() -> None:
     bedrock = FakeBedrockRuntime(error=client_error("AccessDeniedException"))
-    with pytest.raises(LLMError, match="may not be enabled") as error:
-        handler.ask_model(bedrock, "model-x", "p")
+    with pytest.raises(LLMError, match="may not be open to this function") as error:
+        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
     assert error.value.status == 502
 
 
@@ -1374,7 +1537,7 @@ def test_a_model_timeout_is_an_llm_error() -> None:
     exceptions = pytest.importorskip("botocore.exceptions")
     bedrock = FakeBedrockRuntime(error=exceptions.ReadTimeoutError(endpoint_url="https://bedrock-runtime"))
     with pytest.raises(LLMError, match="timeout"):
-        handler.ask_model(bedrock, "model-x", "p")
+        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
 
 
 def test_extract_answer_returns_the_text() -> None:
@@ -1412,6 +1575,125 @@ def test_an_empty_answer_is_an_llm_error(text: str) -> None:
 def test_extract_answer_raises_on_an_empty_response() -> None:
     with pytest.raises(LLMError, match="unknown"):
         handler.extract_answer({})
+
+
+# --- Guardrail and cost --------------------------------------------------
+
+#: The input assessment of a tax question the topic filter refused.
+TAX_QUESTION_BLOCKED = {
+    "topicPolicy": {"topics": [{"name": "Tax advice", "type": "DENY", "action": "BLOCKED", "detected": True}]},
+    "invocationMetrics": {"guardrailProcessingLatency": 90, "usage": guardrail_usage(1, 0, 0)},
+}
+
+#: The output assessment of an answer with a phone number and a name in it.
+PHONE_MASKED = {
+    "sensitiveInformationPolicy": {
+        "piiEntities": [
+            {"match": "Ada Quill", "type": "NAME", "action": "ANONYMIZED", "detected": True},
+            {"match": "+44 20 7946 0958", "type": "PHONE", "action": "ANONYMIZED", "detected": True},
+        ]
+    },
+    "contextualGroundingPolicy": {
+        "filters": [
+            {"type": "GROUNDING", "threshold": 0.7, "score": 0.97, "action": "NONE", "detected": False},
+            {"type": "RELEVANCE", "threshold": 0.7, "score": 0.91, "action": "NONE", "detected": False},
+        ]
+    },
+    "invocationMetrics": {"guardrailProcessingLatency": 250, "usage": guardrail_usage(1, 1, 3)},
+}
+
+#: The output assessment of an answer the passages do not carry.
+UNGROUNDED = {
+    "contextualGroundingPolicy": {
+        "filters": [
+            {"type": "GROUNDING", "threshold": 0.7, "score": 0.12, "action": "BLOCKED", "detected": True},
+            {"type": "RELEVANCE", "threshold": 0.7, "score": 0.9, "action": "NONE", "detected": False},
+        ]
+    },
+    "invocationMetrics": {"guardrailProcessingLatency": 260, "usage": guardrail_usage(1, 1, 3)},
+}
+
+
+def test_a_guardrail_that_did_nothing_reports_its_scores_and_units() -> None:
+    assert handler.read_guardrail(bedrock_response([{"text": "A [1]."}])) == {
+        "action": "none",
+        "policies": [],
+        "grounding_score": 0.93,
+        "relevance_score": 0.88,
+        "units": {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 3},
+        "question_refused": False,
+    }
+
+
+def test_a_refused_topic_is_blocked_and_named() -> None:
+    response = bedrock_response(
+        [{"text": "Refused."}], "guardrail_intervened", guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED)
+    )
+    guardrail = handler.read_guardrail(response)
+    assert (guardrail["action"], guardrail["policies"]) == ("blocked", ["topic:Tax advice"])
+    assert guardrail["question_refused"] is True
+
+
+def test_masked_personal_details_are_named_by_type_and_never_by_what_matched() -> None:
+    response = bedrock_response(
+        [{"text": "Call {NAME} on {PHONE} [1]."}], "guardrail_intervened", guardrail_trace(output_assessment=PHONE_MASKED)
+    )
+    guardrail = handler.read_guardrail(response)
+    assert (guardrail["action"], guardrail["policies"]) == ("masked", ["pii:NAME", "pii:PHONE"])
+    assert "Ada Quill" not in json.dumps(guardrail) and "7946" not in json.dumps(guardrail)
+
+
+def test_an_ungrounded_answer_is_blocked_with_its_score() -> None:
+    response = bedrock_response(
+        [{"text": "Withheld."}], "guardrail_intervened", guardrail_trace(output_assessment=UNGROUNDED)
+    )
+    guardrail = handler.read_guardrail(response)
+    assert (guardrail["action"], guardrail["policies"]) == ("blocked", ["grounding"])
+    assert guardrail["question_refused"] is False
+    assert (guardrail["grounding_score"], guardrail["relevance_score"]) == (0.12, 0.9)
+
+
+def test_blocking_outranks_masking() -> None:
+    both = {**PHONE_MASKED, "contextualGroundingPolicy": UNGROUNDED["contextualGroundingPolicy"]}
+    response = bedrock_response([{"text": "Withheld."}], "guardrail_intervened", guardrail_trace(output_assessment=both))
+    guardrail = handler.read_guardrail(response)
+    assert guardrail["action"] == "blocked"
+    assert guardrail["policies"] == ["grounding", "pii:NAME", "pii:PHONE"]
+
+
+def test_an_intervention_without_a_trace_is_named_as_such_and_its_units_are_unknown() -> None:
+    response = bedrock_response([{"text": "Stopped."}], "guardrail_intervened", trace={})
+    guardrail = handler.read_guardrail(response)
+    assert guardrail["action"] == "intervened"
+    assert guardrail["units"] is None
+    assert (guardrail["grounding_score"], guardrail["relevance_score"]) == (None, None)
+
+
+def test_a_masked_answer_says_so_and_a_blocked_one_is_the_guardrail_message_alone() -> None:
+    masked = bedrock_response([{"text": "Call {PHONE} [1]."}], "guardrail_intervened")
+    assert handler.extract_answer(masked, "masked") == "Call {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["masked"]
+    blocked = bedrock_response([{"text": "Andur does not advise on this."}], "guardrail_intervened")
+    assert handler.extract_answer(blocked, "blocked") == "Andur does not advise on this."
+    assert handler.extract_answer(blocked, "intervened").endswith(handler.STOP_NOTES["guardrail_intervened"])
+
+
+def test_the_cost_is_tokens_and_units_times_their_prices_rounded_to_six_places() -> None:
+    usage = {"input_tokens": 1624, "output_tokens": 50}
+    units = {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 3}
+    # 1624 x 0.00015 + 50 x 0.00065 + 2 x 0.15 + 1 x 0.10 + 3 x 0.10, per thousand
+    # = (0.2436 + 0.0325 + 0.3 + 0.1 + 0.3) / 1000 = 0.0009761
+    assert handler.answer_cost(SETTINGS.prices, usage, units) == 0.000976
+    assert handler.answer_cost(SETTINGS.prices, usage, None) is None
+    zero = {name: 0 for name in handler.PRICED_UNITS}
+    assert handler.answer_cost(SETTINGS.prices, {"input_tokens": 0, "output_tokens": 0}, zero) == 0.0
+
+
+def test_the_cost_is_rounded_half_even_at_the_sixth_place() -> None:
+    """Decimal arithmetic, so 0.1 + 0.2 is 0.3 here and the rounding is exact."""
+    prices = handler.Prices(Decimal("0.0000025"), Decimal(0), Decimal(0), Decimal(0), Decimal(0))
+    none = {name: 0 for name in handler.PRICED_UNITS}
+    assert handler.answer_cost(prices, {"input_tokens": 1000, "output_tokens": 0}, none) == 0.000002
+    assert handler.answer_cost(prices, {"input_tokens": 3000, "output_tokens": 0}, none) == 0.000008
 
 
 def test_usage_is_read_from_the_response() -> None:
@@ -1467,8 +1749,189 @@ def test_an_answer_carries_sources_layers_model_usage_and_latency(aws: dict[str,
     assert body["model"] == ENVIRONMENT["MODEL_ID"]
     assert body["stop_reason"] == "end_turn"
     assert body["usage"] == {"input_tokens": 1624, "output_tokens": 50}
+    assert body["guardrail"] == {"action": "none", "policies": []}
+    # 0.000976 for the answer, plus one PII unit at 0.10 per thousand for the excerpts.
+    assert body["cost_usd"] == 0.001076
+    assert body["price_date"] == "2026-09-23"
     assert isinstance(body["latency_ms"], int)
-    assert set(body) == {"answer", "sources", "layers", "model", "stop_reason", "usage", "latency_ms"}
+    assert set(body) == {
+        "answer", "sources", "layers", "model", "stop_reason", "usage", "guardrail", "cost_usd", "price_date",
+        "latency_ms",
+    }
+
+
+def test_a_tax_question_comes_back_as_the_guardrail_message_and_is_still_a_200(aws: dict[str, Any]) -> None:
+    """A refusal by the guardrail is an answer, not an error: the key's question is spent either way."""
+    aws["bedrock-runtime"].response = {
+        "output": {"message": {"content": [{"text": "Andur does not advise on this."}]}},
+        "stopReason": "guardrail_intervened",
+        "usage": {"inputTokens": 0, "outputTokens": 0},
+        "trace": guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED, output_assessment={}),
+    }
+    status, body = call(event())
+    assert status == 200
+    assert body["answer"] == "Andur does not advise on this."
+    assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Tax advice"]}
+    # One topic unit at 0.15 per thousand, nothing else: no excerpt was masked.
+    assert body["cost_usd"] == 0.00015
+
+
+def test_a_refused_question_gets_no_sources_and_its_excerpts_are_never_guarded(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Nothing was answered from the passages; their text next to a refusal is only a leak."""
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["bedrock-runtime"].response = {
+        "output": {"message": {"content": [{"text": "Andur does not advise on this."}]}},
+        "stopReason": "guardrail_intervened",
+        "usage": {"inputTokens": 0, "outputTokens": 0},
+        "trace": guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED, output_assessment={}),
+    }
+    _, body = call(event())
+    assert body["sources"] == [] and body["layers"] == []
+    assert aws["guardrail"].calls == []
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "answered"]
+    # The search still ran: the log says how many passages it found.
+    assert (line["hits"], line["cited"]) == (2, 0)
+
+
+def test_an_answer_withheld_by_the_grounding_check_keeps_its_sources(aws: dict[str, Any]) -> None:
+    """Only a refused question loses them; a withheld answer still shows what was searched."""
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Withheld."}], "guardrail_intervened", guardrail_trace(output_assessment=UNGROUNDED)
+    )
+    _, body = call(event())
+    assert len(body["sources"]) == 2
+    assert len(aws["guardrail"].calls) == 1
+
+
+def test_excerpts_go_through_the_excerpt_guardrail_in_one_block(aws: dict[str, Any]) -> None:
+    aws["bedrock-agent-runtime"].results = [
+        hit(text="Anja answers the phone from 08:00."),
+        hit(layer="inbox", name="draft--01.md", text="Write to workshop@pellwick.example."),
+    ]
+    aws["guardrail"].response = excerpt_guard_response(
+        ["{NAME} answers the phone from 08:00.\nWrite to {EMAIL}."], pii_units=1, masked=("NAME", "EMAIL")
+    )
+    _, body = call(event())
+    (request,) = aws["guardrail"].calls
+    assert request["guardrailIdentifier"] == "gr-excerpts"
+    assert request["guardrailVersion"] == "2"
+    assert request["source"] == "OUTPUT"
+    assert request["content"] == [
+        {"text": {"text": "Anja answers the phone from 08:00.\nWrite to workshop@pellwick.example."}}
+    ]
+    assert [source["excerpt"] for source in body["sources"]] == [
+        "{NAME} answers the phone from 08:00.",
+        "Write to {EMAIL}.",
+    ]
+    assert "Anja" not in json.dumps(body) and "workshop@" not in json.dumps(body)
+
+
+def test_excerpts_the_guardrail_leaves_alone_come_back_unchanged(aws: dict[str, Any]) -> None:
+    _, body = call(event())
+    assert [source["excerpt"] for source in body["sources"]] == [
+        "Open the project and go to Settings > Export.",
+        "Draft.",
+    ]
+
+
+def test_the_masked_types_are_logged_and_never_what_they_matched(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["guardrail"].response = excerpt_guard_response(["{NAME} opens.\nDraft."], masked=("NAME",))
+    call(event())
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "answered"]
+    assert line["excerpt_policies"] == ["pii:NAME"]
+    assert "Anja Pell" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "outputs",
+    [["only one line"], ["a", "b"], ["too\nmany\nlines"]],
+    ids=["too-few-lines", "two-outputs", "too-many-lines"],
+)
+def test_a_masked_text_that_does_not_split_back_drops_every_excerpt(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture, outputs: list[str]
+) -> None:
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["guardrail"].response = excerpt_guard_response(outputs, masked=("NAME",))
+    status, body = call(event())
+    assert status == 200
+    assert [source["excerpt"] for source in body["sources"]] == [None, None]
+    assert [line for line in log_lines(caplog) if line["event"] == "excerpt-guard-unusable"]
+
+
+@pytest.mark.parametrize("action", ["BLOCKED", "", None, "SOMETHING_NEW"], ids=["blocked", "empty", "missing", "unknown"])
+def test_an_action_other_than_none_or_intervened_drops_every_excerpt(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture, action: str | None
+) -> None:
+    """Only the two documented actions keep the excerpts; anything else is no masking to trust.
+
+    The call went through and reported its units, so the cost stays an amount.
+    """
+    caplog.set_level(logging.INFO, logger="andur")
+    # Outputs that would split into two lines, so the action alone decides.
+    response = excerpt_guard_response(["{NAME} opens.\nDraft."], masked=("NAME",))
+    if action is None:
+        del response["action"]
+    else:
+        response["action"] = action
+    aws["guardrail"].response = response
+    status, body = call(event())
+    assert status == 200
+    assert [source["excerpt"] for source in body["sources"]] == [None, None]
+    assert body["cost_usd"] == 0.001076
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "excerpt-guard-unusable"]
+    assert line["action"] == action
+
+
+def test_a_split_that_does_not_fit_keeps_the_units_counted(aws: dict[str, Any]) -> None:
+    """The call was billed although its text was of no use: the cost is an amount, not null."""
+    aws["guardrail"].response = excerpt_guard_response(["only one line"], pii_units=2, masked=("NAME",))
+    _, body = call(event())
+    assert [source["excerpt"] for source in body["sources"]] == [None, None]
+    # 0.000976 for the answer, plus two PII units at 0.10 per thousand.
+    assert body["cost_usd"] == 0.001176
+
+
+def test_a_failed_excerpt_guardrail_drops_every_excerpt_and_the_cost_is_unknown(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Fail closed: an answer without its passages' openings, never with them unmasked."""
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["guardrail"].error = client_error("ThrottlingException", "near 'Anja Pell'", operation="ApplyGuardrail")
+    status, body = call(event())
+    assert status == 200
+    assert body["answer"] == "Use Settings > Export [1]."
+    assert [source["excerpt"] for source in body["sources"]] == [None, None]
+    assert body["cost_usd"] is None
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "excerpt-guard-failed"]
+    assert line["detail"] == "ClientError: ThrottlingException"
+    assert "Anja Pell" not in caplog.text
+
+
+def test_excerpt_units_count_as_pii_units() -> None:
+    units = {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 3}
+    assert handler.add_units(units, 2)["sensitiveInformationPolicyUnits"] == 3
+    assert units["sensitiveInformationPolicyUnits"] == 1
+    assert handler.add_units(units, None) is None
+    assert handler.add_units(None, 2) is None
+
+
+def test_the_unmasked_answer_in_the_trace_reaches_neither_body_nor_log(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Call {NAME} on {PHONE} [1]."}], "guardrail_intervened", guardrail_trace(output_assessment=PHONE_MASKED)
+    )
+    status, body = call(event())
+    assert status == 200
+    assert body["answer"] == "Call {NAME} on {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["masked"]
+    for text in (json.dumps(body), caplog.text):
+        assert "Ada Quill" not in text and "7946" not in text
 
 
 def test_the_request_goes_to_the_workspace_and_model_from_the_environment(aws: dict[str, Any]) -> None:
@@ -1499,6 +1962,7 @@ def test_no_hits_means_no_model_call(aws: dict[str, Any]) -> None:
     assert body["sources"] == [] and body["layers"] == []
     assert body["model"] is None
     assert body["usage"] == {"input_tokens": 0, "output_tokens": 0}
+    assert body["cost_usd"] == 0.0
     assert aws["bedrock-runtime"].calls == []
 
 
@@ -1633,6 +2097,18 @@ def test_an_answer_logs_one_line_with_tokens_hits_dropped_and_latency(
         "hits": 2,
         "dropped": 1,
         "cited": 1,
+        "guardrail": "none",
+        "guardrail_policies": [],
+        "excerpt_policies": [],
+        "grounding_score": 0.93,
+        "relevance_score": 0.88,
+        "guardrail_units": {
+            "topicPolicyUnits": 2,
+            "sensitiveInformationPolicyUnits": 2,
+            "contextualGroundingPolicyUnits": 3,
+        },
+        "cost_usd": 0.001076,
+        "price_date": "2026-09-23",
         "latency_ms": line["latency_ms"],
     }
 

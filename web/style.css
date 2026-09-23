@@ -174,9 +174,21 @@ button:disabled {
 
 .answer {
   margin: 0 0 .8rem;
-  white-space: pre-wrap;
   font-size: 1.05rem;
 }
+
+/* Paragraphs and lists built by markdown.js. pre-wrap keeps the spaces the
+   model wrote; line breaks inside a paragraph are <br> elements. */
+.answer p,
+.answer li {
+  white-space: pre-wrap;
+}
+
+.answer p { margin: 0 0 .6rem; }
+.answer ul,
+.answer ol { margin: 0 0 .6rem; padding-left: 1.4rem; }
+.answer li { margin-bottom: .2rem; }
+.answer > :last-child { margin-bottom: 0; }
 
 .layers {
   margin: 0;

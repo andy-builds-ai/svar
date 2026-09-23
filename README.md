@@ -26,7 +26,8 @@ removes it.
 | Answering | Nemotron 3 Super on Bedrock, behind a Lambda function | Answers from the retrieved passages only and cites them. No idle cost; the function only runs while a question is in flight. |
 | Access | One key per workspace | The key decides the workspace. Keys are generated during the deploy and kept as SecureString parameters, which cost nothing. |
 | Budget | DynamoDB, one item per key | A key is an allowance, not a password: 10 questions and 48 hours from the first one. Billed per request, so an idle month costs nothing. |
-| Page | Static files on S3, private | Three files, no framework, nothing loaded from another server. |
+| Guardrail | Bedrock Guardrails, on the model call and on the excerpts | Refuses legal, tax and medical advice and questions about people, masks personal details in the answer and in the excerpts of its sources, withholds an answer the passages do not carry. Billed per text unit read; nothing while idle. |
+| Page | Static files on S3, private | Four files, no framework, nothing loaded from another server. |
 | The way in | CloudFront, one distribution | One https address for the page and for questions. Its permanent free tier is 1 TB and 10 million requests a month — a demo never leaves it. |
 
 What is missing from that list is as deliberate as what is in it: no
@@ -74,14 +75,15 @@ seconds today.
 
 ### What this repository contains today
 
-Build steps 1 to 5 of seven. The stack creates the documents bucket, the
+Build steps 1 to 6 of seven. The stack creates the documents bucket, the
 vector bucket and index, the knowledge base with its service role, a data
 source pointing at the documents, one key per workspace, the table that
-holds each key's budget, the answer function, the bucket holding the page,
-and the CloudFront distribution that serves both. A fill script loads a demo
+holds each key's budget, the guardrail on the answering model, the answer
+function, the bucket holding the page, and the CloudFront distribution that
+serves both. A fill script loads a demo
 corpus of two fictional companies into it, a retrieve script shows that a
 query in one company's workspace never returns the other's documents, and an
-ask script puts a question to the deployed address. The page itself is three
+ask script puts a question to the deployed address. The page itself is four
 files in `web/` — no framework, no build step, nothing from another server.
 
 Every key carries a budget: ten questions, and 48 hours from the first of
@@ -92,10 +94,27 @@ half ran out. Both numbers can be set per key without a deploy; what that
 costs, how to set it and how to reset it is in
 [app/README.md](app/README.md).
 
+Every answer passes a guardrail on the same model call: it refuses legal,
+tax and medical advice and questions about people's private lives, masks
+names, e-mail addresses, phone numbers and addresses in the answer, and
+withholds an answer the retrieved passages do not carry. The excerpts of
+the sources pass a second guardrail that masks the same details, and a
+refused question comes back without sources.
+
+The masking is statistical, not a list of names, and it misses. In the
+browser acceptance on 23.09.2026 the answer to the phone question was
+masked, and so were names in the excerpts, but a first name standing alone
+stayed in clear text in two excerpts, a few words from a `{NAME}` in the
+same excerpt. A first name without a surname can slip through. Treat the
+masking as a filter that catches most personal details, not as a guarantee;
+documents that must not show a name to a reader must not hold it. Every answer also
+carries its cost in USD, with the day its prices were read. Both are in
+[app/README.md](app/README.md#the-guardrail).
+
 ```
 infra/       the CDK app, the stack, and the key generator it runs during a deploy
 app/         the answer function behind /ask
-web/         the page: index.html, app.js, style.css
+web/         the page: index.html, app.js, markdown.js, style.css
 scripts/     ingest, retrieve and ask
 knowledge/   the demo corpus: two fictional companies
 docs/        metadata convention
@@ -371,34 +390,53 @@ before a deploy or a sync spends minutes finding out.
 
 ## What it costs
 
-Prices taken from AWS pricing pages on 16.09.2026, `us-east-1`. Order of
-magnitude, not a quote.
+Prices taken from AWS pricing pages on 16.09.2026 and later, each dated
+where it is used, `us-east-1`. Order of magnitude, not a quote; the cost per
+question below is measured.
 
 **Idle:** cents per month. S3 Vectors storage is 0.06 USD per GB, the
 documents bucket is a handful of megabytes, and nothing else is running.
 
-**Per question,** assuming 2,000 tokens of context in and 300 tokens out:
+**Per question, measured.** Every answer carries `cost_usd` in its log line
+and its response: tokens and guardrail text units, each times its price
+(Amazon Bedrock pricing page, read 23.09.2026, standard tier; the prices sit
+in the stack next to their source). Three questions to `pellwick` on
+23.09.2026:
 
-| Item | Cost |
-|---|---|
-| Answering model | ~0.0005 USD |
-| Guardrails (build step 5) | ~0.0005 USD |
-| Question embedding, vector query, Lambda | < 0.0001 USD |
-| **Total** | **~0.001 USD — about 1 USD per 1,000 questions** |
+| Question | Tokens in / out | Guardrail units (topic / PII / grounding) | Model | Guardrail | `cost_usd` |
+|---|---|---|---|---|---|
+| Lead time from order to fitting — answered | 1,326 / 32 | 2 / 1 / 5 | 0.00022 USD | 0.00090 USD | 0.001120 USD |
+| Office phone number — answered, a name masked | 1,717 / 40 | 2 / 1 / 7 | 0.00028 USD | 0.00110 USD | 0.001384 USD |
+| Income tax deduction — refused by the topic filter | 0 / 0 | 1 / 0 / 0 | — | 0.00015 USD | 0.000150 USD |
+
+An answered question costs **about 0.0011 to 0.0014 USD — 1.1 to 1.4 USD per
+1,000 questions**, and four fifths of it is the guardrail, not the model.
+The grounding check is the largest part: it reads every retrieved passage as
+its reference, one unit per 1,000 characters, so it grows with the passages,
+not with the answer. A refused question costs one topic unit and no model
+call. Not in `cost_usd`: the question's embedding, the vector query and the
+Lambda time, together under 0.0001 USD.
+
+The excerpts of the sources pass a second guardrail that masks personal
+details, built after these three questions. Measured on the phone question
+again, 23.09.2026: six excerpts in one call are two text units, 0.0002 USD,
+and the question cost 0.001579 USD in all (1,717 / 33 tokens, units
+2 / 3 / 7, the 3 being one for the answer and two for the excerpts). A
+refused question costs nothing more: it returns no sources.
 
 **The cap:** the web address is open to anyone who has it, so the answer
 function runs at most 5 requests at the same time and Lambda turns the rest
 away with HTTP 429 before any code runs. A request without a valid key never reaches the model.
 That bounds the rate at which anything can arrive; what one key may spend in
-total is its budget — ten questions and 48 hours, so about 0.01 USD before
+total is its budget — ten questions and 48 hours, so about 0.014 USD before
 the key is refused. A leaked key is a leak of ten questions, not of an
 open tap.
 
 **Counting it:** one conditional write per question, which is one write unit
 on a table billed per request — 0.625 USD per million writes in `us-east-1`
 (DynamoDB on-demand pricing page, read 17.09.2026). That is 0.63 USD per
-million questions, against roughly 1,000 USD per million at the model. The
-counter is not what the bill is made of. Note that the permanent free tier of
+million questions, against roughly 1,100 to 1,400 USD per million at the
+model and the guardrail. The counter is not what the bill is made of. Note that the permanent free tier of
 25 write and 25 read units is for provisioned capacity, not for on-demand
 tables; this table is on-demand, because a public URL has no rate to
 provision for and a throttled counter would refuse honest questions.
@@ -427,8 +465,9 @@ uses one. The site bucket holds a few kilobytes at 0.023 USD per GB-month.
 4. **Key budgets** — a key is an allowance: ten questions and 48 hours,
    counted in DynamoDB. *(done)*
 5. **The page** — a page behind CloudFront, with the answer function on the
-   same address. *(this step)*
-6. **Guardrails** — topic, PII and hallucination filters.
+   same address. *(done)*
+6. **Guardrails** — topic, PII and hallucination filters, and the cost of
+   every answer in its log line. *(this step)*
 7. **Release** — screenshots, a walkthrough, a tagged version.
 
 ## Licence

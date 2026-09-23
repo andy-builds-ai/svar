@@ -1,9 +1,9 @@
 # web — the page
 
-Three files and no build step: `index.html`, `app.js`, `style.css`. No
-framework, no bundler, no npm package, nothing loaded from another server —
-not a font, not a script, not a pixel. What is in this folder is what the
-browser gets. `cdk deploy` copies it into the site bucket and clears the
+Four files and no build step: `index.html`, `app.js`, `markdown.js`,
+`style.css`. No framework, no bundler, no npm package, nothing loaded from
+another server — not a font, not a script, not a pixel. What is in this
+folder is what the browser gets. `cdk deploy` copies it into the site bucket and clears the
 CloudFront caches, so a change to a file here is live with the next deploy.
 This README stays behind: the deploy leaves it out, like every other
 `README.md` in a packaged folder.
@@ -61,13 +61,23 @@ the button stayed on *Asking…* until the browser was reloaded.
 An answer is shown as the model wrote it, with its `[n]` citations, then the
 layers it rests on, then every retrieved passage with its layer, length,
 whether the answer cites it, and the opening of its text. The last line is
-what the answer cost: model, tokens in and out, and the milliseconds the
-function spent. When no passage matched, the function's own sentence appears
-and the source list says so.
+what the answer cost: model, tokens in and out, the cost in USD with the day
+its prices were read, and the milliseconds the function spent. When no
+passage matched, the function's own sentence appears and the source list
+says so.
 
 Nothing from a response is ever inserted as markup. Every value goes into a
 text node, so a document containing angle brackets stays text and a document
 cannot bring markup of its own into the page.
+
+The model writes a little Markdown now and then, and raw asterisks read
+badly, so `markdown.js` understands three things: `**bold**` on one line,
+bulleted lists (`-`, `*`, `•`) and numbered lists (`1.`, `1)`). Everything
+else — headings, links, tables, a single asterisk — stays as written. The
+file turns the answer into plain data first and then builds each `<p>`,
+`<ul>`, `<ol>`, `<li>` and `<strong>` itself, with the words put in as text;
+there is no `innerHTML` in it, and a test keeps it that way. An answer
+containing `<script>` shows those eight characters.
 
 ## What an error says
 

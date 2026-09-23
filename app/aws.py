@@ -32,7 +32,7 @@ class ClientLimits(NamedTuple):
 #: arrives in one piece at the end.
 #:
 #: The budget counter sits on the critical path of every question, so its
-#: timeouts are the shortest of the four. It is tried twice: a conditional
+#: timeouts are the shortest of all. It is tried twice: a conditional
 #: increment is not idempotent, and a retry after a lost response can charge
 #: one question twice — but that is the safe direction. The count runs ahead,
 #: never behind, so the limit stays hard.
@@ -41,7 +41,16 @@ CLIENT_LIMITS = {
     "dynamodb": ClientLimits(connect_timeout=2, read_timeout=3, attempts=2),
     "bedrock-agent-runtime": ClientLimits(connect_timeout=3, read_timeout=10, attempts=2),
     "bedrock-runtime": ClientLimits(connect_timeout=3, read_timeout=40, attempts=1),
+    "guardrail": ClientLimits(connect_timeout=2, read_timeout=5, attempts=2),
 }
+
+#: Clients that are named for their job, not their service. The excerpt
+#: guardrail is an ``ApplyGuardrail`` call on ``bedrock-runtime``, but with
+#: limits of its own: under the model's 40 seconds the worst case would pass
+#: the function's timeout. It masks a few hundred characters, so it is short,
+#: and it is tried twice — it generates nothing, so a second attempt pays for
+#: nothing twice but a text unit.
+SERVICE_OF_CLIENT = {"guardrail": "bedrock-runtime"}
 
 #: The longest pause botocore makes before a retry: up to 1 second of jittered
 #: backoff, plus up to 5 seconds more when AWS sends a retry-after header.
@@ -71,6 +80,12 @@ def worst_case_seconds() -> int:
     (`BUDGET_WRITES_PER_REQUEST`). Reading the keys is one page for a handful
     of workspaces; a key store large enough to need several pages would add a
     read per page.
+
+    Today that is 171 seconds, counted with one page per key read, and that
+    holds up to ten workspaces at most: ``GetParametersByPath`` returns no
+    more than ten parameters per page (its MaxResults is 1 to 10), so from
+    the eleventh key on, every key read takes two calls or more and the worst
+    case grows.
     """
     calls = {"ssm": KEY_READS_PER_REQUEST, "dynamodb": BUDGET_WRITES_PER_REQUEST}
     return sum(
@@ -98,7 +113,7 @@ def client(service: str, region: str) -> Any:
         read_timeout=limits.read_timeout,
         retries={"mode": "standard", "total_max_attempts": limits.attempts},
     )
-    return boto3.client(service, region_name=region, config=config)
+    return boto3.client(SERVICE_OF_CLIENT.get(service, service), region_name=region, config=config)
 
 
 def sdk_versions() -> dict[str, str]:

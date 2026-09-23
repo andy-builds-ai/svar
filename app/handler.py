@@ -14,10 +14,14 @@ A request runs five steps, and each can end it with its own status code:
 3. Retrieve passages from the knowledge base, filtered to that workspace.
    No passage means no model call: a 200 that says so, and no model to pay
    for. The question is spent either way — it passed the budget in step 2.
-4. Ask the answering model to answer from the numbered passages only (502 if
-   Bedrock fails).
+4. Ask the answering model to answer from the numbered passages only, through
+   the guardrail on the same call (502 if Bedrock fails). The guardrail
+   refuses legal, tax and medical advice and questions about people, masks
+   names, e-mail addresses, phone numbers and addresses in the answer, and
+   withholds an answer the passages do not carry.
 5. Return the answer, every passage with its layer, the layers of the
-   passages the answer cites, the model, the token usage and the latency.
+   passages the answer cites, the model, the token usage, what the guardrail
+   did, what the answer cost with the date of the prices, and the latency.
 
 Errors come back as ``{"error": "<one sentence>"}`` — never a traceback, and
 for a broken configuration only a fixed sentence; the cause goes to the log.
@@ -50,6 +54,8 @@ import time
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import aws
@@ -96,8 +102,12 @@ EXCERPT_CHARACTERS = 300
 #: limit only stops an outlier from pulling pages into the prompt.
 MAX_SOURCE_CHARACTERS = 3000
 
-#: Upper bound for the number of passages a deployment may configure.
-MAX_RESULTS = 100
+#: Upper bound for the number of passages a deployment may configure. The
+#: passages go to the guardrail as its grounding source, which takes at most
+#: 100,000 characters (contextual grounding page of the Bedrock user guide,
+#: read 23.09.2026). Thirty passages of `MAX_SOURCE_CHARACTERS` with their
+#: headers and cut notes stay below that; a hundred would not.
+MAX_RESULTS = 30
 
 #: Upper bounds for the budget a deployment may configure. They only catch a
 #: typo in an environment variable; a real budget is far below either.
@@ -136,11 +146,28 @@ QUESTIONS_SPENT_MESSAGE = "This key's {limit} questions are used up; a new key i
 WINDOW_CLOSED_MESSAGE = "This key's time window has closed; a new key is needed."
 BUDGET_SPENT_MESSAGE = "This key's budget is used up; a new key is needed."
 
+#: The highest price per thousand a deployment may configure, in USD. It only
+#: catches a slip in an environment variable; every real price is far below.
+MAX_PRICE_PER_THOUSAND = Decimal(10)
+
+#: How many decimal places `cost_usd` keeps. A question costs about a tenth
+#: of a cent, so six places show it to a thousandth of that.
+COST_DECIMAL_PLACES = 6
+
 #: Notes added to an answer the model did not finish on its own.
 STOP_NOTES = {
     "max_tokens": f"[Answer cut off: the limit of {MAX_ANSWER_TOKENS} tokens was reached.]",
     "content_filtered": "[Answer stopped: the model's content filter intervened.]",
     "guardrail_intervened": "[Answer stopped: a guardrail intervened.]",
+}
+
+#: What the guardrail did to an answer, and the note the answer gets for it.
+#: A blocked answer is replaced by the guardrail's own message, which says
+#: why; a note under it would say it twice. A masked answer is the model's
+#: answer with personal details replaced by their type, such as ``{PHONE}``.
+GUARDRAIL_NOTES = {
+    "blocked": None,
+    "masked": "[Personal details in this answer are masked.]",
 }
 
 
@@ -236,6 +263,21 @@ class LLMError(HandlerError):
 
 
 @dataclass(frozen=True)
+class Prices:
+    """USD per 1,000 tokens of the answering model, or per 1,000 guardrail text units.
+
+    A text unit is up to 1,000 characters of text one guardrail policy
+    reads. Only the three policies the stack configures have a price here.
+    """
+
+    input_tokens: Decimal
+    output_tokens: Decimal
+    topic_units: Decimal
+    sensitive_information_units: Decimal
+    grounding_units: Decimal
+
+
+@dataclass(frozen=True)
 class Settings:
     """What the stack tells the function through its environment."""
 
@@ -248,6 +290,13 @@ class Settings:
     question_limit: int
     window_hours: int
     keep_days: int
+    guardrail_id: str
+    guardrail_version: str
+    excerpt_guardrail_id: str
+    excerpt_guardrail_version: str
+    prices: Prices
+    #: The day the prices were read off the pricing page, ``YYYY-MM-DD``.
+    price_date: str
 
 
 #: Environment variable for each setting. The stack sets all of them.
@@ -261,6 +310,16 @@ ENVIRONMENT_VARIABLES = {
     "question_limit": "QUESTION_LIMIT",
     "window_hours": "WINDOW_HOURS",
     "keep_days": "KEEP_DAYS",
+    "guardrail_id": "GUARDRAIL_ID",
+    "guardrail_version": "GUARDRAIL_VERSION",
+    "excerpt_guardrail_id": "EXCERPT_GUARDRAIL_ID",
+    "excerpt_guardrail_version": "EXCERPT_GUARDRAIL_VERSION",
+    "price_input_tokens": "PRICE_INPUT_PER_1K_TOKENS",
+    "price_output_tokens": "PRICE_OUTPUT_PER_1K_TOKENS",
+    "price_topic_units": "PRICE_TOPIC_PER_1K_UNITS",
+    "price_sensitive_information_units": "PRICE_PII_PER_1K_UNITS",
+    "price_grounding_units": "PRICE_GROUNDING_PER_1K_UNITS",
+    "price_date": "PRICE_DATE",
 }
 
 
@@ -276,6 +335,30 @@ def whole_number(variable: str, text: str, lowest: int, highest: int) -> int:
             f"{variable} must be a whole number from {lowest} to {highest}, not {text!r}."
         )
     return int(text)
+
+
+def price(variable: str, text: str) -> Decimal:
+    """A price per thousand: a plain decimal from 0 to `MAX_PRICE_PER_THOUSAND`."""
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        value = None
+    if value is None or not value.is_finite() or not Decimal(0) <= value <= MAX_PRICE_PER_THOUSAND:
+        raise ConfigurationError(
+            f"{variable} must be a price in USD from 0 to {MAX_PRICE_PER_THOUSAND}, not {text!r}."
+        )
+    return value
+
+
+def price_day(text: str) -> str:
+    """The day the prices were read, as ``YYYY-MM-DD`` and a real date."""
+    try:
+        day = date.fromisoformat(text)
+    except ValueError:
+        day = None
+    if day is None or day.isoformat() != text:
+        raise ConfigurationError(f"PRICE_DATE must be a date as YYYY-MM-DD, not {text!r}.")
+    return text
 
 
 def load_settings(environ: Mapping[str, str]) -> Settings:
@@ -307,6 +390,21 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             f"KEEP_DAYS ({keep_days}) must outlast WINDOW_HOURS ({window_hours}): a budget "
             "whose item disappears before its window closes is no budget."
         )
+    # A numbered version and never DRAFT: the draft changes whenever somebody
+    # edits the guardrail in the console, and the guard on an answer should be
+    # the one the stack deployed.
+    for name in ("guardrail_version", "excerpt_guardrail_version"):
+        if not (values[name].isascii() and values[name].isdigit()):
+            raise ConfigurationError(
+                f"{ENVIRONMENT_VARIABLES[name]} must be a version number, not {values[name]!r}."
+            )
+    prices = Prices(
+        input_tokens=price("PRICE_INPUT_PER_1K_TOKENS", values["price_input_tokens"]),
+        output_tokens=price("PRICE_OUTPUT_PER_1K_TOKENS", values["price_output_tokens"]),
+        topic_units=price("PRICE_TOPIC_PER_1K_UNITS", values["price_topic_units"]),
+        sensitive_information_units=price("PRICE_PII_PER_1K_UNITS", values["price_sensitive_information_units"]),
+        grounding_units=price("PRICE_GROUNDING_PER_1K_UNITS", values["price_grounding_units"]),
+    )
 
     return Settings(
         knowledge_base_id=values["knowledge_base_id"],
@@ -318,6 +416,12 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         question_limit=question_limit,
         window_hours=window_hours,
         keep_days=keep_days,
+        guardrail_id=values["guardrail_id"],
+        guardrail_version=values["guardrail_version"],
+        excerpt_guardrail_id=values["excerpt_guardrail_id"],
+        excerpt_guardrail_version=values["excerpt_guardrail_version"],
+        prices=prices,
+        price_date=price_day(values["price_date"]),
     )
 
 
@@ -943,49 +1047,94 @@ def capped(text: str) -> str:
     return f"{cut} [... cut: the passage is longer than {MAX_SOURCE_CHARACTERS} characters]"
 
 
-def build_prompt(question: str, results: Sequence[Mapping[str, Any]]) -> str:
-    """The user message: every passage under its number, layer and file, then the question."""
+def build_sources(results: Sequence[Mapping[str, Any]]) -> str:
+    """Every passage under its number, layer and file, after a ``Sources:`` line."""
     blocks = [
         f"[{number}] layer: {result.get('metadata', {}).get('layer', 'unknown')} | file: {file_name(result)}\n"
         f"{capped(passage_text(result))}"
         for number, result in enumerate(results, start=1)
     ]
-    sources = "\n\n".join(blocks)
-    return f"Sources:\n\n{sources}\n\nQuestion: {question}"
+    return "Sources:\n\n" + "\n\n".join(blocks)
+
+
+def build_content(question: str, results: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The user message as three content blocks: sources, a label, the question.
+
+    The model reads all three in order. The guardrail reads them by their
+    qualifiers (contextual grounding page of the Bedrock user guide, read
+    23.09.2026):
+
+    * the sources are ``grounding_source`` only: the reference the answer is
+      checked against, and nothing the topic or PII filters look at. A phone
+      number in a document reaches the model and is masked in the answer,
+      not in the passage.
+    * the question is ``query`` and ``guard_content``: the query the answer
+      has to be relevant to, and text the topic filter reads, so a tax
+      question is refused before the model is paid for.
+    * the label in between is plain text, which the guardrail skips once any
+      block of the message is a guard block.
+
+    The question stands alone in its block because a query may be at most
+    1,000 characters, and so may a question (`MAX_QUESTION_CHARACTERS`).
+    """
+    return [
+        {"guardContent": {"text": {"text": build_sources(results), "qualifiers": ["grounding_source"]}}},
+        {"text": "\n\nQuestion:"},
+        {"guardContent": {"text": {"text": question, "qualifiers": ["query", "guard_content"]}}},
+    ]
 
 
 # --- Answering model -----------------------------------------------------
 
 
-def ask_model(bedrock_runtime: Any, model_id: str, prompt: str) -> dict[str, Any]:
-    """Send the system rules and the prompt to the model; return Bedrock's raw response."""
+def ask_model(bedrock_runtime: Any, settings: Settings, content: list[dict[str, Any]]) -> dict[str, Any]:
+    """Send the system rules and the message to the model through the guardrail; return Bedrock's raw response.
+
+    The guardrail rides on the same call: Nemotron 3 Super lists Guardrails
+    among its features on the ``bedrock-runtime`` endpoint (model card in the
+    Bedrock user guide, read 23.09.2026), so no separate ``ApplyGuardrail``
+    call is needed. ``trace`` is on because the trace is the only place that
+    says which policy acted and how many text units each one read, which is
+    the cost of the guardrail. Its ``modelOutput`` field holds the answer as
+    the model wrote it, before masking; nothing here ever reads it.
+    """
     try:
         return bedrock_runtime.converse(
-            modelId=model_id,
+            modelId=settings.model_id,
             system=[{"text": SYSTEM_PROMPT}],
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            messages=[{"role": "user", "content": content}],
             inferenceConfig={"maxTokens": MAX_ANSWER_TOKENS},
+            guardrailConfig={
+                "guardrailIdentifier": settings.guardrail_id,
+                "guardrailVersion": settings.guardrail_version,
+                "trace": "enabled",
+            },
         )
     except aws.botocore_errors() as exc:
-        log_event("converse-failed", model=model_id, detail=aws.error_detail(exc))
+        log_event("converse-failed", model=settings.model_id, detail=aws.error_detail(exc))
         cause = aws.error_cause(exc)
         if aws.error_code(exc) in {"AccessDeniedException", "AccessDenied"}:
-            cause += " — the model may not be enabled for this account"
-        raise LLMError(f"The model {model_id} could not answer: {cause}.") from exc
+            cause += " — the model or the guardrail may not be open to this function"
+        raise LLMError(f"The model {settings.model_id} could not answer: {cause}.") from exc
 
 
-def extract_answer(response: Mapping[str, Any]) -> str:
+def extract_answer(response: Mapping[str, Any], guardrail_action: str = "none") -> str:
     """Pick the first content block that carries text, not blindly the first one.
 
     An answer that is empty or only whitespace is no answer. One the model did
-    not finish on its own gets a note saying why.
+    not finish on its own gets a note saying why. When the guardrail stepped
+    in, its trace says whether it blocked or masked (`read_guardrail`), and
+    the note follows that; a stop without a trace keeps the general note.
     """
     blocks = response.get("output", {}).get("message", {}).get("content", [])
     text = next((block["text"] for block in blocks if "text" in block), None)
     stop_reason = response.get("stopReason", "unknown")
     if text is None or not text.strip():
         raise LLMError(f"The model returned no text (stopReason {stop_reason}).")
-    note = STOP_NOTES.get(stop_reason)
+    if stop_reason == "guardrail_intervened" and guardrail_action in GUARDRAIL_NOTES:
+        note = GUARDRAIL_NOTES[guardrail_action]
+    else:
+        note = STOP_NOTES.get(stop_reason)
     return f"{text}\n\n{note}" if note else text
 
 
@@ -996,6 +1145,186 @@ def read_usage(response: Mapping[str, Any]) -> dict[str, int]:
         "input_tokens": int(usage.get("inputTokens", 0)),
         "output_tokens": int(usage.get("outputTokens", 0)),
     }
+
+
+# --- Guardrail and cost --------------------------------------------------
+
+#: The guardrail usage fields with a price, and the `Prices` field for each.
+#: The trace reports other policies too (content, word, regex); the stack
+#: configures none of them, so they read zero units.
+PRICED_UNITS = {
+    "topicPolicyUnits": "topic_units",
+    "sensitiveInformationPolicyUnits": "sensitive_information_units",
+    "contextualGroundingPolicyUnits": "grounding_units",
+}
+
+
+def guardrail_assessments(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Every assessment in the guardrail trace: the one of the input, then each one of the output."""
+    trace = response.get("trace", {}).get("guardrail", {})
+    found = list(trace.get("inputAssessment", {}).values())
+    for assessments in trace.get("outputAssessments", {}).values():
+        found.extend(assessments)
+    return found
+
+
+def read_guardrail(response: Mapping[str, Any]) -> dict[str, Any]:
+    """What the guardrail did, read from its trace, and never a matched text.
+
+    ``action`` is ``blocked`` when any policy blocked, ``masked`` when the
+    only thing done was masking personal details, ``intervened`` when Bedrock
+    says the guardrail stepped in but the trace does not say how, and
+    ``none`` otherwise. ``policies`` names what acted: ``topic:<name>``,
+    ``pii:<type>``, ``grounding``, ``relevance``. The two scores are the
+    contextual grounding check's, whether it acted or not; they are what a
+    threshold is tuned by. ``units`` is the sum of the text units every
+    assessment reports, or None when none reports any: then the guardrail's
+    cost is unknown, and a cost of zero would be a wrong number.
+    ``question_refused`` is true when the input assessment blocked: the
+    question itself was refused and the model never saw it.
+
+    A PII entry carries the text it matched in ``match``. That is personal
+    data out of a company's documents, and it is never read here.
+    """
+    blocked: list[str] = []
+    masked: list[str] = []
+    scores: dict[str, float | None] = {"grounding_score": None, "relevance_score": None}
+    units: dict[str, int] | None = None
+    input_assessments = list(response.get("trace", {}).get("guardrail", {}).get("inputAssessment", {}).values())
+    question_refused = any(
+        topic.get("action") == "BLOCKED"
+        for assessment in input_assessments
+        for topic in assessment.get("topicPolicy", {}).get("topics", [])
+    )
+    for assessment in guardrail_assessments(response):
+        for topic in assessment.get("topicPolicy", {}).get("topics", []):
+            if topic.get("action") == "BLOCKED":
+                blocked.append(f"topic:{topic.get('name')}")
+        for entity in assessment.get("sensitiveInformationPolicy", {}).get("piiEntities", []):
+            if entity.get("action") == "ANONYMIZED":
+                masked.append(f"pii:{entity.get('type')}")
+            elif entity.get("action") == "BLOCKED":
+                blocked.append(f"pii:{entity.get('type')}")
+        for check in assessment.get("contextualGroundingPolicy", {}).get("filters", []):
+            kind = str(check.get("type", "")).lower()
+            if f"{kind}_score" in scores and isinstance(check.get("score"), (int, float)):
+                scores[f"{kind}_score"] = round(check["score"], 4)
+            if check.get("action") == "BLOCKED":
+                blocked.append(kind)
+        usage = assessment.get("invocationMetrics", {}).get("usage")
+        if usage is not None:
+            units = units or {name: 0 for name in PRICED_UNITS}
+            for name in PRICED_UNITS:
+                units[name] += int(usage.get(name, 0))
+
+    if blocked:
+        action = "blocked"
+    elif masked:
+        action = "masked"
+    elif response.get("stopReason") == "guardrail_intervened":
+        action = "intervened"
+    else:
+        action = "none"
+    policies = list(dict.fromkeys(blocked + masked))
+    return {"action": action, "policies": policies, **scores, "units": units, "question_refused": question_refused}
+
+
+def mask_excerpts(guardrail_client: Any, settings: Settings, sources: list[dict[str, Any]]) -> dict[str, Any]:
+    """Mask the personal details in the sources' excerpts, in place; return what was masked and its units.
+
+    The answer's guardrail reads the model's answer only, and an excerpt is
+    the opening of a passage as it stands in the documents. So the excerpts
+    go through a second guardrail with one policy, the same masking, in one
+    ``ApplyGuardrail`` call as the model's output. One text block, one excerpt
+    per line: an excerpt has no line break of its own (`excerpt`), and one
+    block of 1,800 characters is two text units where six blocks would be six.
+
+    Fails closed: a source without its opening is less useful, an unmasked
+    one is what this is here to stop. Only two answers keep the excerpts:
+    ``NONE`` (nothing to mask, the excerpts stay as they are) and
+    ``GUARDRAIL_INTERVENED`` with one output that splits back into exactly as
+    many lines as went in. Every excerpt becomes None
+
+    * when the call fails — ``units`` is then None, because nothing says what
+      was billed, and the answer's ``cost_usd`` is null;
+    * when the action is anything else or missing, or the masked text does
+      not split back — ``units`` stays what the response reports, because the
+      call went through and was billed, and ``cost_usd`` stays an amount.
+    """
+    if not sources:
+        return {"policies": [], "units": 0}
+    try:
+        response = guardrail_client.apply_guardrail(
+            guardrailIdentifier=settings.excerpt_guardrail_id,
+            guardrailVersion=settings.excerpt_guardrail_version,
+            source="OUTPUT",
+            content=[{"text": {"text": "\n".join(source["excerpt"] for source in sources)}}],
+        )
+    except aws.botocore_errors() as exc:
+        log_event("excerpt-guard-failed", detail=aws.error_detail(exc))
+        for source in sources:
+            source["excerpt"] = None
+        return {"policies": [], "units": None}
+
+    policies = list(
+        dict.fromkeys(
+            f"pii:{entity.get('type')}"
+            for assessment in response.get("assessments", [])
+            for entity in assessment.get("sensitiveInformationPolicy", {}).get("piiEntities", [])
+            if entity.get("action") == "ANONYMIZED"
+        )
+    )
+    units = response.get("usage", {}).get("sensitiveInformationPolicyUnits")
+    counted = {"policies": policies, "units": None if units is None else int(units)}
+    action = response.get("action")
+    if action == "NONE":
+        return counted
+    outputs = response.get("outputs", [])
+    masked = outputs[0].get("text", "").split("\n") if action == "GUARDRAIL_INTERVENED" and len(outputs) == 1 else []
+    if len(masked) != len(sources):
+        log_event(
+            "excerpt-guard-unusable",
+            action=action,
+            outputs=len(outputs),
+            lines=len(masked),
+            excerpts=len(sources),
+        )
+        for source in sources:
+            source["excerpt"] = None
+        return counted
+    for source, text in zip(sources, masked):
+        source["excerpt"] = text
+    return counted
+
+
+def add_units(units: Mapping[str, int] | None, excerpt_units: int | None) -> dict[str, int] | None:
+    """The answer's guardrail units plus the excerpt guardrail's PII units; None when either is unknown."""
+    if units is None or excerpt_units is None:
+        return None
+    total = dict(units)
+    total["sensitiveInformationPolicyUnits"] += excerpt_units
+    return total
+
+
+def answer_cost(prices: Prices, usage: Mapping[str, int], units: Mapping[str, int] | None) -> float | None:
+    """What one answer cost in USD: model tokens and guardrail units, each times its price per thousand.
+
+    Rounded to `COST_DECIMAL_PLACES`. None when the guardrail's units are
+    unknown: half a bill is not the bill. Retrieval, the question's
+    embedding and the Lambda time are not in it; together they are less than
+    a hundredth of a cent (README, "What it costs").
+    """
+    if units is None:
+        return None
+    total = (
+        Decimal(usage["input_tokens"]) * prices.input_tokens
+        + Decimal(usage["output_tokens"]) * prices.output_tokens
+        + sum(
+            (Decimal(units[name]) * getattr(prices, field_name) for name, field_name in PRICED_UNITS.items()),
+            Decimal(0),
+        )
+    ) / 1000
+    return float(round(total, COST_DECIMAL_PLACES))
 
 
 _DASH = "-–—"
@@ -1040,6 +1369,13 @@ class RequestRecord:
     workspace: str | None = None
     #: Passages retrieve returned for another workspace and the handler dropped.
     dropped: int = 0
+    #: What `read_guardrail` found. Scores and units go to the log line only.
+    guardrail: dict[str, Any] = field(default_factory=dict)
+    #: Passages that reached the model. Not the number of sources in the
+    #: response: a refused question returns none, but the search ran.
+    hits: int = 0
+    #: Personal details the excerpt guardrail masked, by type.
+    excerpt_policies: list[str] = field(default_factory=list)
 
 
 def answer_question(settings: Settings, workspace: str, question: str, record: RequestRecord) -> dict[str, Any]:
@@ -1052,7 +1388,16 @@ def answer_question(settings: Settings, workspace: str, question: str, record: R
         settings.number_of_results,
     )
     results, record.dropped = keep_workspace(retrieved, workspace)
+    record.hits = len(results)
     if not results:
+        # No model call and no guardrail call: nothing that is billed per answer.
+        record.guardrail = {
+            "action": "none",
+            "policies": [],
+            "grounding_score": None,
+            "relevance_score": None,
+            "units": {name: 0 for name in PRICED_UNITS},
+        }
         return {
             "answer": NO_SOURCES_ANSWER,
             "sources": [],
@@ -1060,13 +1405,26 @@ def answer_question(settings: Settings, workspace: str, question: str, record: R
             "model": None,
             "stop_reason": None,
             "usage": {"input_tokens": 0, "output_tokens": 0},
+            "guardrail": {"action": "none", "policies": []},
+            "cost_usd": 0.0,
+            "price_date": settings.price_date,
         }
 
-    response = ask_model(
-        client("bedrock-runtime", settings.region), settings.model_id, build_prompt(question, results)
-    )
-    answer = extract_answer(response)
-    sources = [to_source(number, result) for number, result in enumerate(results, start=1)]
+    response = ask_model(client("bedrock-runtime", settings.region), settings, build_content(question, results))
+    guardrail = read_guardrail(response)
+    answer = extract_answer(response, guardrail["action"])
+    usage = read_usage(response)
+    # A refused question gets no sources: nothing was answered from them, and
+    # their excerpts would be the documents' text next to a refusal.
+    if guardrail["question_refused"]:
+        sources: list[dict[str, Any]] = []
+        excerpts = {"policies": [], "units": 0}
+    else:
+        sources = [to_source(number, result) for number, result in enumerate(results, start=1)]
+        excerpts = mask_excerpts(client("guardrail", settings.region), settings, sources)
+    guardrail["units"] = add_units(guardrail["units"], excerpts["units"])
+    record.guardrail = guardrail
+    record.excerpt_policies = excerpts["policies"]
     cited = cited_numbers(answer, len(sources))
     for source in sources:
         source["cited"] = source["number"] in cited
@@ -1076,7 +1434,10 @@ def answer_question(settings: Settings, workspace: str, question: str, record: R
         "layers": cited_layers(sources),
         "model": settings.model_id,
         "stop_reason": response.get("stopReason"),
-        "usage": read_usage(response),
+        "usage": usage,
+        "guardrail": {"action": guardrail["action"], "policies": guardrail["policies"]},
+        "cost_usd": answer_cost(settings.prices, usage, guardrail["units"]),
+        "price_date": settings.price_date,
     }
 
 
@@ -1154,9 +1515,17 @@ def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         model=body["model"],
         input_tokens=body["usage"]["input_tokens"],
         output_tokens=body["usage"]["output_tokens"],
-        hits=len(body["sources"]),
+        hits=record.hits,
         dropped=record.dropped,
         cited=sum(1 for source in body["sources"] if source["cited"]),
+        guardrail=record.guardrail.get("action"),
+        guardrail_policies=record.guardrail.get("policies"),
+        excerpt_policies=record.excerpt_policies,
+        grounding_score=record.guardrail.get("grounding_score"),
+        relevance_score=record.guardrail.get("relevance_score"),
+        guardrail_units=record.guardrail.get("units"),
+        cost_usd=body["cost_usd"],
+        price_date=body["price_date"],
         latency_ms=body["latency_ms"],
     )
     return http_response(200, body)

@@ -251,6 +251,9 @@ it.
   "model": "nvidia.nemotron-super-3-120b",
   "stop_reason": "end_turn",
   "usage": {"input_tokens": 1883, "output_tokens": 75},
+  "guardrail": {"action": "none", "policies": []},
+  "cost_usd": 0.001031,
+  "price_date": "2026-09-23",
   "latency_ms": 2483
 }
 ```
@@ -258,15 +261,111 @@ it.
 | Field | Meaning |
 |---|---|
 | `answer` | The model's answer. It cites sources as `[n]`; `[2][3]`, `[2, 3]`, `[2; 3]` and ranges such as `[1-3]` count too. The prompt tells the model to answer exactly *The sources do not answer this question.* when they do not. |
-| `sources` | Every retrieved passage, numbered as the model saw them. `file` is the section file in the documents bucket; `words` its length; `cited` whether the answer cites it; `excerpt` its opening, cut at a word boundary at about 300 characters. |
+| `sources` | Every retrieved passage, numbered as the model saw them. `file` is the section file in the documents bucket; `words` its length; `cited` whether the answer cites it; `excerpt` its opening, cut at a word boundary at about 300 characters, with personal details masked by the excerpt guardrail — `null` when that guardrail could not be asked. Empty when the guardrail refused the question. |
 | `layers` | The layers of the **cited** sources, most trusted first: `human`, `agent`, `inbox`. An answer with `inbox` here rests partly on documents nobody has confirmed. |
 | `model` | The model that answered; `null` when no passage matched and no model was asked. |
-| `stop_reason` | Bedrock's stop reason. `max_tokens` means the answer was cut off, `content_filtered` and `guardrail_intervened` that a filter stopped it; in all three cases the answer says so at its end. |
-| `usage` | Tokens in and out of the model call — what the call costs. |
+| `stop_reason` | Bedrock's stop reason. `max_tokens` means the answer was cut off, `content_filtered` that the model's own filter stopped it, `guardrail_intervened` that the guardrail blocked or masked something — `guardrail` says which. |
+| `usage` | Tokens in and out of the model call. |
+| `guardrail` | What the guardrail did: `action` is `none`, `masked` (personal details replaced by their type, such as `{PHONE}`, and a note at the end of the answer), `blocked` (the answer is the guardrail's own message) or `intervened` (Bedrock says it stepped in, the trace does not say how). `policies` names what acted: `topic:<name>`, `pii:<type>`, `grounding`, `relevance`. |
+| `cost_usd` | What this answer cost: model tokens and guardrail text units, each times its price, rounded to six places. `null` when the guardrail reported no units, because a cost without them would be too low. Retrieval, embedding and Lambda are not in it — together under a hundredth of a cent. |
+| `price_date` | The day the prices behind `cost_usd` were read off the AWS pricing page. A price changes at AWS without a deploy here; the date says how old the number is. |
 | `latency_ms` | Time inside the function, from request to response. |
 
 No passage in the workspace means no model call: the answer is *No sources in
-this workspace match the question.*, with empty `sources` and zero tokens.
+this workspace match the question.*, with empty `sources`, zero tokens and a
+`cost_usd` of 0.
+
+## The guardrail
+
+Every model call goes through one Bedrock guardrail, on the same `converse`
+call (`guardrailConfig`). Nemotron 3 Super lists Guardrails among its
+features on the `bedrock-runtime` endpoint (its model card in the Bedrock
+user guide, read 23.09.2026), so there is no separate `ApplyGuardrail` call.
+The execution role may invoke the model only with the guardrail's deployed
+version named in the call; a call without it is refused.
+
+Three policies, set in `infra/stacks/andur_stack.py`:
+
+- **Refused topics:** legal, tax and medical advice, and questions about
+  public figures or a person's private life. Checked on the question and on
+  the answer. A refused question never reaches the model — the answer is the
+  guardrail's message, the status is still 200, and the question is spent.
+  It comes back without sources: nothing was answered from them, and their
+  excerpts would put the documents' text next to a refusal. An answer the
+  grounding check withholds keeps its sources.
+- **Masked personal details:** names, e-mail addresses, phone numbers and
+  addresses in the answer are replaced by their type, such as `{EMAIL}`. The
+  question is not checked, and neither are the passages: the model reads the
+  documents as they are, the reader gets the answer masked.
+- **Contextual grounding:** an answer the passages do not carry (grounding)
+  or that does not answer the question (relevance) is withheld. Both
+  thresholds are 0.7, the value the user guide works its example with; AWS
+  names no default. Every answered log line carries both scores, which is
+  what a threshold is tuned by.
+
+How the message tells them apart: the passages go in a `guardContent`
+block qualified `grounding_source` — the reference for the grounding check
+and nothing the other policies read. The question goes in a block qualified
+`query` and `guard_content` — the query for the relevance check, and text
+the topic filter reads. A query may be at most 1,000 characters, the same
+limit as a question; the grounding source at most 100,000, which is why a
+deployment may ask for at most 30 passages (`MAX_RESULTS`).
+
+"People outside the documents" is an approximation: the topic filter does
+not see the documents, so it cannot know who is in them. It refuses
+questions about public figures and private lives; an answer about somebody
+the passages do not mention is caught by the grounding check instead.
+
+The guardrail's version is a number, never `DRAFT`. A changed setting
+changes a digest in the version's description, and since that description is
+create-only, the deploy makes a new version and hands its number to the
+function in the same step.
+
+What the trace says goes to the log, never what it matched: a masked phone
+number is logged as `pii:PHONE`, not as the number, and the trace's copy of
+the unmasked answer is not read at all.
+
+### The excerpts
+
+The guardrail on the model call reads the answer. The `excerpt` of every
+source is the opening of a passage as the documents have it, and it goes to
+the page too — before build step 6 was finished, a name the answer had
+masked stood unmasked in the excerpt next to it (live probe, 23.09.2026). So
+the excerpts pass a second guardrail, `andur-excerpt-guardrail`, with one
+policy: the same four details, masked. No topics, so an excerpt about VAT is
+not refused as tax advice; no grounding, which has nothing to check an
+excerpt against; and one price, the sensitive information filter's.
+
+All excerpts go in one `ApplyGuardrail` call, one per line in a single text
+block: an excerpt has no line break of its own, and one block of 1,800
+characters is two text units where six blocks would be six. The units count
+into `cost_usd` as PII units.
+
+It fails closed: a source without its opening is less useful, an unmasked
+one is what this is for. Only `NONE` (nothing to mask) and
+`GUARDRAIL_INTERVENED` with a text that splits back into as many excerpts as
+went in keep them. When the call fails, every `excerpt` is `null` and so is
+`cost_usd`, since nothing says what was billed — the log line is
+`excerpt-guard-failed` with the error code. When the action is anything
+else or missing, or the text does not split back, every `excerpt` is `null`
+too, but the call went through and its units are counted, so `cost_usd`
+stays an amount — the log line is `excerpt-guard-unusable` with the action
+and the counts.
+
+### Where the masking stops
+
+The PII filter recognises personal details statistically, from the words
+around them; it keeps no list of the names in the documents. It misses. In
+the browser acceptance on 23.09.2026 (the phone question to `pellwick`) the
+answer was masked and the excerpts carried `{NAME}` — `excerpt_policies`
+in the log line says `pii:NAME` — yet the same first name stood unmasked in
+two excerpts, in one of them a few words from a `{NAME}`. A first name
+without a surname can slip through, in the answer as much as in an excerpt.
+
+So the masking lowers the chance that a reader sees a personal detail; it
+does not rule it out. The log cannot show a miss either: it names what was
+masked, never what was not. What must never reach a reader must not be in
+the documents.
 
 Behind the retrieval filter sits a second lock: a passage whose `workspace`
 metadata is not the requested workspace is dropped before the prompt is
@@ -325,7 +424,7 @@ One JSON line per request in the log group `/aws/lambda/andur-answer`, kept
 30 days:
 
 ```json
-{"event": "answered", "status": 200, "workspace": "quillmoor", "model": "nvidia.nemotron-super-3-120b", "input_tokens": 1883, "output_tokens": 75, "hits": 6, "dropped": 0, "cited": 1, "latency_ms": 2483}
+{"event": "answered", "status": 200, "workspace": "pellwick", "model": "nvidia.nemotron-super-3-120b", "input_tokens": 1326, "output_tokens": 32, "hits": 5, "dropped": 0, "cited": 2, "guardrail": "none", "guardrail_policies": [], "grounding_score": 0.99, "relevance_score": 1.0, "guardrail_units": {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 5}, "cost_usd": 0.00112, "price_date": "2026-09-23", "latency_ms": 3430}
 {"event": "refused", "status": 401, "workspace": "quillmoor", "error": "The key is not valid.", "latency_ms": 0}
 {"event": "refused", "status": 402, "workspace": "pellwick", "error": "This key's 10 questions are used up; a new key is needed.", "latency_ms": 31}
 ```
@@ -333,6 +432,10 @@ One JSON line per request in the log group `/aws/lambda/andur-answer`, kept
 The question is never logged, nor the key, nor its hash — with one
 exception: a `crashed` line carries a traceback, and an exception message
 inside it can quote what the code choked on.
+
+What the excerpt guardrail masked is in `excerpt_policies` of the
+`answered` line, by type. `hits` counts the passages that reached the model,
+also for a refused question that returns none of them.
 
 A Bedrock failure adds a `retrieve-failed` or `converse-failed` line with
 the exception class and the AWS error code, never the service's own message:
@@ -352,8 +455,12 @@ start names the boto3 and botocore versions of the runtime.
 aws logs tail /aws/lambda/andur-answer --region us-east-1 --follow
 ```
 
-There is no price calculation in the code: prices change, token counts do
-not. Multiply `input_tokens` and `output_tokens` by the model's current price.
+`cost_usd` in the `answered` line is the answer's cost at the prices of
+`price_date`: tokens and guardrail units, each times the price per thousand
+the stack hands over. Prices change at AWS without a deploy here, and the
+token and unit counts in the same line do not — so an old line can always be
+priced again. `guardrail_units` is what the trace reported per policy;
+`null` there, and in `cost_usd`, means the runtime returned no units.
 
 ## Configuration
 
@@ -371,6 +478,20 @@ from files.
 | `QUESTION_LIMIT` | Questions a key gets, `10`, unless its item says otherwise. |
 | `WINDOW_HOURS` | How long its window stays open, `48`, from the first question. |
 | `KEEP_DAYS` | How long an item is kept, `365`, from the first question. Has to outlast the window. |
+| `GUARDRAIL_ID` | The stack's guardrail. |
+| `GUARDRAIL_VERSION` | Its deployed version, a number. `DRAFT` is refused. |
+| `EXCERPT_GUARDRAIL_ID` | The stack's excerpt guardrail. |
+| `EXCERPT_GUARDRAIL_VERSION` | Its deployed version, a number. |
+| `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00015`. |
+| `PRICE_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens, `0.00065`. |
+| `PRICE_TOPIC_PER_1K_UNITS` | USD per 1,000 text units of the topic filter, `0.15`. |
+| `PRICE_PII_PER_1K_UNITS` | USD per 1,000 text units of the sensitive information filter, `0.10`. |
+| `PRICE_GROUNDING_PER_1K_UNITS` | USD per 1,000 text units of the grounding check, `0.10`. |
+| `PRICE_DATE` | The day those prices were read, `2026-09-23`, as `YYYY-MM-DD`. |
+
+The prices are the us-east-1 standard-tier prices of the Amazon Bedrock
+pricing page, read 23.09.2026; the source is in a comment next to them in
+the stack. A text unit is up to 1,000 characters of text one policy reads.
 
 There is no variable for the address or the key header: the function reads
 the key from `KEY_HEADER` in `handler.py`, and nothing in it knows what it is
@@ -381,13 +502,16 @@ Claude models, needs a different `InvokeModel` resource in the stack than a
 plain model id.
 
 Timeouts: every AWS call has a connect and a read timeout (`CLIENT_LIMITS`
-in `aws.py`). Reading the keys, counting the budget and retrieving are tried
-twice; the model call only once, because a converse that timed out may
-already have produced its answer, and a second attempt would pay for the
-input tokens again. A retried count can charge one question twice, which is
-the safe direction: the count runs ahead, never behind. The budget call waits
-the shortest of the four, since it sits in front of every question. Added up,
-the worst case is 151 seconds — Parameter Store counts twice, because an
+in `aws.py`). Reading the keys, counting the budget, retrieving and masking
+the excerpts are tried twice; the model call only once, because a converse
+that timed out may already have produced its answer, and a second attempt
+would pay for the input tokens again. A retried count can charge one question
+twice, which is the safe direction: the count runs ahead, never behind. The
+budget call waits the shortest of all, since it sits in front of every
+question. The excerpt guardrail is a `bedrock-runtime` call with limits of
+its own (2 + 5 seconds): under the model's 40 it would push the worst case
+past the function's timeout. Added up, the worst case is 171 seconds —
+Parameter Store counts twice, because an
 unknown key makes the function read the keys again before it answers 401, and
 the budget table counts twice, because an item whose own window outlasts it is
 put right with a second write. The

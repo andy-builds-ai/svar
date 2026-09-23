@@ -9,6 +9,9 @@ One stack holds everything Andur needs:
 * a data source that tells the knowledge base which prefix to crawl,
 * one key per workspace in Parameter Store, generated during the deploy,
 * a DynamoDB table that counts what each key has spent of its budget,
+* a Bedrock guardrail on the answering model: refused topics, masked
+  personal details, a grounding check; and a second one that masks the
+  same details in the excerpts of the sources,
 * the answer function (app/handler.py) behind a Function URL,
 * a second, private bucket holding the page from web/,
 * one CloudFront distribution that serves both: the page from the bucket, and
@@ -119,6 +122,130 @@ ANSWER_MODEL_ID = "nvidia.nemotron-super-3-120b"
 #: How many passages retrieve hands to the model per question.
 NUMBER_OF_RESULTS = 6
 
+# --- Guardrail -------------------------------------------------------------
+# One guardrail on the answering model's call, three policies (build step 6).
+# Nemotron 3 Super lists Guardrails among its features on the bedrock-runtime
+# endpoint (model card in the Bedrock user guide, read 23.09.2026), so the
+# guardrail rides on the Converse call instead of a separate ApplyGuardrail.
+
+#: Fixed, so a person can find it in the console. Every setting below may
+#: change without replacing it; a change makes a new version instead.
+GUARDRAIL_NAME = "andur-answer-guardrail"
+
+#: Topics Andur refuses: (name, definition, examples). The topic filter reads
+#: the question and the answer, never the passages (app/handler.py,
+#: ``build_content``). A definition is at most 200 characters for the classic
+#: tier, an example at most 100 (Bedrock API reference, GuardrailTopicConfig).
+#:
+#: "People outside the documents" can only be approximated: the filter does
+#: not see the documents, so it cannot know who is in them. What it refuses is
+#: a question about public figures or about a person's private life; a
+#: question for a named colleague's role passes, and an answer about somebody
+#: the passages do not mention is what the grounding check below withholds.
+DENIED_TOPICS = (
+    (
+        "Legal advice",
+        "Requests for advice on a legal matter: rights, contracts, liability, disputes, lawsuits, "
+        "or what the law requires a person or a business to do.",
+        ["Can I sue my landlord over this?", "Is this non-compete clause enforceable?",
+         "What are my rights if I am dismissed?"],
+    ),
+    (
+        "Tax advice",
+        "Requests for advice on taxes: how to file, declare, deduct, reduce or avoid tax, "
+        "or how tax law applies to a person or a business.",
+        ["Can I deduct my home office from my taxes?", "How do I pay less VAT?",
+         "Do I have to declare this income?"],
+    ),
+    (
+        "Medical advice",
+        "Requests for advice on health: symptoms, diagnoses, treatments, medicines or doses for a person.",
+        ["What should I take for a headache?", "Is this rash serious?", "How much ibuprofen can I take?"],
+    ),
+    (
+        "People outside the documents",
+        "Questions about celebrities, politicians or other public figures, or about the private life, "
+        "family, health, beliefs or home of a named person.",
+        ["Who is the richest person in the world?", "Is our CEO married?", "Where does my colleague live?"],
+    ),
+)
+
+#: Personal details masked in the answer: the model reads them in the
+#: passages and writes them, the guardrail replaces each with its type, such
+#: as ``{PHONE}``. The question is not checked (``inputEnabled`` false): a
+#: question may name a person, and an input check is billed for nothing.
+MASKED_PII_TYPES = ("NAME", "EMAIL", "PHONE", "ADDRESS")
+
+#: Contextual grounding: an answer scoring below either threshold is withheld.
+#:
+#: The Bedrock user guide sets the range at 0 to 0.99, says that raising a
+#: threshold blocks more ungrounded and irrelevant content, and works its
+#: example with 0.7 for both (contextual grounding page, read 23.09.2026).
+#: AWS names no default. The launch post adds that an application with a
+#: low tolerance for inaccurate content may need a high threshold (AWS News
+#: Blog, "Guardrails for Amazon Bedrock can now detect hallucinations",
+#: read 23.09.2026). Andur's tolerance is low, but its answers are short and
+#: cite by number, and a threshold set too high withholds answers that are
+#: right. So 0.7, the documented example, as the starting point; every
+#: answered log line carries both scores, which is what moves it later.
+GROUNDING_THRESHOLD = 0.7
+RELEVANCE_THRESHOLD = 0.7
+
+#: What a caller reads instead of a refused question or a withheld answer.
+#: At most 500 characters each.
+BLOCKED_INPUT_MESSAGE = (
+    "Andur answers questions about this company's documents. It does not give legal, tax or "
+    "medical advice, and it does not answer questions about people's private lives or public figures."
+)
+BLOCKED_OUTPUT_MESSAGE = (
+    "Andur withheld this answer: the documents do not carry it, or it strays into advice Andur does not give."
+)
+
+#: The second guardrail: the excerpts of the sources. An excerpt is the
+#: opening of a passage as the documents have it, and the answer's guardrail
+#: never sees it. This one masks the same personal details and does nothing
+#: else — no topics, so an excerpt about VAT is not refused as tax advice, and
+#: no grounding, which has nothing to check an excerpt against. One policy
+#: is one price: sensitive information filters only.
+EXCERPT_GUARDRAIL_NAME = "andur-excerpt-guardrail"
+
+#: Required by Bedrock, never shown: masking replaces text, it does not block.
+EXCERPT_BLOCKED_MESSAGE = "This excerpt was withheld."
+
+
+def masking_policy() -> bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty:
+    """The masking both guardrails share: `MASKED_PII_TYPES` in the output, never in the input."""
+    return bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty(
+        pii_entities_config=[
+            bedrock.CfnGuardrail.PiiEntityConfigProperty(
+                type=pii_type,
+                action="ANONYMIZE",
+                input_enabled=False,
+                input_action="NONE",
+                output_enabled=True,
+                output_action="ANONYMIZE",
+            )
+            for pii_type in MASKED_PII_TYPES
+        ]
+    )
+
+# --- Prices ----------------------------------------------------------------
+# What the handler multiplies the token counts and guardrail units by to put
+# cost_usd on every answer. USD per 1,000, us-east-1, standard tier. Read off
+# the Amazon Bedrock pricing page (aws.amazon.com/bedrock/pricing) on
+# 23.09.2026: NVIDIA Nemotron 3 Super 120B A12B, 0.15 USD per million input
+# and 0.65 USD per million output tokens; Guardrails, per 1,000 text units of
+# up to 1,000 characters, denied topics 0.15 USD, sensitive information
+# filters 0.10 USD, contextual grounding checks 0.10 USD. A price changes on
+# AWS's side without a deploy here, which is why PRICE_DATE travels with
+# every answer: a cost is only as current as the day in front of it.
+PRICE_DATE = "2026-09-23"
+PRICE_INPUT_PER_1K_TOKENS = "0.00015"
+PRICE_OUTPUT_PER_1K_TOKENS = "0.00065"
+PRICE_TOPIC_PER_1K_UNITS = "0.15"
+PRICE_PII_PER_1K_UNITS = "0.10"
+PRICE_GROUNDING_PER_1K_UNITS = "0.10"
+
 #: Every workspace that gets a key. A workspace without a key cannot be asked,
 #: so adding a company means adding it here and deploying.
 WORKSPACES = ("quillmoor", "pellwick")
@@ -182,7 +309,7 @@ LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_14
 ANSWER_FUNCTION_NAME = "andur-answer"
 
 #: Longer than the handler's worst case (``worst_case_seconds`` in app/aws.py,
-#: 151 seconds, checked by a test), so a hanging Bedrock call ends as a 502
+#: 171 seconds, checked by a test), so a hanging Bedrock call ends as a 502
 #: with a reason. Far below the 15 minutes a Function URL call may take.
 ANSWER_TIMEOUT_SECONDS = 180
 
@@ -347,11 +474,23 @@ class AndurStack(Stack):
         self.answer_log_group = self._create_log_group(
             "AnswerFunctionLogs", f"/aws/lambda/{ANSWER_FUNCTION_NAME}"
         )
+        self.guardrail, self.guardrail_version = self._create_guardrail()
+        self.excerpt_guardrail, self.excerpt_guardrail_version = self._create_excerpt_guardrail()
         self.answer_role = self._create_answer_role(
-            self.knowledge_base, self.budget_table, self.answer_log_group
+            self.knowledge_base,
+            self.budget_table,
+            self.answer_log_group,
+            self.guardrail,
+            self.guardrail_version,
+            self.excerpt_guardrail,
         )
         self.answer_function = self._create_answer_function(
-            self.knowledge_base, self.budget_table, self.answer_role, self.answer_log_group
+            self.knowledge_base,
+            self.budget_table,
+            self.answer_role,
+            self.answer_log_group,
+            self.guardrail_version,
+            self.excerpt_guardrail_version,
         )
         self.function_url = self._create_function_url(self.answer_function, self.api_keys)
 
@@ -744,6 +883,92 @@ class AndurStack(Stack):
             ]
         )
 
+    # --- Guardrail -------------------------------------------------------
+
+    def _guardrail_with_version(
+        self, construct_id: str, label: str, properties: dict[str, Any]
+    ) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
+        """A guardrail from ``properties``, and a numbered version that follows every one of them.
+
+        The function names a version, never ``DRAFT``: the draft is whatever
+        the guardrail's settings are this minute, including an edit made in
+        the console. A version is a frozen copy — and CloudFormation creates
+        one only when the version resource is created. Its description is
+        create-only (CloudFormation template reference,
+        AWS::Bedrock::GuardrailVersion, read 23.09.2026), so it carries a
+        digest: change a setting and the description changes, the version is
+        replaced, and the function gets the new number in the same deploy.
+
+        The digest is taken over ``properties`` themselves, the objects the
+        guardrail is built from, resolved to the JSON CloudFormation gets. A
+        digest over a hand-picked summary of them missed every field the
+        summary left out: a changed type, action or enabled flag reached the
+        draft and never the version.
+        """
+        resolved = json.dumps(self.resolve(properties), sort_keys=True)
+        digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
+        guardrail = bedrock.CfnGuardrail(self, construct_id, **properties)
+        version = bedrock.CfnGuardrailVersion(
+            self,
+            f"{construct_id}Version",
+            guardrail_identifier=guardrail.attr_guardrail_id,
+            description=f"Andur {label} guardrail, settings {digest}",
+        )
+        return guardrail, version
+
+    def _create_guardrail(self) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
+        """The guardrail on every answer, and the numbered version the function uses."""
+        return self._guardrail_with_version(
+            "AnswerGuardrail",
+            "answer",
+            {
+                "name": GUARDRAIL_NAME,
+                "description": "Andur: refuses advice topics, masks personal details, withholds ungrounded answers.",
+                "blocked_input_messaging": BLOCKED_INPUT_MESSAGE,
+                "blocked_outputs_messaging": BLOCKED_OUTPUT_MESSAGE,
+                "topic_policy_config": bedrock.CfnGuardrail.TopicPolicyConfigProperty(
+                    topics_config=[
+                        bedrock.CfnGuardrail.TopicConfigProperty(
+                            name=name,
+                            definition=definition,
+                            examples=examples,
+                            type="DENY",
+                            input_enabled=True,
+                            input_action="BLOCK",
+                            output_enabled=True,
+                            output_action="BLOCK",
+                        )
+                        for name, definition, examples in DENIED_TOPICS
+                    ]
+                ),
+                "sensitive_information_policy_config": masking_policy(),
+                "contextual_grounding_policy_config": bedrock.CfnGuardrail.ContextualGroundingPolicyConfigProperty(
+                    filters_config=[
+                        bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
+                            type="GROUNDING", threshold=GROUNDING_THRESHOLD, action="BLOCK", enabled=True
+                        ),
+                        bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
+                            type="RELEVANCE", threshold=RELEVANCE_THRESHOLD, action="BLOCK", enabled=True
+                        ),
+                    ]
+                ),
+            },
+        )
+
+    def _create_excerpt_guardrail(self) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
+        """The guardrail that masks the sources' excerpts, and its numbered version."""
+        return self._guardrail_with_version(
+            "ExcerptGuardrail",
+            "excerpt",
+            {
+                "name": EXCERPT_GUARDRAIL_NAME,
+                "description": "Andur: masks personal details in the excerpts of the sources.",
+                "blocked_input_messaging": EXCERPT_BLOCKED_MESSAGE,
+                "blocked_outputs_messaging": EXCERPT_BLOCKED_MESSAGE,
+                "sensitive_information_policy_config": masking_policy(),
+            },
+        )
+
     # --- Answer function -------------------------------------------------
 
     @property
@@ -755,12 +980,25 @@ class AndurStack(Stack):
         knowledge_base: bedrock.CfnKnowledgeBase,
         budget_table: dynamodb.TableV2,
         log_group: logs.LogGroup,
+        guardrail: bedrock.CfnGuardrail,
+        guardrail_version: bedrock.CfnGuardrailVersion,
+        excerpt_guardrail: bedrock.CfnGuardrail,
     ) -> iam.Role:
-        """The execution role of the answer function: five things, each on one resource.
+        """The execution role of the answer function: six things, each on one resource.
 
         Read the workspace keys, count a question against its key's budget,
         retrieve from this knowledge base, invoke the answering model
-        (``converse`` is authorised as ``InvokeModel``), write its own log.
+        (``converse`` is authorised as ``InvokeModel``), apply its guardrail,
+        write its own log.
+
+        The model may only be invoked through the guardrail's deployed
+        version: the ``bedrock:GuardrailIdentifier`` condition refuses a call
+        without it, and applying the guardrail is its own permission on the
+        guardrail (Bedrock user guide, "Enforce the use of specific
+        guardrails", example 1, read 23.09.2026). A later change that drops
+        ``guardrailConfig`` from the call fails with AccessDenied instead of
+        answering unguarded. Applying the excerpt guardrail is the same
+        permission on the second guardrail; it invokes no model.
         The keys use the AWS managed key ``aws/ssm``, whose key policy already
         lets this account decrypt through Parameter Store, so no KMS statement
         is needed — the deploy of 17.09.2026 read the keys with exactly these
@@ -810,7 +1048,19 @@ class AndurStack(Stack):
                             sid="InvokeAnswerModelStatement",
                             actions=["bedrock:InvokeModel"],
                             resources=[self.answer_model_arn],
-                        )
+                            conditions={
+                                "StringEquals": {
+                                    "bedrock:GuardrailIdentifier": (
+                                        f"{guardrail.attr_guardrail_arn}:{guardrail_version.attr_version}"
+                                    )
+                                }
+                            },
+                        ),
+                        iam.PolicyStatement(
+                            sid="ApplyAnswerGuardrail",
+                            actions=["bedrock:ApplyGuardrail"],
+                            resources=[guardrail.attr_guardrail_arn, excerpt_guardrail.attr_guardrail_arn],
+                        ),
                     ]
                 ),
                 "WriteLogs": self._write_logs_policy(log_group),
@@ -823,6 +1073,8 @@ class AndurStack(Stack):
         budget_table: dynamodb.TableV2,
         role: iam.Role,
         log_group: logs.LogGroup,
+        guardrail_version: bedrock.CfnGuardrailVersion,
+        excerpt_guardrail_version: bedrock.CfnGuardrailVersion,
     ) -> lambda_.Function:
         """The question handler from app/, configured entirely through its environment.
 
@@ -855,6 +1107,16 @@ class AndurStack(Stack):
                 "QUESTION_LIMIT": str(DEFAULT_QUESTION_LIMIT),
                 "WINDOW_HOURS": str(DEFAULT_WINDOW_HOURS),
                 "KEEP_DAYS": str(DEFAULT_KEEP_DAYS),
+                "GUARDRAIL_ID": guardrail_version.attr_guardrail_id,
+                "GUARDRAIL_VERSION": guardrail_version.attr_version,
+                "EXCERPT_GUARDRAIL_ID": excerpt_guardrail_version.attr_guardrail_id,
+                "EXCERPT_GUARDRAIL_VERSION": excerpt_guardrail_version.attr_version,
+                "PRICE_INPUT_PER_1K_TOKENS": PRICE_INPUT_PER_1K_TOKENS,
+                "PRICE_OUTPUT_PER_1K_TOKENS": PRICE_OUTPUT_PER_1K_TOKENS,
+                "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
+                "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
+                "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
+                "PRICE_DATE": PRICE_DATE,
             },
         )
 
@@ -1135,6 +1397,18 @@ class AndurStack(Stack):
             "ApiKeyParameterPath",
             value=API_KEY_PARAMETER_PATH,
             description="Parameter Store path of the workspace keys: <path>/<workspace>, SecureString.",
+        )
+        CfnOutput(
+            self,
+            "GuardrailVersion",
+            value=self.guardrail_version.ref,
+            description="The guardrail on every answer and the version the function uses, as <id>|<version>.",
+        )
+        CfnOutput(
+            self,
+            "ExcerptGuardrailRef",
+            value=self.excerpt_guardrail_version.ref,
+            description="The guardrail that masks the sources' excerpts, as <id>|<version>.",
         )
         CfnOutput(
             self,

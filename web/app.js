@@ -15,6 +15,8 @@
  *
  * Nothing the function returns is ever inserted as markup. Every value goes
  * into a text node, so a document that contains angle brackets stays text.
+ * The answer's bold and lists are elements this page builds itself
+ * (markdown.js); the words inside them are text nodes all the same.
  */
 
 "use strict";
@@ -204,7 +206,7 @@ function sourceEntry(source) {
 }
 
 function show(answer) {
-  answerText.textContent = answer.answer;
+  renderAnswer(answerText, answer.answer);
 
   const layers = Array.isArray(answer.layers) ? answer.layers : [];
   layersText.textContent = layers.length
@@ -222,6 +224,9 @@ function show(answer) {
   costText.textContent =
     (answer.model || "no model call")
     + " · " + usage.input_tokens + " tokens in, " + usage.output_tokens + " out"
+    + (typeof answer.cost_usd === "number"
+      ? " · " + answer.cost_usd.toFixed(6) + " USD at the prices of " + answer.price_date
+      : "")
     + " · " + answer.latency_ms + " ms in the function";
 
   result.hidden = false;

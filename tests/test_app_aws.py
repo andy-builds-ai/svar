@@ -29,7 +29,15 @@ def test_the_model_call_is_tried_once_everything_else_twice() -> None:
     assert aws.CLIENT_LIMITS["bedrock-agent-runtime"].attempts == 2
     assert aws.CLIENT_LIMITS["ssm"].attempts == 2
     assert aws.CLIENT_LIMITS["dynamodb"].attempts == 2
-    assert set(aws.CLIENT_LIMITS) == {"ssm", "dynamodb", "bedrock-agent-runtime", "bedrock-runtime"}
+    assert aws.CLIENT_LIMITS["guardrail"].attempts == 2
+    assert set(aws.CLIENT_LIMITS) == {"ssm", "dynamodb", "bedrock-agent-runtime", "bedrock-runtime", "guardrail"}
+
+
+def test_the_excerpt_guardrail_is_a_bedrock_runtime_client_with_short_limits() -> None:
+    """ApplyGuardrail is a bedrock-runtime call; under the model's 40 seconds the worst case would pass 180."""
+    assert aws.SERVICE_OF_CLIENT == {"guardrail": "bedrock-runtime"}
+    guard = aws.CLIENT_LIMITS["guardrail"]
+    assert guard.connect_timeout + guard.read_timeout == 7
 
 
 def test_the_budget_counter_waits_the_shortest() -> None:
@@ -44,16 +52,16 @@ def test_the_budget_counter_waits_the_shortest() -> None:
 
 
 def test_worst_case_is_every_attempt_timing_out() -> None:
-    """ssm 2 × 22, budget 2 × 16, retrieve 2 × (3 + 10) + 6, converse 1 × (3 + 40).
+    """ssm 2 × 22, budget 2 × 16, retrieve 2 × (3 + 10) + 6, converse 1 × (3 + 40), excerpts 2 × (2 + 5) + 6.
 
     Twice the keys, because an unknown key makes the handler read them again
     before it answers 401. Twice the budget table, because an item whose own
     window outlasts it is put right with a second write. One call each for
-    retrieve and converse.
+    retrieve, converse and the excerpt guardrail.
     """
     assert aws.KEY_READS_PER_REQUEST == 2
     assert aws.BUDGET_WRITES_PER_REQUEST == 2
-    assert aws.worst_case_seconds() == 2 * 22 + 2 * 16 + 32 + 43 == 151
+    assert aws.worst_case_seconds() == 2 * 22 + 2 * 16 + 32 + 43 + 20 == 171
 
 
 def test_clients_get_their_service_limits_and_are_made_once() -> None:
@@ -64,6 +72,7 @@ def test_clients_get_their_service_limits_and_are_made_once() -> None:
         assert made.meta.config.read_timeout == limits.read_timeout
         assert made.meta.config.retries == {"mode": "standard", "total_max_attempts": limits.attempts}
         assert aws.client(service, "us-east-1") is made
+        assert made.meta.service_model.service_name == aws.SERVICE_OF_CLIENT.get(service, service)
 
 
 def test_a_missing_boto3_is_an_import_error(monkeypatch: pytest.MonkeyPatch) -> None:

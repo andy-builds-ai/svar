@@ -34,6 +34,8 @@ from infra.stacks.andur_stack import (
     ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
     API_KEY_PARAMETER_PATH,
+    BLOCKED_INPUT_MESSAGE,
+    BLOCKED_OUTPUT_MESSAGE,
     ASK_PATH,
     BUDGET_KEY_ATTRIBUTE,
     BUDGET_TABLE_NAME,
@@ -44,16 +46,28 @@ from infra.stacks.andur_stack import (
     DEFAULT_KEEP_DAYS,
     DEFAULT_QUESTION_LIMIT,
     DEFAULT_WINDOW_HOURS,
+    DENIED_TOPICS,
+    EXCERPT_GUARDRAIL_NAME,
     DEPLOY_PROPERTY,
     DISTANCE_METRIC,
     EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_ID,
+    GROUNDING_THRESHOLD,
+    GUARDRAIL_NAME,
     HSTS_MAX_AGE_DAYS,
     KNOWLEDGE_BASE_NAME,
+    MASKED_PII_TYPES,
     NON_FILTERABLE_METADATA_KEYS,
     NONCURRENT_VERSION_RETENTION_DAYS,
     NUMBER_OF_RESULTS,
     ORIGIN_RESPONSE_TIMEOUT_SECONDS,
+    PRICE_DATE,
+    PRICE_GROUNDING_PER_1K_UNITS,
+    PRICE_INPUT_PER_1K_TOKENS,
+    PRICE_OUTPUT_PER_1K_TOKENS,
+    PRICE_PII_PER_1K_UNITS,
+    PRICE_TOPIC_PER_1K_UNITS,
+    RELEVANCE_THRESHOLD,
     REPOSITORY_ROOT,
     SITE_ROOT_DOCUMENT,
     VECTOR_DATA_TYPE,
@@ -537,7 +551,7 @@ def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
     again before it is refused, and the budget table twice, because a wrong
     item is put right with a second write.
     """
-    assert aws.worst_case_seconds() == 151
+    assert aws.worst_case_seconds() == 171
     assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
 
 
@@ -575,6 +589,16 @@ def test_answer_function_is_configured_only_through_its_environment(
         "QUESTION_LIMIT": str(DEFAULT_QUESTION_LIMIT),
         "WINDOW_HOURS": str(DEFAULT_WINDOW_HOURS),
         "KEEP_DAYS": str(DEFAULT_KEEP_DAYS),
+        "GUARDRAIL_ID": get_att(stack, stack.guardrail_version, "GuardrailId"),
+        "GUARDRAIL_VERSION": get_att(stack, stack.guardrail_version, "Version"),
+        "EXCERPT_GUARDRAIL_ID": get_att(stack, stack.excerpt_guardrail_version, "GuardrailId"),
+        "EXCERPT_GUARDRAIL_VERSION": get_att(stack, stack.excerpt_guardrail_version, "Version"),
+        "PRICE_INPUT_PER_1K_TOKENS": PRICE_INPUT_PER_1K_TOKENS,
+        "PRICE_OUTPUT_PER_1K_TOKENS": PRICE_OUTPUT_PER_1K_TOKENS,
+        "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
+        "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
+        "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
+        "PRICE_DATE": PRICE_DATE,
     }
     assert set(variables) == set(handler.ENVIRONMENT_VARIABLES.values())
 
@@ -584,7 +608,7 @@ def test_the_model_id_is_configuration_not_handler_code() -> None:
         assert ANSWER_MODEL_ID not in module.read_text(encoding="utf-8"), module.name
 
 
-def test_answer_role_has_five_permissions_each_on_one_resource(stack: AndurStack, template: Template) -> None:
+def test_answer_role_has_six_permissions_each_on_one_resource(stack: AndurStack, template: Template) -> None:
     policies = role_policies(stack, template, stack.answer_role)
     assert set(policies) == {
         "ReadApiKeys",
@@ -606,9 +630,25 @@ def test_answer_role_has_five_permissions_each_on_one_resource(stack: AndurStack
     assert retrieve["Action"] == "bedrock:Retrieve"
     assert retrieve["Resource"] == get_att(stack, stack.knowledge_base, "KnowledgeBaseArn")
 
-    (invoke,) = policies["InvokeAnswerModel"]["Statement"]
+    invoke, apply_guardrail = policies["InvokeAnswerModel"]["Statement"]
     assert invoke["Action"] == "bedrock:InvokeModel"
     assert joined_last_part(invoke["Resource"]) == f"::foundation-model/{ANSWER_MODEL_ID}"
+    # Only through the deployed guardrail version: <guardrail arn>:<version>.
+    assert invoke["Condition"] == {
+        "StringEquals": {
+            "bedrock:GuardrailIdentifier": {
+                "Fn::Join": [
+                    "",
+                    [get_att(stack, stack.guardrail, "GuardrailArn"), ":", get_att(stack, stack.guardrail_version, "Version")],
+                ]
+            }
+        }
+    }
+    assert apply_guardrail["Action"] == "bedrock:ApplyGuardrail"
+    assert apply_guardrail["Resource"] == [
+        get_att(stack, stack.guardrail, "GuardrailArn"),
+        get_att(stack, stack.excerpt_guardrail, "GuardrailArn"),
+    ]
 
     (write_logs,) = policies["WriteLogs"]["Statement"]
     assert sorted(write_logs["Action"]) == ["logs:CreateLogStream", "logs:PutLogEvents"]
@@ -982,9 +1022,183 @@ def test_the_defaults_the_stack_hands_over_are_a_budget_the_handler_accepts() ->
             "QUESTION_LIMIT": str(DEFAULT_QUESTION_LIMIT),
             "WINDOW_HOURS": str(DEFAULT_WINDOW_HOURS),
             "KEEP_DAYS": str(DEFAULT_KEEP_DAYS),
+            "GUARDRAIL_ID": "gr1",
+            "GUARDRAIL_VERSION": "1",
+            "EXCERPT_GUARDRAIL_ID": "gr2",
+            "EXCERPT_GUARDRAIL_VERSION": "1",
+            "PRICE_INPUT_PER_1K_TOKENS": PRICE_INPUT_PER_1K_TOKENS,
+            "PRICE_OUTPUT_PER_1K_TOKENS": PRICE_OUTPUT_PER_1K_TOKENS,
+            "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
+            "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
+            "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
+            "PRICE_DATE": PRICE_DATE,
         }
     )
     assert (DEFAULT_QUESTION_LIMIT, DEFAULT_WINDOW_HOURS) == (10, 48)
+
+
+# --- Guardrail -----------------------------------------------------------
+
+
+def test_two_guardrails_each_with_one_version(stack: AndurStack, template: Template) -> None:
+    template.resource_count_is("AWS::Bedrock::Guardrail", 2)
+    template.resource_count_is("AWS::Bedrock::GuardrailVersion", 2)
+    assert resource_of(stack, template, stack.guardrail)["Properties"]["Name"] == GUARDRAIL_NAME
+    assert resource_of(stack, template, stack.excerpt_guardrail)["Properties"]["Name"] == EXCERPT_GUARDRAIL_NAME
+    version = resource_of(stack, template, stack.guardrail_version)["Properties"]
+    assert version["GuardrailIdentifier"] == get_att(stack, stack.guardrail, "GuardrailId")
+    excerpt_version = resource_of(stack, template, stack.excerpt_guardrail_version)["Properties"]
+    assert excerpt_version["GuardrailIdentifier"] == get_att(stack, stack.excerpt_guardrail, "GuardrailId")
+
+
+def test_the_excerpt_guardrail_masks_the_same_details_and_does_nothing_else(
+    stack: AndurStack, template: Template
+) -> None:
+    """No topic, no grounding: an excerpt about VAT is no tax question, and one price only."""
+    properties = resource_of(stack, template, stack.excerpt_guardrail)["Properties"]
+    assert "TopicPolicyConfig" not in properties
+    assert "ContextualGroundingPolicyConfig" not in properties
+    assert "ContentPolicyConfig" not in properties and "WordPolicyConfig" not in properties
+    entities = properties["SensitiveInformationPolicyConfig"]["PiiEntitiesConfig"]
+    answer_entities = resource_of(stack, template, stack.guardrail)["Properties"]["SensitiveInformationPolicyConfig"][
+        "PiiEntitiesConfig"
+    ]
+    assert entities == answer_entities
+    assert 1 <= len(properties["BlockedOutputsMessaging"]) <= 500
+
+
+def test_the_four_topics_are_refused_in_question_and_answer(stack: AndurStack, template: Template) -> None:
+    topics = resource_of(stack, template, stack.guardrail)["Properties"]["TopicPolicyConfig"]["TopicsConfig"]
+    assert [topic["Name"] for topic in topics] == [
+        "Legal advice",
+        "Tax advice",
+        "Medical advice",
+        "People outside the documents",
+    ]
+    for topic in topics:
+        assert topic["Type"] == "DENY"
+        assert (topic["InputEnabled"], topic["InputAction"]) == (True, "BLOCK")
+        assert (topic["OutputEnabled"], topic["OutputAction"]) == (True, "BLOCK")
+
+
+def test_topics_stay_inside_what_bedrock_accepts() -> None:
+    """Classic tier: a definition of at most 200 characters, up to five examples of at most 100.
+
+    Too long is no synth error; it is a failed deploy after several minutes.
+    """
+    name_pattern = re.compile(r"^[0-9a-zA-Z-_ !?.]+$")
+    for name, definition, examples in DENIED_TOPICS:
+        assert name_pattern.match(name) and len(name) <= 100, name
+        assert 1 <= len(definition) <= 200, name
+        assert 1 <= len(examples) <= 5, name
+        assert all(1 <= len(example) <= 100 for example in examples), name
+    assert 1 <= len(BLOCKED_INPUT_MESSAGE) <= 500
+    assert 1 <= len(BLOCKED_OUTPUT_MESSAGE) <= 500
+
+
+def test_personal_details_are_masked_in_the_answer_only(stack: AndurStack, template: Template) -> None:
+    config = resource_of(stack, template, stack.guardrail)["Properties"]["SensitiveInformationPolicyConfig"]
+    entities = config["PiiEntitiesConfig"]
+    assert [entity["Type"] for entity in entities] == list(MASKED_PII_TYPES) == ["NAME", "EMAIL", "PHONE", "ADDRESS"]
+    for entity in entities:
+        assert entity["Action"] == "ANONYMIZE"
+        assert (entity["OutputEnabled"], entity["OutputAction"]) == (True, "ANONYMIZE")
+        assert entity["InputEnabled"] is False
+
+
+def test_grounding_and_relevance_are_checked_at_documented_thresholds(stack: AndurStack, template: Template) -> None:
+    config = resource_of(stack, template, stack.guardrail)["Properties"]["ContextualGroundingPolicyConfig"]
+    filters = {check["Type"]: check for check in config["FiltersConfig"]}
+    assert set(filters) == {"GROUNDING", "RELEVANCE"}
+    assert filters["GROUNDING"]["Threshold"] == GROUNDING_THRESHOLD == 0.7
+    assert filters["RELEVANCE"]["Threshold"] == RELEVANCE_THRESHOLD == 0.7
+    for check in filters.values():
+        assert 0 <= check["Threshold"] <= 0.99  # 1 blocks everything, says the user guide
+        assert (check["Action"], check["Enabled"]) == ("BLOCK", True)
+
+
+def test_a_changed_setting_makes_a_new_guardrail_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The version's description is create-only, and it carries a digest of the settings.
+
+    Without that, a new threshold would reach the guardrail's draft and never
+    the version the function uses.
+    """
+    from infra.stacks import andur_stack
+
+    def version_description() -> str:
+        other = AndurStack(cdk.App(context=deploy_context()), "VersionStack")
+        return Template.from_stack(other).to_json()["Resources"][
+            other.get_logical_id(other.guardrail_version)
+        ]["Properties"]["Description"]
+
+    before = version_description()
+    assert before == version_description()
+    monkeypatch.setattr(andur_stack, "GROUNDING_THRESHOLD", 0.8)
+    after = version_description()
+    assert after != before
+    assert len(after) <= 200
+
+
+def test_a_changed_output_action_makes_new_versions_of_both_guardrails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The digest covers the built properties, not a summary of them.
+
+    An output action was never in the summary the digest used to be taken
+    over: switching masking to blocking changed the guardrail's draft and left
+    both versions — the ones the function uses — as they were.
+    """
+    from aws_cdk import aws_bedrock as bedrock
+
+    from infra.stacks import andur_stack
+
+    def descriptions() -> tuple[str, str]:
+        other = AndurStack(cdk.App(context=deploy_context()), "ActionStack")
+        resources = Template.from_stack(other).to_json()["Resources"]
+        return tuple(
+            resources[other.get_logical_id(version)]["Properties"]["Description"]
+            for version in (other.guardrail_version, other.excerpt_guardrail_version)
+        )
+
+    real_policy = andur_stack.masking_policy
+
+    def blocking_policy() -> bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty:
+        entities = [
+            bedrock.CfnGuardrail.PiiEntityConfigProperty(
+                type=entity.type,
+                action=entity.action,
+                input_enabled=entity.input_enabled,
+                input_action=entity.input_action,
+                output_enabled=entity.output_enabled,
+                output_action="BLOCK",
+            )
+            for entity in real_policy().pii_entities_config
+        ]
+        return bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty(pii_entities_config=entities)
+
+    answer_before, excerpt_before = descriptions()
+    monkeypatch.setattr(andur_stack, "masking_policy", blocking_policy)
+    answer_after, excerpt_after = descriptions()
+    assert answer_after != answer_before
+    assert excerpt_after != excerpt_before
+
+
+def test_the_prices_are_ones_the_handler_accepts_and_dated() -> None:
+    for value in (
+        PRICE_INPUT_PER_1K_TOKENS,
+        PRICE_OUTPUT_PER_1K_TOKENS,
+        PRICE_TOPIC_PER_1K_UNITS,
+        PRICE_PII_PER_1K_UNITS,
+        PRICE_GROUNDING_PER_1K_UNITS,
+    ):
+        handler.price("PRICE", value)
+    assert handler.price_day(PRICE_DATE) == PRICE_DATE
+
+
+def test_the_guardrail_version_is_an_output(stack: AndurStack, template: Template) -> None:
+    outputs = template.find_outputs("GuardrailVersion")
+    (output,) = outputs.values()
+    assert output["Value"] == {"Ref": stack.get_logical_id(stack.guardrail_version)}
+    (excerpt_output,) = template.find_outputs("ExcerptGuardrailRef").values()
+    assert excerpt_output["Value"] == {"Ref": stack.get_logical_id(stack.excerpt_guardrail_version)}
 
 
 def test_no_role_may_do_more_than_count_on_the_budget_table(template: Template) -> None:
