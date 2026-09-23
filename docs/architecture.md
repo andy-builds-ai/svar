@@ -1,0 +1,137 @@
+# Architecture
+
+An internal knowledge assistant that answers questions from a company's own
+documents, and says where each answer came from.
+
+A company drops its handbooks, policies and notes into a folder. Andur reads
+them, and from then on anyone can ask in plain language instead of searching.
+Every answer carries its sources, and every source says which layer it came
+from — written by a person, produced by a machine, or merely arrived and not
+yet sorted. One deployment serves several companies: each gets a workspace,
+and a question asked in one workspace can never be answered from another's
+documents.
+
+Runs entirely on AWS, defined as code. One command builds it; one command
+removes it.
+
+## The parts
+
+| Part | Service | Job |
+|---|---|---|
+| Documents | S3 | The source of truth. One prefix per workspace, versioned, closed to the public. |
+| Vector store | S3 Vectors | Holds the embeddings. Nothing runs while nobody asks, so an idle month costs cents. |
+| Retrieval | Bedrock Knowledge Base | Chunking, embedding, search. Managed, so there is no index code to maintain. |
+| Embeddings | Titan Text Embeddings V2 | Turns text into the 1024-dimension vectors the index stores. |
+| Separation | Metadata filter | `workspace` on every chunk. The filter, not a separate deployment, is what keeps companies apart. |
+| Answering | Nemotron 3 Super on Bedrock, behind a Lambda function | Answers from the retrieved passages only and cites them. No idle cost; the function only runs while a question is in flight. |
+| Access | One key per workspace | The key decides the workspace. Keys are generated during the deploy and kept as SecureString parameters, which cost nothing. |
+| Budget | DynamoDB, one item per key | A key is an allowance, not a password: 10 questions and 48 hours from the first one. Billed per request, so an idle month costs nothing. |
+| Guardrail | Bedrock Guardrails, on the model call and on the excerpts | Refuses legal, tax and medical advice and questions about people, masks personal details in the answer and in the excerpts of its sources, withholds an answer the passages do not carry. Billed per text unit read; nothing while idle. |
+| Page | Static files on S3, private | Four files, no framework, nothing loaded from another server. |
+| The way in | CloudFront, one distribution | One https address for the page and for questions. Its permanent free tier is 1 TB and 10 million requests a month — a demo never leaves it. |
+
+What is missing from that list is as deliberate as what is in it: no
+OpenSearch cluster, no NAT gateway, no container service, nothing with a
+monthly base fee. The bill follows use, and when nobody uses it, there
+barely is one.
+
+## One address for everything
+
+The page and the answer function sit behind the same CloudFront
+distribution. The page comes from a private S3 bucket; the single path
+`/ask` goes to the answer function instead. Both origins are reached through
+an origin access control, which means neither is reachable from outside on
+its own: the bucket blocks all public access, and the function URL is set to
+`AWS_IAM`, so it answers 403 to every caller outside this account, and its
+resource policy names CloudFront alone, only for this distribution. Inside
+the account it is not a wall — `AWS_IAM` lets a role here be authorised by
+its own identity policy — so an administrator or a CI role can sign a call
+and reach the function past the distribution. The workspace key, its
+workspace and its budget are checked in the function on every call, wherever
+it came from.
+
+That shape buys three things. The page calls `/ask` as a relative path, so it
+never has to know its own address and there is no configuration file to keep
+in step. Page and function share an origin, so there is no cross-origin
+request and nothing to allow with CORS. And there is one place in front of
+everything — the place a WAF would go if the demo ever needed one.
+
+It costs two things, both in the request and both worth knowing before
+reading the curl examples in [operating.md](operating.md#with-curl):
+
+- **The key travels in `X-Andur-Key`, not in `Authorization`.** CloudFront
+  signs every request it forwards to the function URL and puts its own
+  signature into `Authorization`, so a key sent there would be overwritten on
+  the way.
+- **Every request carries the SHA-256 of its body in `x-amz-content-sha256`.**
+  A signed request to a Lambda function URL may not have an unsigned payload,
+  so the caller computes the hash. A browser has `crypto.subtle` for it, a
+  shell has `sha256sum`, and `scripts/ask.py` uses `hashlib`.
+
+One more consequence, in the [app README](../app/README.md): CloudFront waits
+120 seconds for the function, which may run 180. An answer between the two
+arrives as a 504 while the function finishes it anyway. Answers took 1.8 to
+3.8 seconds inside the function on 23.09.2026, with both guardrails.
+
+## What the stack creates
+
+The stack creates the documents bucket, the
+vector bucket and index, the knowledge base with its service role, a data
+source pointing at the documents, one key per workspace, the table that
+holds each key's budget, the guardrail on the answering model, the answer
+function, the bucket holding the page, and the CloudFront distribution that
+serves both. A fill script loads a demo
+corpus of two fictional companies into it, a retrieve script shows that a
+query in one company's workspace never returns the other's documents, and an
+ask script puts a question to the deployed address. The page itself is four
+files in `web/` — no framework, no build step, nothing from another server.
+
+Every key carries a budget: ten questions, and 48 hours from the first of
+them. The handler counts a question against the key that asked before it
+retrieves anything, in one conditional write against a DynamoDB item found by
+the SHA-256 of the key. A key with nothing left gets a 402 that says which
+half ran out. Both numbers can be set per key without a deploy; what that
+costs, how to set it and how to reset it is in
+[app/README.md](../app/README.md).
+
+Every answer passes a guardrail on the same model call: it refuses legal,
+tax and medical advice and questions about people's private lives, masks
+names, e-mail addresses, phone numbers and addresses in the answer, and
+withholds an answer the retrieved passages do not carry. The excerpts of
+the sources pass a second guardrail that masks the same details, and a
+refused question comes back without sources.
+
+The masking is statistical, not a list of names, and it misses. In the
+browser acceptance on 23.09.2026 the answer to the phone question was
+masked, and so were names in the excerpts, but a first name standing alone
+stayed in clear text in two excerpts, a few words from a `{NAME}` in the
+same excerpt. A first name without a surname can slip through. Treat the
+masking as a filter that catches most personal details, not as a guarantee;
+documents that must not show a name to a reader must not hold it. Every answer also
+carries its cost in USD, with the day its prices were read. Both are in
+[app/README.md](../app/README.md#the-guardrail).
+
+```
+infra/       the CDK app, the stack, and the key generator it runs during a deploy
+app/         the answer function behind /ask
+web/         the page: index.html, app.js, markdown.js, style.css
+scripts/     ingest, retrieve and ask
+knowledge/   the demo corpus: two fictional companies
+docs/        architecture, operating, retrieval findings, costs, decisions, metadata convention
+tests/       stack template, answer function, key generator, scripts, page
+```
+
+## How it was built, step by step
+
+1. **Infrastructure** — bucket, vector index, knowledge base, IAM. *(done)*
+2. **Ingest** — a fill script and a fictional demo company, 20–40 documents. *(done)*
+3. **Answering** — Lambda handler with one key per workspace: question,
+   retrieval, model, answer with sources and layer, token counts per answer
+   in the log. *(done)*
+4. **Key budgets** — a key is an allowance: ten questions and 48 hours,
+   counted in DynamoDB. *(done)*
+5. **The page** — a page behind CloudFront, with the answer function on the
+   same address. *(done)*
+6. **Guardrails** — topic, PII and hallucination filters, and the cost of
+   every answer in its log line. *(done)*
+7. **Release** — screenshots, a walkthrough, a tagged version.

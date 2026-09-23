@@ -1,474 +1,91 @@
 # Andur
 
-An internal knowledge assistant that answers questions from a company's own
-documents, and says where each answer came from.
+Andur answers questions from a company's own documents and shows, for every
+answer, the passages it was built from and whether a person or a machine
+wrote them. It is meant for a team that keeps its handbooks, policies and
+notes in files and would rather ask than search, and one installation
+serves several companies without one ever seeing another's documents. It
+runs on AWS, defined as code, with no part that bills a monthly base fee.
 
-A company drops its handbooks, policies and notes into a folder. Andur reads
-them, and from then on anyone can ask in plain language instead of searching.
-Every answer carries its sources, and every source says which layer it came
-from — written by a person, produced by a machine, or merely arrived and not
-yet sorted. One deployment serves several companies: each gets a workspace,
-and a question asked in one workspace can never be answered from another's
-documents.
+![An answer in the browser: the question, the answer with a masked name and its citations, and the first source](docs/screenshot-answer.png)
 
-Runs entirely on AWS, defined as code. One command builds it; one command
-removes it.
+## Measured
 
-## Architecture
+- **Cost per question:** 0.0011 to 0.0016 USD for an answered question,
+  0.00015 USD for one the guardrail refuses — `cost_usd` of five live
+  questions on 23.09.2026, at that day's prices. Details:
+  [docs/costs.md](docs/costs.md).
+- **Tests:** 479, all passing, in under 30 seconds, without AWS.
+- **Answer time:** 1.8 to 3.8 seconds inside the function for the four
+  answered questions, 0.7 seconds for the refused one (`latency_ms` in the
+  log).
+- **Documents:** 37 Markdown documents of two fictional companies, uploaded
+  as 147 sections so that a hit is a passage, not a page.
+- **Key budget:** a key allows 10 questions within 48 hours of its first —
+  at the measured cost, at most about 0.016 USD per key.
 
-| Part | Service | Job |
-|---|---|---|
-| Documents | S3 | The source of truth. One prefix per workspace, versioned, closed to the public. |
-| Vector store | S3 Vectors | Holds the embeddings. Nothing runs while nobody asks, so an idle month costs cents. |
-| Retrieval | Bedrock Knowledge Base | Chunking, embedding, search. Managed, so there is no index code to maintain. |
-| Embeddings | Titan Text Embeddings V2 | Turns text into the 1024-dimension vectors the index stores. |
-| Separation | Metadata filter | `workspace` on every chunk. The filter, not a separate deployment, is what keeps companies apart. |
-| Answering | Nemotron 3 Super on Bedrock, behind a Lambda function | Answers from the retrieved passages only and cites them. No idle cost; the function only runs while a question is in flight. |
-| Access | One key per workspace | The key decides the workspace. Keys are generated during the deploy and kept as SecureString parameters, which cost nothing. |
-| Budget | DynamoDB, one item per key | A key is an allowance, not a password: 10 questions and 48 hours from the first one. Billed per request, so an idle month costs nothing. |
-| Guardrail | Bedrock Guardrails, on the model call and on the excerpts | Refuses legal, tax and medical advice and questions about people, masks personal details in the answer and in the excerpts of its sources, withholds an answer the passages do not carry. Billed per text unit read; nothing while idle. |
-| Page | Static files on S3, private | Four files, no framework, nothing loaded from another server. |
-| The way in | CloudFront, one distribution | One https address for the page and for questions. Its permanent free tier is 1 TB and 10 million requests a month — a demo never leaves it. |
+## Decisions
 
-What is missing from that list is as deliberate as what is in it: no
-OpenSearch cluster, no NAT gateway, no container service, nothing with a
-monthly base fee. The bill follows use, and when nobody uses it, there
-barely is one.
+Everything with a monthly base fee is left out: S3 Vectors behind a Bedrock
+knowledge base instead of a search cluster. A key is a budget, not a
+password, counted in one conditional DynamoDB write. Two guardrails, one on
+the answer and one that masks the excerpts of its sources. Every AWS call has
+a timeout, and their sum stays under the function's own. Why each of these,
+and 36 more, with dates: [docs/decisions.md](docs/decisions.md).
 
-### One address for everything
+## Limits
 
-The page and the answer function sit behind the same CloudFront
-distribution. The page comes from a private S3 bucket; the single path
-`/ask` goes to the answer function instead. Both origins are reached through
-an origin access control, which means neither is reachable from outside on
-its own: the bucket blocks all public access, and the function URL is set to
-`AWS_IAM`, so it answers 403 to every caller outside this account, and its
-resource policy names CloudFront alone, only for this distribution. Inside
-the account it is not a wall — `AWS_IAM` lets a role here be authorised by
-its own identity policy — so an administrator or a CI role can sign a call
-and reach the function past the distribution. The workspace key, its
-workspace and its budget are checked in the function on every call, wherever
-it came from.
+- **Personal details are filtered, not guaranteed.** The masking is
+  statistical. In the browser acceptance a first name without a surname
+  stayed readable in two excerpts, while the answer next to them was masked.
+- **Citations are the model's.** One of the four answered live questions
+  carried no `[n]` at all, although the grounding check scored it 1.0. The
+  prompt asks for citations; the model does not always give them.
+- **The grounding threshold is a starting point.** 0.7 is the value AWS
+  works its example with, not a tuned one. A correct answer scored 0.73, just
+  above it. Every answer logs both scores, so the threshold can be moved on
+  evidence.
 
-That shape buys three things. The page calls `/ask` as a relative path, so it
-never has to know its own address and there is no configuration file to keep
-in step. Page and function share an origin, so there is no cross-origin
-request and nothing to allow with CORS. And there is one place in front of
-everything — the place a WAF would go if the demo ever needed one.
+## How it was built
 
-It costs two things, both in the request and both worth knowing before
-reading the curl examples below:
+Built with Claude Code as a coding partner; the decisions, the reviews and
+the measurements are the author's.
 
-- **The key travels in `X-Andur-Key`, not in `Authorization`.** CloudFront
-  signs every request it forwards to the function URL and puts its own
-  signature into `Authorization`, so a key sent there would be overwritten on
-  the way.
-- **Every request carries the SHA-256 of its body in `x-amz-content-sha256`.**
-  A signed request to a Lambda function URL may not have an unsigned payload,
-  so the caller computes the hash. A browser has `crypto.subtle` for it, a
-  shell has `sha256sum`, and `scripts/ask.py` uses `hashlib`.
-
-One more consequence, in the [app README](app/README.md): CloudFront waits
-120 seconds for the function, which may run 180. An answer between the two
-arrives as a 504 while the function finishes it anyway. Answers take 0.7 to 3
-seconds today.
-
-### What this repository contains today
-
-Build steps 1 to 6 of seven. The stack creates the documents bucket, the
-vector bucket and index, the knowledge base with its service role, a data
-source pointing at the documents, one key per workspace, the table that
-holds each key's budget, the guardrail on the answering model, the answer
-function, the bucket holding the page, and the CloudFront distribution that
-serves both. A fill script loads a demo
-corpus of two fictional companies into it, a retrieve script shows that a
-query in one company's workspace never returns the other's documents, and an
-ask script puts a question to the deployed address. The page itself is four
-files in `web/` — no framework, no build step, nothing from another server.
-
-Every key carries a budget: ten questions, and 48 hours from the first of
-them. The handler counts a question against the key that asked before it
-retrieves anything, in one conditional write against a DynamoDB item found by
-the SHA-256 of the key. A key with nothing left gets a 402 that says which
-half ran out. Both numbers can be set per key without a deploy; what that
-costs, how to set it and how to reset it is in
-[app/README.md](app/README.md).
-
-Every answer passes a guardrail on the same model call: it refuses legal,
-tax and medical advice and questions about people's private lives, masks
-names, e-mail addresses, phone numbers and addresses in the answer, and
-withholds an answer the retrieved passages do not carry. The excerpts of
-the sources pass a second guardrail that masks the same details, and a
-refused question comes back without sources.
-
-The masking is statistical, not a list of names, and it misses. In the
-browser acceptance on 23.09.2026 the answer to the phone question was
-masked, and so were names in the excerpts, but a first name standing alone
-stayed in clear text in two excerpts, a few words from a `{NAME}` in the
-same excerpt. A first name without a surname can slip through. Treat the
-masking as a filter that catches most personal details, not as a guarantee;
-documents that must not show a name to a reader must not hold it. Every answer also
-carries its cost in USD, with the day its prices were read. Both are in
-[app/README.md](app/README.md#the-guardrail).
-
-```
-infra/       the CDK app, the stack, and the key generator it runs during a deploy
-app/         the answer function behind /ask
-web/         the page: index.html, app.js, markdown.js, style.css
-scripts/     ingest, retrieve and ask
-knowledge/   the demo corpus: two fictional companies
-docs/        metadata convention
-tests/       stack template, answer function, key generator, scripts, page
-```
-
-## Deploy
+## Try it
 
 Needs Python 3.11+, Node.js, the AWS CDK (`npm install -g aws-cdk`) and AWS
-credentials for the target account. Everything goes to `us-east-1`, pinned
-in `infra/app.py`.
+credentials. Everything goes to `us-east-1`.
 
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]"
+pytest -q                                  # 479 tests, no AWS needed
 
-cdk bootstrap aws://<account>/us-east-1   # once per account and region
-cdk deploy                                # builds or updates everything
-cdk destroy                               # removes it again
-```
-
-`cdk deploy` prints the knowledge base id, the data source id, the bucket
-names, the web address (`WebUrl`) and the Parameter Store path of the
-workspace keys. The scripts read them from there. It also uploads `web/` into
-the site bucket and clears the CloudFront caches, so the page is whatever is
-in `web/` at the moment of the deploy.
-
-The first deploy of the distribution takes a few minutes longer than the
-others: CloudFront rolls a new configuration out to its edge locations before
-the stack reports success.
-
-The deploy also creates one key per workspace listed in `WORKSPACES` in
-`infra/stacks/andur_stack.py`. A small function generates each key inside AWS
-and stores it as a SecureString parameter; CloudFormation cannot create those
-itself, and a key written into the template would end up in `cdk.out`. An
-existing key survives every later deploy. The function's URL is created only
-after the keys, so the function never exists without one.
-
-Resource names are mostly not generated by CloudFormation. The documents
-bucket, the site bucket, the vector bucket, the knowledge base role, the
-answer function (`andur-answer`) and its log group have fixed names. The index, the knowledge
-base and the data source carry a short digest of the settings that force a
-replacement, so a changed setting gives the replacement a new name instead
-of an "already exists" failure. Either way the stack is one instance per
-account and region: a second copy under another stack name collides with
-the first. IAM role names are global to the account, so even a copy in
-another region would collide at the role.
-
-`cdk destroy` deliberately leaves the documents bucket and its bucket policy
-behind. Vectors can be rebuilt from documents; documents cannot be rebuilt
-from anything. Because the bucket name is fixed, the bucket left behind also
-blocks the next `cdk deploy`, which stops with "already exists". Two ways
-out:
-
-- **Delete it.** Empty it in the S3 console (*Empty* removes old versions
-  too; `aws s3 rm` does not on a versioned bucket), then:
-
-  ```bash
-  aws s3 rb s3://andur-documents-<account>-us-east-1
-  ```
-
-- **Keep it and adopt it.** Import the bucket into the new stack, then
-  deploy the rest:
-
-  ```bash
-  cdk import AndurStack   # enter the bucket name for the bucket and its policy, leave the others empty
-  cdk deploy
-  ```
-
-`cdk destroy` only removes the index this stack created. An index added to
-the vector bucket by hand keeps the bucket from being deleted, and the stack
-ends in `DELETE_FAILED`.
-
-`cdk destroy` deletes the workspace keys and the function logs with the
-stack. The next deploy generates new keys.
-
-The site bucket and the distribution go with the stack too. The bucket is
-emptied first — the file copier removes what it uploaded — so the deletion
-does not stop at a bucket that is not empty. A new distribution has a new
-address, so `WebUrl` changes with every rebuild.
-
-### Filling it
-
-One command checks the local corpus, uploads it and syncs the knowledge
-base. It reads bucket and ids from the stack outputs and needs a valid AWS
-login (`aws login`):
-
-```bash
-python -m scripts.ingest
-```
-
-The corpus in `knowledge/` belongs to two **fictional** companies invented
-for this demo: *Quillmoor Systems*, a software company with 33 documents
-across all three layers, and *Pellwick Joinery*, a joinery workshop with 4.
-Neither company, nor anything in their documents, is real. Details in
-[knowledge/README.md](knowledge/README.md).
-
-Every document carries a sidecar metadata file
-([docs/metadata.md](docs/metadata.md)); the script refuses to upload anything
-while one is missing or wrong. Markdown documents are uploaded split into
-sections, for the reason in [Retrieval findings](#retrieval-findings). A
-rerun uploads only what changed. Options, output and exit codes:
-[scripts/README.md](scripts/README.md).
-
-The proof that workspaces stay apart:
-
-```bash
-python -m scripts.retrieve "How do I export project data?" --workspace quillmoor
-python -m scripts.retrieve "How do I export project data?" --workspace pellwick
-```
-
-The first returns Quillmoor sections only — every hit prints
-`workspace=quillmoor`. The second returns Pellwick sections or nothing, never
-a Quillmoor document, although Quillmoor's documents answer the question
-and Pellwick's do not. Add `--layer agent` to see only machine-written
-documents.
-
-### Asking it
-
-```bash
+cdk bootstrap aws://<account>/us-east-1    # once per account and region
+cdk deploy                                 # builds everything
+python -m scripts.ingest                   # uploads the demo corpus and syncs
 python -m scripts.ask "How do I export project data?" --workspace quillmoor
-python -m scripts.ask "How do I export project data?" --workspace pellwick
+cdk destroy                                # removes it; the documents bucket stays
 ```
 
-The first prints Quillmoor's answer, the layers it rests on, every source
-with its layer and whether the answer cites it, then tokens and latency. The
-second answers *The sources do not answer this question.* from Pellwick's
-documents. The script fetches the workspace key from Parameter Store itself;
-the key never appears on screen. Request format, answer fields, status codes
-and how to get a key for curl or the page: [app/README.md](app/README.md).
+Then open the stack output `WebUrl` in a browser; the page asks for a
+workspace and its key. How to get a key, what every field and status means,
+and how to ask with curl: [docs/operating.md](docs/operating.md) and
+[app/README.md](app/README.md).
 
-#### In the browser
+## Further reading
 
-Open the stack output `WebUrl`. The page asks once for a workspace and its
-key, keeps both in the browser, and shows the answer with its sources, the
-layers it rests on and what it cost. **Forget key** removes the key again.
-The key is never part of the address. What the page does with each status,
-and why it has no configuration file: [web/README.md](web/README.md).
-
-#### With curl
-
-```bash
-WEB_URL=$(aws cloudformation describe-stacks --region us-east-1 --stack-name AndurStack \
-  --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text)
-BODY='{"question": "How do I export project data?", "workspace": "quillmoor"}'
-
-curl -s -X POST "$WEB_URL/ask" \
-  -H "X-Andur-Key: $KEY" \
-  -H "Content-Type: application/json" \
-  -H "x-amz-content-sha256: $(printf '%s' "$BODY" | sha256sum | cut -d' ' -f1)" \
-  -d "$BODY"
-```
-
-`$KEY` is the workspace key ([app/README.md](app/README.md#getting-a-key)).
-`printf '%s'` and not `echo`: a trailing newline would go into the hash but
-not into the body, and the request would be refused. The stack output
-`FunctionUrl` is not an address to send this to — from outside the account
-it answers 403 to everyone but CloudFront.
-
-## Retrieval findings
-
-A hit should be a passage, not a page: the answering model in build step 3
-gets what retrieve returns. Getting there took five configurations, all
-measured on 17.09.2026 against the demo corpus (37 Markdown documents,
-540 to 1,014 words each). Word counts are whitespace-separated words.
-
-### What was measured
-
-| Configuration | Stored in the index | What retrieve returned |
-|---|---|---|
-| Fixed-size, 800 tokens | not inspected | Whole documents, e.g. `support-process.md` with all 976 words in one hit. A request for 10 hits returned 6. |
-| Fixed-size, 300 tokens | 249 chunks of 2 to 246 words | For 28 of 37 documents the whole document, once per document; for the other 9 the chunk. A request for 10 hits returned 7, each from a different document. |
-| Hierarchical, parents 500 / children 200 tokens, overlap 30 | 328 vectors | For `release-notes-4.1.md`, one of the 9 documents without the effect, parent chunks of 260 and 280 words, as documented. For the same 28 documents as above, still the whole document: 67 of 91 hits in a sample of 12 queries. |
-| Fixed-size, 300 tokens, documents uploaded as sections | 304 vectors from 147 section files | 185 hits over 12 queries: 18 to 440 words, median 165. No hit was a whole document, none exceeded 450 words. |
-| Fixed-size, 300 tokens, whole documents, foundation-model parser (Amazon Nova Lite), as a second data source | 249 chunks; every chunk of the same 28 documents carries `parentText`. The chunk texts match the default parser's: a table chunk of `support-process.md` is character for character the same in both data sources. | `support-process.md` whole (976 words) in 4 of 4 queries; `release-notes-4.1.md` a chunk of 198 words. Requests for 10 hits over 4 queries returned 3 to 7, 14 of 17 of them whole documents. |
-
-Reading the vectors directly (`s3vectors list-vectors`) showed where the
-whole documents come from. Every chunk of the 28 affected documents carries
-the complete document text in `AMAZON_BEDROCK_METADATA.parentText`, and
-retrieve returns that text in `content.text` instead of the chunk. The 9
-unaffected documents have no `parentText`.
-
-The 28 affected documents are exactly the 28 that contain a Markdown table;
-the 9 unaffected ones contain none. That is an observed correlation across
-37 of 37 documents, not a documented cause. Length does not explain it:
-`faq.md` (908 words, no table) was unaffected, `api-resources-bookings-and-time.md`
-(633 words, tables) was affected.
-
-### What the documentation says, and does not
-
-- The chunking guide ([kb-chunking](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-chunking.html))
-  describes replacing matched chunks with parent chunks only for
-  hierarchical chunking. For fixed-size chunking it describes no such step.
-- The [Retrieve API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html)
-  has one text field per hit, `content.text`. `parentText` is not mentioned
-  there, nor anywhere else found in the documentation.
-- The same guide advises against hierarchical chunking on S3 Vectors
-  because of metadata size limits above 8,000 tokens combined — far above
-  the sizes tried here, and not the effect observed.
-- A question on AWS re:Post
-  ([Retrieve returns the full parent document instead of the matched chunk](https://repost.aws/questions/QUjFWDQ_XRRNCAU5WefBWTPA/))
-  describes the same behaviour on S3 Vectors with Markdown sources. The
-  suggested fix, declaring fixed-size chunking explicitly, did not change it
-  according to the person asking. No cause is given there either. A later
-  answer there suggests setting the data source's parser explicitly to a
-  foundation model (`parsingConfiguration` with `BEDROCK_FOUNDATION_MODEL`).
-  Measured as the fifth row above, it changed nothing: same chunks, same
-  `parentText`, same whole documents.
-- The [parsing options](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-advanced-parsing.html)
-  page describes the foundation-model and Data Automation parsers for `.pdf`,
-  `.jpeg` and `.png` files; `.md` is listed only under the default parser. The
-  [ParsingConfiguration](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent_ParsingConfiguration.html)
-  reference adds that Bedrock falls back to the default parser when the chosen
-  one fails on a file. Identical chunk texts fit both readings: Markdown files
-  still go through the default parser.
-
-### What was chosen
-
-Chunking stays fixed-size at 300 tokens. The fill script splits every
-Markdown document before the upload, so that whatever Bedrock returns is at
-most a section:
-
-1. cut at every `## ` heading outside code fences;
-2. join sections under 80 words to the one before (a short intro to the one
-   after);
-3. cut sections over 450 words again at `### `;
-4. start every section with the document title, and pieces of step 3 also
-   with their `## ` heading, so a hit read alone still says where it is from.
-
-The repository keeps whole documents; only the bucket holds sections, named
-`<document>--<nn>-<heading>.md`, each with a copy of the document's sidecar.
-This does not depend on why Bedrock returns whole files: if it does, the
-file is a section.
-
-### Measured after the change
-
-- `support-process.md` (976 words, tables): 7 section files, 16 vectors;
-  hits of 97 to 182 words.
-- `release-notes-4.1.md` (540 words, no table): 2 section files, 5
-  vectors; hits of 43, 70, 198 and 210 words.
-- Sections containing a table came back whole in every one of the 81 hits
-  where they appeared; no such section is longer than 450 words.
-- 81 of the 185 hits were under 150 words: sections that are short in
-  themselves, and chunk pieces of sections without tables. Short hits are
-  complete but carry little context; the two levers are the 80-word joining
-  threshold and the chunk size.
-- A request for 10 hits returned 10.
-- The workspace filter held in every query: no hit from the other company.
-
-What is still not known is the rule Bedrock follows. If it changes, the
-section split keeps hits bounded either way.
-
-## Tests
-
-```bash
-pytest -q
-```
-
-The stack tests render the stack to CloudFormation JSON and assert on it,
-including the way in: the function URL on `AWS_IAM`, both invoke permissions
-bound to this distribution alone, the private site bucket, and the `/ask`
-behaviour with its methods, its disabled cache and its response timeout. Four
-of them read `web/` itself, to keep the page from growing an address of its
-own, a key, a `console.log` or a file from another server. The handler tests
-drive the answer function through every status code against fake Bedrock,
-Parameter Store and DynamoDB clients; the budget fake runs the handler's own
-update and condition strings, so a wrong attribute name fails there rather
-than in AWS. The script tests check the corpus layout, the sidecars, the
-object keys and the counters, and drive upload, job wait, retrieval and
-asking against small fake clients. None of them call AWS or need credentials,
-and they finish in seconds — a broken stack or a broken sidecar shows up
-before a deploy or a sync spends minutes finding out.
-
-## What it costs
-
-Prices taken from AWS pricing pages on 16.09.2026 and later, each dated
-where it is used, `us-east-1`. Order of magnitude, not a quote; the cost per
-question below is measured.
-
-**Idle:** cents per month. S3 Vectors storage is 0.06 USD per GB, the
-documents bucket is a handful of megabytes, and nothing else is running.
-
-**Per question, measured.** Every answer carries `cost_usd` in its log line
-and its response: tokens and guardrail text units, each times its price
-(Amazon Bedrock pricing page, read 23.09.2026, standard tier; the prices sit
-in the stack next to their source). Three questions to `pellwick` on
-23.09.2026:
-
-| Question | Tokens in / out | Guardrail units (topic / PII / grounding) | Model | Guardrail | `cost_usd` |
-|---|---|---|---|---|---|
-| Lead time from order to fitting — answered | 1,326 / 32 | 2 / 1 / 5 | 0.00022 USD | 0.00090 USD | 0.001120 USD |
-| Office phone number — answered, a name masked | 1,717 / 40 | 2 / 1 / 7 | 0.00028 USD | 0.00110 USD | 0.001384 USD |
-| Income tax deduction — refused by the topic filter | 0 / 0 | 1 / 0 / 0 | — | 0.00015 USD | 0.000150 USD |
-
-An answered question costs **about 0.0011 to 0.0014 USD — 1.1 to 1.4 USD per
-1,000 questions**, and four fifths of it is the guardrail, not the model.
-The grounding check is the largest part: it reads every retrieved passage as
-its reference, one unit per 1,000 characters, so it grows with the passages,
-not with the answer. A refused question costs one topic unit and no model
-call. Not in `cost_usd`: the question's embedding, the vector query and the
-Lambda time, together under 0.0001 USD.
-
-The excerpts of the sources pass a second guardrail that masks personal
-details, built after these three questions. Measured on the phone question
-again, 23.09.2026: six excerpts in one call are two text units, 0.0002 USD,
-and the question cost 0.001579 USD in all (1,717 / 33 tokens, units
-2 / 3 / 7, the 3 being one for the answer and two for the excerpts). A
-refused question costs nothing more: it returns no sources.
-
-**The cap:** the web address is open to anyone who has it, so the answer
-function runs at most 5 requests at the same time and Lambda turns the rest
-away with HTTP 429 before any code runs. A request without a valid key never reaches the model.
-That bounds the rate at which anything can arrive; what one key may spend in
-total is its budget — ten questions and 48 hours, so about 0.014 USD before
-the key is refused. A leaked key is a leak of ten questions, not of an
-open tap.
-
-**Counting it:** one conditional write per question, which is one write unit
-on a table billed per request — 0.625 USD per million writes in `us-east-1`
-(DynamoDB on-demand pricing page, read 17.09.2026). That is 0.63 USD per
-million questions, against roughly 1,100 to 1,400 USD per million at the
-model and the guardrail. The counter is not what the bill is made of. Note that the permanent free tier of
-25 write and 25 read units is for provisioned capacity, not for on-demand
-tables; this table is on-demand, because a public URL has no rate to
-provision for and a throttled counter would refuse honest questions.
-
-**Filling it:** 40 documents of 2,000 words is roughly 110,000 tokens of
-embedding at 0.02 USD per million — about 0.002 USD. Embedding a corpus is
-not what costs money; asking questions is, and barely.
-
-**Serving the page:** nothing worth counting. CloudFront's permanent free
-tier is 1 TB of data transfer out and 10 million requests per month; the page
-is a few kilobytes and a demo month is a few thousand requests, so a month of
-it stays inside the free tier several thousand times over. Beyond it the
-prices are 0.085 USD per GB and 0.010 USD (United States) or 0.012 USD
-(Europe) per 10,000 HTTPS requests. Fetching from an AWS origin is free.
-Cache invalidation is free for the first 1,000 paths a month, and a deploy
-uses one. The site bucket holds a few kilobytes at 0.023 USD per GB-month.
-(CloudFront and S3 pricing pages, read 17.09.2026.)
-
-## Roadmap
-
-1. **Infrastructure** — bucket, vector index, knowledge base, IAM. *(done)*
-2. **Ingest** — a fill script and a fictional demo company, 20–40 documents. *(done)*
-3. **Answering** — Lambda handler with one key per workspace: question,
-   retrieval, model, answer with sources and layer, token counts per answer
-   in the log. *(done)*
-4. **Key budgets** — a key is an allowance: ten questions and 48 hours,
-   counted in DynamoDB. *(done)*
-5. **The page** — a page behind CloudFront, with the answer function on the
-   same address. *(done)*
-6. **Guardrails** — topic, PII and hallucination filters, and the cost of
-   every answer in its log line. *(this step)*
-7. **Release** — screenshots, a walkthrough, a tagged version.
+| Topic | Where |
+|---|---|
+| Architecture, the way in, what the stack creates | [docs/architecture.md](docs/architecture.md) |
+| Deploy, fill, ask, test, tear down | [docs/operating.md](docs/operating.md) |
+| Why documents are uploaded as sections | [docs/retrieval-findings.md](docs/retrieval-findings.md) |
+| What it costs, measured and priced | [docs/costs.md](docs/costs.md) |
+| Every decision, dated | [docs/decisions.md](docs/decisions.md) |
+| The answer function: request, answer, errors, guardrails, logs | [app/README.md](app/README.md) |
+| The page | [web/README.md](web/README.md) |
+| The scripts | [scripts/README.md](scripts/README.md) |
+| The demo corpus and its metadata | [knowledge/README.md](knowledge/README.md), [docs/metadata.md](docs/metadata.md) |
 
 ## Licence
 

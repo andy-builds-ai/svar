@@ -12,7 +12,7 @@ stack's distribution. Inside the account a role with
 `lambda:InvokeFunctionUrl` can sign a call itself; the key, the workspace and
 the budget are checked in the function either way.
 Everything arrives through the web address — see *One address for everything*
-in the [main README](../README.md#one-address-for-everything).
+in the [main README](../docs/architecture.md#one-address-for-everything).
 
 It runs only while a question is in flight; there is nothing to pay while
 nobody asks. `aws.py` holds the AWS clients with their timeouts and retries.

@@ -72,7 +72,7 @@ job counts section files as documents.
 
 Bedrock returned whole documents from retrieve for every demo document with
 a Markdown table, whatever the chunking (see "Retrieval findings" in the
-[README](../README.md#retrieval-findings)). Splitting before the upload keeps
+[README](../docs/retrieval-findings.md)). Splitting before the upload keeps
 a hit at most a section long, whatever the reason:
 
 1. Cut at every `## ` heading; headings inside code fences do not count.
@@ -148,7 +148,7 @@ It sends what any client sends, the page included: a `POST` to
 `<WebUrl>/ask` with the workspace key in `X-Andur-Key` and the SHA-256 of the
 body in `x-amz-content-sha256`. Both headers are what the way in demands, not
 the function — see *One address for everything* in the
-[README](../README.md#one-address-for-everything). The stack output
+[README](../docs/architecture.md#one-address-for-everything). The stack output
 `FunctionUrl` is not an address to send to: from outside the account it
 answers 403 to everyone but CloudFront.
 
