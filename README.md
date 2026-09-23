@@ -1,5 +1,7 @@
 # Andur
 
+[![CI](https://github.com/andy-builds-ai/ask-andur/actions/workflows/ci.yml/badge.svg)](https://github.com/andy-builds-ai/ask-andur/actions/workflows/ci.yml)
+
 Andur answers questions from a company's own documents and shows, for every
 answer, the passages it was built from and whether a person or a machine
 wrote them. It is meant for a team that keeps its handbooks, policies and

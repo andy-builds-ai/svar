@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # The CDK tests synthesize the stack through jsii, which runs on Node;
+      # the markdown tests run web/markdown.js in Node too.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - run: pip install -e ".[dev]"
+      - run: ruff check
+      - run: ruff format --check
+      - run: pytest -q
