@@ -11,13 +11,19 @@ runs on AWS, defined as code, with no part that bills a monthly base fee.
 
 ![An answer in the browser: the question, the answer with a masked name and its citations, and the first source](docs/screenshot-answer.png)
 
+A walkthrough from workspace to answer — a question about the warranty on
+painted windows, answered with four sources and the cost line:
+
+![Walkthrough: choosing the workspace, asking a question, the answer with four sources and its cost](docs/walkthrough.gif)
+
 ## Measured
 
 - **Cost per question:** 0.0011 to 0.0016 USD for an answered question,
   0.00015 USD for one the guardrail refuses — `cost_usd` of five live
   questions on 23.09.2026, at that day's prices. Details:
   [docs/costs.md](docs/costs.md).
-- **Tests:** 479, all passing, in under 30 seconds, without AWS.
+- **Tests:** 479, all passing, without AWS — 17.9 seconds in CI on
+  23.09.2026, 24 to 37 seconds on a local laptop.
 - **Answer time:** 1.8 to 3.8 seconds inside the function for the four
   answered questions, 0.7 seconds for the refused one (`latency_ms` in the
   log).

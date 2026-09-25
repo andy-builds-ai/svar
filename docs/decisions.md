@@ -191,14 +191,14 @@ acceptance. What a reader must never see must not be in the documents.
 ## Code
 
 **2026-09-23 — Files over 500 lines, and why they stay whole.** Measured
-23.09.2026. `app/handler.py` (1,105 lines) is the Lambda function: one
+25.09.2026. `app/handler.py` (1,170 lines) is the Lambda function: one
 module with one entry point keeps the package, its imports and the test
 fakes simple, and its parts are the steps of one request in order.
-`infra/stacks/andur_stack.py` (964) is one CloudFormation stack whose
+`infra/stacks/andur_stack.py` (1,009) is one CloudFormation stack whose
 resources reference each other and deploy together. `scripts/ingest.py`
-(605) is one command with four steps: check, upload, prune, sync. The test
-files over 500 — `tests/test_handler.py` (2,198), `tests/test_stack.py`
-(1,306), `tests/test_ingest.py` (631) — follow the module they test and
+(629) is one command with four steps: check, upload, prune, sync. The test
+files over 500 — `tests/test_handler.py` (2,467), `tests/test_stack.py`
+(1,365), `tests/test_ingest.py` (711) — follow the module they test and
 share its fakes. A split is a step of its own, not part of a change that
 must not change behaviour.
 
