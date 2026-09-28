@@ -218,8 +218,8 @@ questions whose first model call AWS turned away, whether the second call
 saved it or not; **Right on the first try** counts the questions answered
 right without the script asking again — what the page would have shown.
 
-The comparison, run on 28.09.2026 in eu-west-1 before the function made
-its own second call, one question at a time, 19 minutes and 0.38 USD for
+The comparison, run on 28.09.2026 in eu-west-1 with six passages per
+question, before the function made its own second call, one question at a time, 19 minutes and 0.38 USD for
 all five:
 
 | Model | Right | Right on the first try | Rejected on the first try | Answered right | Refused right | Declined right | Cites the document | USD per question | Median seconds | Errors |
@@ -253,10 +253,12 @@ all five:
   Sonnet 4.6's. Twenty single calls to Haiku with ten seconds between them
   were turned away twice, twenty back to back not once. The rejections do not
   follow the rate of the calls.
-- **One question no model answers:** q07, how long an invitation link is
-  valid. Retrieval does not return the passage that says 14 days, so every
-  model answers that the sources do not say — correctly, from what it was
-  given.
+- **One question no model answered at six passages:** q07, how long an
+  invitation link is valid. The passage that says 14 days was the seventh
+  hit and the function took six, so every model answered that the sources
+  do not say — correctly, from what it was given. Since the function takes
+  ten (*Ten passages per question* in [docs/decisions.md](../docs/decisions.md)),
+  Nova Pro answers it: 14 days, citing `admin-users-and-roles`.
 - Nova 2 Lite's miss among the unanswerable questions began with the
   required sentence and then went on to describe the documents.
 - **USD per question** is the mean over all 30, refusals (0.00015 each)

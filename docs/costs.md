@@ -11,8 +11,8 @@ documents bucket is a handful of megabytes, and nothing else is running.
 and its response: tokens and guardrail text units, each times its price
 (standard tier; the prices sit in the stack next to their source).
 
-In `eu-west-1` on 28.09.2026, the 30 evaluation questions per model through
-the answer function's own path (`python -m scripts.evaluate`, see
+In `eu-west-1` on 28.09.2026, at six passages per question, the 30 evaluation
+questions per model through the answer function's own path (`python -m scripts.evaluate`, see
 [scripts/README.md](../scripts/README.md)), each model at its own token
 price:
 
@@ -31,8 +31,19 @@ check withheld (the response reports no model tokens then) and 0.00015 for a
 refused one. Its evaluation run after the switch: 0.0029 USD per answered
 question on average (0.0019–0.0046, 20 answers).
 
+**Ten passages since 28.09.2026** (`NUMBER_OF_RESULTS`, was 6; see
+[decisions](decisions.md)). Nova Pro, the 22 answerable questions, two runs
+through the function's own path: 0.0043 USD per answered question on average
+(0.0032–0.0062, 43 answers; the grounding check withheld one more) against
+0.0029 USD in two runs at six passages (0.0019–0.0045, 39 answers). Tokens in
+per answer: 2,691 against 1,718, out 13.6 against 13.1. Guardrail units
+(topic / PII / grounding): 2 / 4.1 / 10.3 against 2 / 3.0 / 6.5, so the
+guardrail part rose from 0.00125 to 0.00173 USD, because the grounding check
+reads every passage. The refused question (0.00015 USD, below) was measured
+at six passages and not again at ten.
+
 The guardrail part is the same for every model, 0.0012 USD per answered
-question on average, because it reads the same question, passages and
+question on average at six passages, because it reads the same question, passages and
 answer length; what differs is the model. A refused question costs one topic
 unit and no model call, whichever model is set.
 
@@ -66,8 +77,9 @@ refused question costs nothing more: it returns no sources.
 function runs at most 5 requests at the same time and Lambda turns the rest
 away with HTTP 429 before any code runs. A request without a valid key never reaches the model.
 That bounds the rate at which anything can arrive; what one key may spend in
-total is its budget — ten questions and 48 hours, so about 0.03 USD with
-Nova Pro before the key is refused (0.02 to 0.08 across the models above). A leaked key is a leak of ten questions, not of an
+total is its budget — ten questions and 48 hours, so about 0.04 USD with
+Nova Pro at ten passages before the key is refused (0.02 to 0.08 across the
+models above, measured at six passages). A leaked key is a leak of ten questions, not of an
 open tap.
 
 **Counting it:** one conditional write per question, which is one write unit

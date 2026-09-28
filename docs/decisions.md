@@ -52,6 +52,34 @@ returned whole documents under every chunking tried, and the
 foundation-model parser changed nothing. Splitting at headings before the
 upload does not depend on why: a file returned whole is a section.
 
+**2026-09-28 — Ten passages per question, not six.** Every model answered
+"the sources do not say" to q07, how long an invitation link is valid,
+because retrieval ranked the right section seventh (score 0.7255; the eighth
+0.7248, the first, about API tokens, 0.7704) and the function took six. With
+30 hits for each of the 22 answerable questions, 20 had their document first,
+q14 fifth and q07 seventh; none lay deeper. Nova Pro through the function's
+own path, the 22 answerable questions: at six passages four runs on
+28.09.2026 got 21, 20, 19 and 17 right (the comparison, the run after the
+switch, two runs of this check), at ten passages two runs got 22 and 21. The
+cost of an answered question rose from 0.0029 to 0.0043 USD (1,718 to 2,691
+tokens in), the median time stayed at 1.8 seconds. What is proven is q07:
+right in both runs at ten passages and in none at six. Whether ten passages
+also withhold fewer answers is not proven: the grounding check withheld 5 of
+44 answers at six passages and 1 of 44 at ten, but the model is not
+deterministic and a different question was withheld in each run. Eight
+passages would have put q07 one rank inside the cut; ten leave three.
+Rerank is left for later: eu-west-1 has no rerank model, and the knowledge
+base refuses one from another region ("Reranking does not support
+cross-region calls", 28.09.2026). A direct call to Frankfurt works and put
+q07 first (Amazon Rerank 1.0, 0.001 USD per query; Cohere Rerank 3.5, 0.002;
+AWS Price List API, 28.09.2026), but it adds a region, a permission and a
+network hop; it is worth building if a larger corpus pushes the right
+passage past rank ten. Hybrid search is rejected: S3 Vectors answers a
+similarity query with a metadata filter, and knowledge bases offer hybrid
+only on Amazon RDS, OpenSearch Serverless and MongoDB (Amazon S3 Vectors and
+Bedrock user guides, *Querying vectors* and *Configure and customize
+queries*, read 28.09.2026).
+
 **2026-09-17 — Resource names carry a digest of their create-only
 settings.** A changed create-only setting replaces the resource, and
 CloudFormation creates the replacement before deleting the old one; under a

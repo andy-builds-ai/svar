@@ -12,7 +12,7 @@ runs on AWS, defined as code, with no part that bills a monthly base fee.
 ![An answer in the browser to "What is the office phone number, and who answers it?": the name is masked as {NAME}, a note says personal details are masked, and the first two sources are listed, the first one cited](docs/screenshot-answer.png)
 
 A walkthrough of one question, recorded on 28.09.2026 in eu-west-1 with Nova
-Pro, the workspace and key already entered: what the guarantee on painted
+Pro and six passages per question, the workspace and key already entered: what the guarantee on painted
 windows covers and what to do to keep it, answered with two citations out of
 four sources, and the cost line under them (1357 tokens in, 73 out, 0.002717
 USD, 3425 ms in the function):
@@ -26,15 +26,20 @@ USD, 3425 ms in the function):
   profile, never a global one.
 - **How often the answer is right:** 30 fixed questions — 22 the documents
   answer, 4 the guardrail must refuse, 4 no document answers. Nova Pro, the
-  configured model, got 28 right on 28.09.2026 and cited the expected
-  document in 20 of the 22 it should answer. In the comparison the same day
-  Nova Pro, Claude Haiku 4.5 and Claude Sonnet 4.6 got 29 right, Nova 2 Lite
-  28, and Nemotron 3 Super answered none in eu-west-1. Table and method:
+  configured model, got 28 right with six passages per question on
+  28.09.2026 and cited the expected document in 20 of the 22 it should
+  answer. Since the function hands it ten passages, two runs of the 22
+  answerable questions got 22 and 21 right, citing the expected document
+  in 22 and 21 (decisions: [docs/decisions.md](docs/decisions.md)). In the
+  comparison the same day, at six passages, Nova Pro, Claude Haiku 4.5 and
+  Claude Sonnet 4.6 got 29 right, Nova 2 Lite 28, and Nemotron 3 Super
+  answered none in eu-west-1. Table and method:
   [scripts/README.md](scripts/README.md#evaluate--which-model-answers-best).
-- **Cost per question:** 0.0029 USD on average for an answered question
-  with Nova Pro (0.0019 to 0.0046, 20 answers), 0.00015 USD for one the
-  guardrail refuses — `cost_usd` of that run, at that day's prices. Details:
-  [docs/costs.md](docs/costs.md).
+- **Cost per question:** 0.0043 USD on average for an answered question
+  with Nova Pro at ten passages (0.0032 to 0.0062, 43 answers), 0.0029 USD
+  at six (0.0019 to 0.0045, 39 answers), 0.00015 USD for one the guardrail
+  refuses (measured at six) — `cost_usd` of those runs on 28.09.2026, at that
+  day's prices. Details: [docs/costs.md](docs/costs.md).
 - **Answer time:** 0.7 to 4.4 seconds inside the function for four questions
   on the page with Nova Pro, the first after a deploy included
   (`latency_ms`); a median of 1.8 seconds from retrieval to cost line for
@@ -44,7 +49,7 @@ USD, 3425 ms in the function):
 - **Documents:** 37 Markdown documents of two fictional companies, uploaded
   as 147 sections so that a hit is a passage, not a page.
 - **Key budget:** a key allows 10 questions within 48 hours of its first —
-  at the measured cost, about 0.03 USD per key with Nova Pro.
+  at the measured cost, about 0.04 USD per key with Nova Pro.
 
 ## Decisions
 

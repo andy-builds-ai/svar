@@ -64,7 +64,7 @@ ANSWER_MODEL_ID = "eu.amazon.nova-pro-v1:0"
 EU_PROFILE_PREFIX = "eu."
 
 #: How many passages retrieve hands to the model per question.
-NUMBER_OF_RESULTS = 6
+NUMBER_OF_RESULTS = 10
 
 
 GUARDRAIL_NAME = "andur-answer-guardrail"

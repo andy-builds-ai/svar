@@ -499,7 +499,7 @@ from files.
 | `KNOWLEDGE_BASE_ID` | The stack's knowledge base. |
 | `MODEL_ID` | `ANSWER_MODEL_ID` in `infra/stacks/andur_stack.py`: `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile. |
 | `REGION` | The stack's region, `eu-west-1`. |
-| `NUMBER_OF_RESULTS` | Passages per question, `6`. Retrieve may return fewer. |
+| `NUMBER_OF_RESULTS` | Passages per question, `10`. Retrieve may return fewer. |
 | `API_KEY_PARAMETER_PATH` | `/andur/api-keys`. |
 | `BUDGET_TABLE_NAME` | `andur-key-budgets`, the table that counts per key. |
 | `QUESTION_LIMIT` | Questions a key gets, `10`, unless its item says otherwise. |
