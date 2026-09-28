@@ -9,13 +9,15 @@ notes in files and would rather ask than search, and one installation
 serves several companies without one ever seeing another's documents. It
 runs on AWS, defined as code, with no part that bills a monthly base fee.
 
-![An answer in the browser: the question, the answer with a masked name and its citations, and the first source](docs/screenshot-answer.png)
+![An answer in the browser to "What is the office phone number, and who answers it?": the name is masked as {NAME}, a note says personal details are masked, and the first two sources are listed, the first one cited](docs/screenshot-answer.png)
 
-A walkthrough from workspace to answer — a question about the warranty on
-painted windows, answered with four sources and the cost line (screenshot
-and walkthrough recorded in us-east-1, before the move to eu-west-1):
+A walkthrough of one question, recorded on 28.09.2026 in eu-west-1 with Nova
+Pro, the workspace and key already entered: what the guarantee on painted
+windows covers and what to do to keep it, answered with two citations out of
+four sources, and the cost line under them (1357 tokens in, 73 out, 0.002717
+USD, 3425 ms in the function):
 
-![Walkthrough: choosing the workspace, asking a question, the answer with four sources and its cost](docs/walkthrough.gif)
+![Walkthrough: typing a question about the guarantee on painted windows, asking it, and the answer with four sources and its cost line](docs/walkthrough.gif)
 
 ## Measured
 

@@ -134,4 +134,5 @@ tests/       stack template, answer function, key generator, scripts, page
    same address. *(done)*
 6. **Guardrails** — topic, PII and hallucination filters, and the cost of
    every answer in its log line. *(done)*
-7. **Release** — screenshots, a walkthrough, a tagged version. *(done)*
+7. **Release** — screenshots and a walkthrough *(done)*. There is no tagged
+   version; Andur stays private.
