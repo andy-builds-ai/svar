@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from typing import Any
 
 STACK_NAME = "AndurStack"
-REGION = "us-east-1"
+REGION = "eu-west-1"
 
 #: Error codes AWS returns when the credentials themselves are the problem.
 _CREDENTIAL_ERROR_CODES = {

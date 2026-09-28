@@ -67,7 +67,7 @@ the repository, the template or any log. To copy it to the clipboard without
 it showing up on screen:
 
 ```bash
-printf '%s' "$(aws ssm get-parameter --region us-east-1 --name /andur/api-keys/quillmoor \
+printf '%s' "$(aws ssm get-parameter --region eu-west-1 --name /andur/api-keys/quillmoor \
   --with-decryption --query Parameter.Value --output text)" | clip   # macOS: pbcopy
 ```
 
@@ -98,7 +98,7 @@ the function after deleting it —
 every running instance is replaced, and the new ones read the keys fresh:
 
 ```bash
-aws lambda update-function-configuration --region us-east-1 --function-name andur-answer --description "keys rotated"
+aws lambda update-function-configuration --region eu-west-1 --function-name andur-answer --description "keys rotated"
 ```
 
 A new key works at once: a key the function does not know makes it read the
@@ -165,7 +165,7 @@ reaching the screen. Set `WORKSPACE` first; on macOS use `shasum -a 256` in
 place of `sha256sum`:
 
 ```bash
-HASH=$(MSYS_NO_PATHCONV=1 aws ssm get-parameter --region us-east-1 \
+HASH=$(MSYS_NO_PATHCONV=1 aws ssm get-parameter --region eu-west-1 \
   --name "/andur/api-keys/$WORKSPACE" --with-decryption \
   --query Parameter.Value --output text | tr -d '\r\n' | sha256sum | cut -d' ' -f1)
 ```
@@ -183,7 +183,7 @@ numbers, and the condition refuses this write rather than resetting a
 counter that is already running:
 
 ```bash
-aws dynamodb put-item --region us-east-1 --table-name andur-key-budgets \
+aws dynamodb put-item --region eu-west-1 --table-name andur-key-budgets \
   --condition-expression 'attribute_not_exists(first_used_at)' \
   --item "{\"key_hash\":{\"S\":\"$HASH\"},\"question_limit\":{\"N\":\"2\"},\"window_seconds\":{\"N\":\"21600\"},\"keep_seconds\":{\"N\":\"604800\"}}"
 ```
@@ -192,7 +192,7 @@ aws dynamodb put-item --region us-east-1 --table-name andur-key-budgets \
 defaults:
 
 ```bash
-aws dynamodb delete-item --region us-east-1 --table-name andur-key-budgets \
+aws dynamodb delete-item --region eu-west-1 --table-name andur-key-budgets \
   --key "{\"key_hash\":{\"S\":\"$HASH\"}}"
 ```
 
@@ -214,13 +214,33 @@ still one write. The log line is `budget-ttl-repaired`, and it should appear
 once per item, never once per question. Writing both numbers together in the
 set command above is still the better way round.
 
-`expires_at` and `delete_after` are not yours to set. The function derives
-both from `first_used_at` plus the two lengths and rewrites them on every
-question, so a value put there by hand is gone with the next one. Set
-`question_limit`, `window_seconds` and `keep_seconds`; the rest follows. And
-a preset item never carries `first_used_at` — that attribute is what the
-condition reads to tell "not used yet" from "running", so writing it by hand
+On a key that has not asked yet, set `question_limit`, `window_seconds` and
+`keep_seconds` as above; `expires_at` and `delete_after` follow with its
+first question. Never write `first_used_at` by hand — that attribute is what
+the condition reads to tell "not used yet" from "running", so writing it
 would start a window that nobody opened.
+
+On a key that has asked, the numbers do not all follow. The condition reads
+the **stored** `expires_at` and `question_limit`, and only a question that
+passes it rewrites `expires_at` from `first_used_at + window_seconds` and
+`delete_after` from `first_used_at + keep_seconds`:
+
+- `question_limit` takes effect with the next question, higher or lower.
+- A longer `window_seconds` works on a running key from its next question,
+  but never on one whose window has closed: that key is refused before
+  anything is rewritten. Set `expires_at` as well
+  (`first_used_at + window_seconds`).
+- A shorter `window_seconds` lets one more question through, because the
+  condition still reads the old `expires_at`. Set `expires_at` as well to
+  close it at once.
+- `keep_seconds` works the same way on `delete_after`, which is what the
+  table's TTL reads: on a key that asks no more questions, set
+  `delete_after` (`first_used_at + keep_seconds`) with it, and keep it past
+  `expires_at`.
+
+The simplest way to give a used key a fresh start is to reset it with
+`delete-item` above; a changed budget for it is then a preset item as for a
+new key.
 
 **A replaced key has a fresh budget by itself.** Deleting the parameter and
 deploying again gives the workspace a new key, and a new key has a different
@@ -231,6 +251,8 @@ the item is gone and the key would work again. To end a key for good, replace
 it.
 
 ## The answer
+
+An answer from us-east-1, 23.09.2026, before the move to eu-west-1:
 
 ```json
 {
@@ -278,9 +300,11 @@ this workspace match the question.*, with empty `sources`, zero tokens and a
 ## The guardrail
 
 Every model call goes through one Bedrock guardrail, on the same `converse`
-call (`guardrailConfig`). Nemotron 3 Super lists Guardrails among its
-features on the `bedrock-runtime` endpoint (its model card in the Bedrock
-user guide, read 23.09.2026), so there is no separate `ApplyGuardrail` call.
+call (`guardrailConfig`), so there is no separate `ApplyGuardrail` call for
+the answer. Nemotron 3 Super lists Guardrails among its features on the
+`bedrock-runtime` endpoint (its model card, read 23.09.2026); with Nova Pro
+through its EU profile the same guardrail refused, masked and withheld on
+the live page on 28.09.2026.
 The execution role may invoke the model only with the guardrail's deployed
 version named in the call; a call without it is refused.
 
@@ -396,7 +420,7 @@ Every error is a JSON body `{"error": "<one sentence>"}`, never a traceback.
 | 405 | Any method other than `POST`. The response carries `Allow: POST`. |
 | 429 | More requests at once than the function may run (5). Lambda refuses them before any code runs, so the body is Lambda's own: `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
 | 500 | The function is set up wrong (an environment variable, unreadable keys), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.*; the cause is in the log. |
-| 502 | Bedrock failed: throttled, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer. The sentence names the cause. |
+| 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer. The sentence names the cause. |
 
 Two more can arrive that the function never saw. Neither body is
 `{"error": ...}`, which is how a client tells them from a refusal:
@@ -421,7 +445,7 @@ trying again will not help.
 ## Logs
 
 One JSON line per request in the log group `/aws/lambda/andur-answer`, kept
-30 days:
+30 days (these from us-east-1, 23.09.2026):
 
 ```json
 {"event": "answered", "status": 200, "workspace": "pellwick", "model": "nvidia.nemotron-super-3-120b", "input_tokens": 1326, "output_tokens": 32, "hits": 5, "dropped": 0, "cited": 2, "guardrail": "none", "guardrail_policies": [], "grounding_score": 0.99, "relevance_score": 1.0, "guardrail_units": {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 5}, "cost_usd": 0.00112, "price_date": "2026-09-23", "latency_ms": 3430}
@@ -440,7 +464,10 @@ also for a refused question that returns none of them.
 A Bedrock failure adds a `retrieve-failed` or `converse-failed` line with
 the exception class and the AWS error code, never the service's own message:
 a message quotes what the call choked on, and for `converse` that is the
-prompt — the question and passages out of a company's documents. Parameter
+prompt — the question and passages out of a company's documents. A model
+call AWS turned away gives a `converse-rejected` line first, with the error
+code, the time into the request (`elapsed_ms`) and whether the second call is
+made (`retry`); counting these lines tells how often it happens. Parameter
 Store and the budget table do add the full exception (`keys-unreadable`,
 `budget-unreadable`); neither call carries a question. A key shared by two
 workspaces gives a `duplicate-key` line. A failed reread of the keys
@@ -452,7 +479,7 @@ line with status 500 and the path in its `error` field. A bug is one
 start names the boto3 and botocore versions of the runtime.
 
 ```bash
-aws logs tail /aws/lambda/andur-answer --region us-east-1 --follow
+aws logs tail /aws/lambda/andur-answer --region eu-west-1 --follow
 ```
 
 `cost_usd` in the `answered` line is the answer's cost at the prices of
@@ -470,8 +497,8 @@ from files.
 | Variable | Set to |
 |---|---|
 | `KNOWLEDGE_BASE_ID` | The stack's knowledge base. |
-| `MODEL_ID` | `ANSWER_MODEL_ID` in `infra/stacks/andur_stack.py`: `nvidia.nemotron-super-3-120b`. |
-| `REGION` | The stack's region, `us-east-1`. |
+| `MODEL_ID` | `ANSWER_MODEL_ID` in `infra/stacks/andur_stack.py`: `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile. |
+| `REGION` | The stack's region, `eu-west-1`. |
 | `NUMBER_OF_RESULTS` | Passages per question, `6`. Retrieve may return fewer. |
 | `API_KEY_PARAMETER_PATH` | `/andur/api-keys`. |
 | `BUDGET_TABLE_NAME` | `andur-key-budgets`, the table that counts per key. |
@@ -482,30 +509,46 @@ from files.
 | `GUARDRAIL_VERSION` | Its deployed version, a number. `DRAFT` is refused. |
 | `EXCERPT_GUARDRAIL_ID` | The stack's excerpt guardrail. |
 | `EXCERPT_GUARDRAIL_VERSION` | Its deployed version, a number. |
-| `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00015`. |
-| `PRICE_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens, `0.00065`. |
+| `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00092`. |
+| `PRICE_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens, `0.00368`. |
 | `PRICE_TOPIC_PER_1K_UNITS` | USD per 1,000 text units of the topic filter, `0.15`. |
 | `PRICE_PII_PER_1K_UNITS` | USD per 1,000 text units of the sensitive information filter, `0.10`. |
 | `PRICE_GROUNDING_PER_1K_UNITS` | USD per 1,000 text units of the grounding check, `0.10`. |
-| `PRICE_DATE` | The day those prices were read, `2026-09-23`, as `YYYY-MM-DD`. |
+| `PRICE_DATE` | The day those prices were read, `2026-09-28`, as `YYYY-MM-DD`. |
 
-The prices are the us-east-1 standard-tier prices of the Amazon Bedrock
-pricing page, read 23.09.2026; the source is in a comment next to them in
-the stack. A text unit is up to 1,000 characters of text one policy reads.
+The prices are the eu-west-1 standard-tier prices of Amazon Bedrock, read
+28.09.2026 from the AWS Price List API, the source of the pricing page; the
+source is in a comment next to them in the stack. The token prices come
+from `infra/answer_models.py`, looked up by the model id the stack deploys,
+so a model never goes out with another model's prices, and a model without
+a row there does not synthesise. The guardrail prices are the same as in
+us-east-1. A text unit is up to 1,000 characters of text one policy reads.
 
 There is no variable for the address or the key header: the function reads
 the key from `KEY_HEADER` in `handler.py`, and nothing in it knows what it is
 reached through.
 
 A model that is only offered through an inference profile, such as the
-Claude models, needs a different `InvokeModel` resource in the stack than a
-plain model id.
+Claude and Nova models in eu-west-1, is given by its EU profile id
+(`eu.…`). The stack then allows `InvokeModel` on that profile, with the
+guardrail condition, and on the model itself in the EU regions (`eu-*`) only
+when the call comes through that profile (`bedrock:InferenceProfileArn`).
+A global profile (`global.…`) is never used: it may route the question out
+of the EU.
 
 Timeouts: every AWS call has a connect and a read timeout (`CLIENT_LIMITS`
 in `aws.py`). Reading the keys, counting the budget, retrieving and masking
-the excerpts are tried twice; the model call only once, because a converse
+the excerpts are tried twice; the model call once, because a converse
 that timed out may already have produced its answer, and a second attempt
-would pay for the input tokens again. A retried count can charge one question
+would pay for the input tokens again. The exception is a call AWS documents
+as not run — throttled over a quota, a service unable to handle it, a model
+not ready (`MODEL_REJECTION_CODES` in `handler.py`; an internal error is not
+among them, the model may have run). The handler makes it once more after 2
+seconds, but only up to second 50 of the request (`latest_model_retry_start()`
+in `aws.py`): the pause, a model call that runs into its 3 + 40 seconds and
+the excerpt guardrail's 20 after it end by second 115, and the 5 seconds to
+CloudFront's 120 are for the cold start and the way in, which the handler's
+clock does not see (`ORIGIN_MARGIN_SECONDS`). A retried count can charge one question
 twice, which is the safe direction: the count runs ahead, never behind. The
 budget call waits the shortest of all, since it sits in front of every
 question. The excerpt guardrail is a `bedrock-runtime` call with limits of
@@ -514,7 +557,8 @@ past the function's timeout. Added up, the worst case is 171 seconds —
 Parameter Store counts twice, because an
 unknown key makes the function read the keys again before it answers 401, and
 the budget table counts twice, because an item whose own window outlasts it is
-put right with a second write. The
+put right with a second write. A request with the second model call ends
+by second 115, so it does not add to the 171. The
 function's timeout is 180, so a hanging Bedrock call still ends as a 502 with
 a reason, not as a bare timeout.
 
@@ -525,8 +569,10 @@ approved increase — the quota is 1 to 120 seconds. So an answer that took
 longer than 120 seconds reaches the browser as CloudFront's 504 while the
 function runs it to the end and the question stays counted. The alternative
 would be a function timeout under 120, which would cut off answers that are
-merely slow instead of merely reporting them late. Today an answer takes 0.7
-to 3 seconds, so this is a corner, not a case.
+merely slow instead of merely reporting them late. An answer took 0.7 to 3
+seconds in us-east-1 (23.09.2026), and 0.7 to 4.4 seconds inside the
+function with Nova Pro on the page in eu-west-1 (four questions,
+28.09.2026), so this is a corner, not a case.
 
 At most 5 requests run at the same time (`ANSWER_MAX_CONCURRENCY` in the
 stack); Lambda answers the rest with 429. Five concurrent calls from a
@@ -538,4 +584,5 @@ front of the URL is the answer if that ever becomes a real problem.
 
 The function package is this folder without `README.md` and caches. boto3 is
 not packaged: the `python3.14` runtime brought boto3 and botocore 1.42.97 in
-`us-east-1` on 17.09.2026, which know `bedrock-agent-runtime` and `converse`.
+`eu-west-1` on 28.09.2026 (the cold-start log line), the same as in
+`us-east-1` on 17.09.2026; both know `bedrock-agent-runtime` and `converse`.

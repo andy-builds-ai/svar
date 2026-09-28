@@ -18,10 +18,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from infra.stacks.andur_stack import AndurStack  # noqa: E402
 
-#: S3 Vectors and the Bedrock models Andur uses are both available here.
-#: Pinned rather than taken from the caller's profile, so a misconfigured
-#: shell cannot scatter half a deployment across two regions.
-REGION = "us-east-1"
+#: Ireland: documents, vectors and answers stay in the EU, and S3 Vectors and
+#: the Bedrock models Andur uses are available here. Pinned rather than taken
+#: from the caller's profile, so a misconfigured shell cannot scatter half a
+#: deployment across two regions.
+REGION = "eu-west-1"
 
 app = cdk.App()
 

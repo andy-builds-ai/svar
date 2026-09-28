@@ -31,18 +31,58 @@ KEY_READS_PER_REQUEST = 2
 
 BUDGET_WRITES_PER_REQUEST = 2
 
+#: How long CloudFront waits for an answer: `ORIGIN_RESPONSE_TIMEOUT_SECONDS` in the stack.
+ORIGIN_TIMEOUT_SECONDS = 120
+
+#: The pause before the one second model call after AWS turned the first away.
+MODEL_RETRY_PAUSE_SECONDS = 2
+
+#: Time CloudFront waits that the handler's clock does not see: the cold start
+#: (Init Duration 0.11 s, 28.09.2026), the way from CloudFront to the function,
+#: the runtime around the handler.
+ORIGIN_MARGIN_SECONDS = 5
+
+
+def call_seconds(service: str) -> int:
+    """How long one call to a service can take when every attempt runs into its timeouts."""
+    limits = CLIENT_LIMITS[service]
+    return (
+        limits.attempts * (limits.connect_timeout + limits.read_timeout)
+        + (limits.attempts - 1) * RETRY_DELAY_SECONDS
+    )
+
+
+def latest_model_retry_start() -> int:
+    """How far into a request the second model call may still start.
+
+    After it come the pause, the model call and the excerpt guardrail; all of
+    that has to end before CloudFront gives up, less a margin for what the
+    handler cannot see.
+    """
+    return (
+        ORIGIN_TIMEOUT_SECONDS
+        - ORIGIN_MARGIN_SECONDS
+        - MODEL_RETRY_PAUSE_SECONDS
+        - call_seconds("bedrock-runtime")
+        - call_seconds("guardrail")
+    )
+
 
 def worst_case_seconds() -> int:
-    """How long one request can take when every AWS call runs into every timeout."""
+    """How long one request can take when every AWS call runs into every timeout.
+
+    A request with a second model call ends by `ORIGIN_TIMEOUT_SECONDS`, so it
+    counts only if that were the longer of the two.
+    """
     calls = {"ssm": KEY_READS_PER_REQUEST, "dynamodb": BUDGET_WRITES_PER_REQUEST}
-    return sum(
-        calls.get(service, 1)
-        * (
-            limits.attempts * (limits.connect_timeout + limits.read_timeout)
-            + (limits.attempts - 1) * RETRY_DELAY_SECONDS
-        )
-        for service, limits in CLIENT_LIMITS.items()
+    every_timeout = sum(calls.get(service, 1) * call_seconds(service) for service in CLIENT_LIMITS)
+    with_model_retry = (
+        latest_model_retry_start()
+        + MODEL_RETRY_PAUSE_SECONDS
+        + call_seconds("bedrock-runtime")
+        + call_seconds("guardrail")
     )
+    return max(every_timeout, with_model_retry)
 
 
 @functools.cache

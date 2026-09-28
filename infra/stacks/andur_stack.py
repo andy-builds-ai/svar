@@ -27,6 +27,8 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+from infra.answer_models import PRICE_DATE, answer_model
+
 #: Titan Text Embeddings V2. The model id is part of the Bedrock ARN.
 EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 
@@ -54,7 +56,12 @@ NON_FILTERABLE_METADATA_KEYS = [
 NONCURRENT_VERSION_RETENTION_DAYS = 30
 
 
-ANSWER_MODEL_ID = "nvidia.nemotron-super-3-120b"
+#: A model id runs in the stack's region; an ``eu.`` inference profile id runs
+#: in the EU regions that profile routes to, and nowhere else. Its token prices
+#: come from infra/answer_models.py.
+ANSWER_MODEL_ID = "eu.amazon.nova-pro-v1:0"
+
+EU_PROFILE_PREFIX = "eu."
 
 #: How many passages retrieve hands to the model per question.
 NUMBER_OF_RESULTS = 6
@@ -143,11 +150,11 @@ def masking_policy() -> bedrock.CfnGuardrail.SensitiveInformationPolicyConfigPro
     )
 
 
-#: USD per 1,000 tokens or guardrail text units, us-east-1, standard tier:
-#: aws.amazon.com/bedrock/pricing.
-PRICE_DATE = "2026-09-23"
-PRICE_INPUT_PER_1K_TOKENS = "0.00015"
-PRICE_OUTPUT_PER_1K_TOKENS = "0.00065"
+#: USD per 1,000 tokens or guardrail text units, eu-west-1, standard tier:
+#: the AWS Price List API behind aws.amazon.com/bedrock/pricing, read on
+#: `PRICE_DATE`. The token prices are the answer model's own.
+PRICE_INPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).input_per_1k
+PRICE_OUTPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).output_per_1k
 PRICE_TOPIC_PER_1K_UNITS = "0.15"
 PRICE_PII_PER_1K_UNITS = "0.10"
 PRICE_GROUNDING_PER_1K_UNITS = "0.10"
@@ -245,8 +252,17 @@ DATA_SOURCE_NAME = replacement_safe_name(
 class AndurStack(Stack):
     """Everything Andur runs on, in one stack."""
 
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        *,
+        answer_model_id: str = ANSWER_MODEL_ID,
+        **kwargs,
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        self.answer_model_id = answer_model_id
+        self.answer_model = answer_model(answer_model_id)
 
         self.documents_bucket = self._create_documents_bucket()
         self.vector_bucket, self.vector_index = self._create_vector_store()
@@ -354,7 +370,8 @@ class AndurStack(Stack):
         return iam.Role(
             self,
             "KnowledgeBaseRole",
-            role_name="AmazonBedrockExecutionRoleForKnowledgeBase_Andur",
+            # IAM names are account-wide: the region keeps two stacks apart.
+            role_name=f"AmazonBedrockExecutionRoleForKnowledgeBase_Andur_{Aws.REGION}",
             description=(
                 "Lets Bedrock Knowledge Bases read Andur documents and write Andur vectors."
             ),
@@ -678,9 +695,44 @@ class AndurStack(Stack):
 
     # --- Answer function -------------------------------------------------
 
-    @property
-    def answer_model_arn(self) -> str:
-        return f"arn:{Aws.PARTITION}:bedrock:{Aws.REGION}::foundation-model/{ANSWER_MODEL_ID}"
+    def _invoke_answer_model(self, guardrail_identifier: str) -> list[iam.PolicyStatement]:
+        """Invoke the answer model only with the deployed guardrail version.
+
+        An EU profile takes two statements: the profile in this region, and the
+        model in the EU regions it routes to, reachable only through that profile.
+        """
+        with_guardrail = {"bedrock:GuardrailIdentifier": guardrail_identifier}
+        if not self.answer_model_id.startswith(EU_PROFILE_PREFIX):
+            return [
+                iam.PolicyStatement(
+                    sid="InvokeAnswerModelStatement",
+                    actions=["bedrock:InvokeModel"],
+                    resources=[
+                        f"arn:{Aws.PARTITION}:bedrock:{Aws.REGION}::foundation-model/"
+                        f"{self.answer_model_id}"
+                    ],
+                    conditions={"StringEquals": with_guardrail},
+                )
+            ]
+        profile_arn = (
+            f"arn:{Aws.PARTITION}:bedrock:{Aws.REGION}:{Aws.ACCOUNT_ID}:inference-profile/"
+            f"{self.answer_model_id}"
+        )
+        model_id = self.answer_model_id.removeprefix(EU_PROFILE_PREFIX)
+        return [
+            iam.PolicyStatement(
+                sid="InvokeAnswerModelProfile",
+                actions=["bedrock:InvokeModel"],
+                resources=[profile_arn],
+                conditions={"StringEquals": with_guardrail},
+            ),
+            iam.PolicyStatement(
+                sid="InvokeAnswerModelInEurope",
+                actions=["bedrock:InvokeModel"],
+                resources=[f"arn:{Aws.PARTITION}:bedrock:eu-*::foundation-model/{model_id}"],
+                conditions={"StringEquals": {"bedrock:InferenceProfileArn": profile_arn}},
+            ),
+        ]
 
     def _create_answer_role(
         self,
@@ -729,17 +781,8 @@ class AndurStack(Stack):
                 ),
                 "InvokeAnswerModel": iam.PolicyDocument(
                     statements=[
-                        iam.PolicyStatement(
-                            sid="InvokeAnswerModelStatement",
-                            actions=["bedrock:InvokeModel"],
-                            resources=[self.answer_model_arn],
-                            conditions={
-                                "StringEquals": {
-                                    "bedrock:GuardrailIdentifier": (
-                                        f"{guardrail.attr_guardrail_arn}:{guardrail_version.attr_version}"
-                                    )
-                                }
-                            },
+                        *self._invoke_answer_model(
+                            f"{guardrail.attr_guardrail_arn}:{guardrail_version.attr_version}"
                         ),
                         iam.PolicyStatement(
                             sid="ApplyAnswerGuardrail",
@@ -781,7 +824,7 @@ class AndurStack(Stack):
             log_group=log_group,
             environment={
                 "KNOWLEDGE_BASE_ID": knowledge_base.attr_knowledge_base_id,
-                "MODEL_ID": ANSWER_MODEL_ID,
+                "MODEL_ID": self.answer_model_id,
                 "REGION": Aws.REGION,
                 "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
                 "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,
@@ -793,8 +836,8 @@ class AndurStack(Stack):
                 "GUARDRAIL_VERSION": guardrail_version.attr_version,
                 "EXCERPT_GUARDRAIL_ID": excerpt_guardrail_version.attr_guardrail_id,
                 "EXCERPT_GUARDRAIL_VERSION": excerpt_guardrail_version.attr_version,
-                "PRICE_INPUT_PER_1K_TOKENS": PRICE_INPUT_PER_1K_TOKENS,
-                "PRICE_OUTPUT_PER_1K_TOKENS": PRICE_OUTPUT_PER_1K_TOKENS,
+                "PRICE_INPUT_PER_1K_TOKENS": self.answer_model.input_per_1k,
+                "PRICE_OUTPUT_PER_1K_TOKENS": self.answer_model.output_per_1k,
                 "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
                 "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
                 "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
@@ -830,6 +873,8 @@ class AndurStack(Stack):
         return cloudfront.ResponseHeadersPolicy(
             self,
             "SecurityHeaders",
+            # CloudFront names are account-wide: the region keeps two stacks apart.
+            response_headers_policy_name=f"andur-security-headers-{Aws.REGION}",
             comment="Andur: what the page may load, and how it must be reached.",
             security_headers_behavior=cloudfront.ResponseSecurityHeadersBehavior(
                 content_security_policy=cloudfront.ResponseHeadersContentSecurityPolicy(
@@ -862,7 +907,14 @@ class AndurStack(Stack):
             comment="Andur: the page, and /ask on its way to the answer function.",
             default_root_object=SITE_ROOT_DOCUMENT,
             default_behavior=cloudfront.BehaviorOptions(
-                origin=origins.S3BucketOrigin.with_origin_access_control(site_bucket),
+                origin=origins.S3BucketOrigin.with_origin_access_control(
+                    site_bucket,
+                    origin_access_control=cloudfront.S3OriginAccessControl(
+                        self,
+                        "SiteOriginAccessControl",
+                        origin_access_control_name=f"andur-site-{Aws.REGION}",
+                    ),
+                ),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,
                 response_headers_policy=headers,
@@ -871,6 +923,11 @@ class AndurStack(Stack):
                 ASK_PATH: cloudfront.BehaviorOptions(
                     origin=origins.FunctionUrlOrigin.with_origin_access_control(
                         function_url,
+                        origin_access_control=cloudfront.FunctionUrlOriginAccessControl(
+                            self,
+                            "AnswerOriginAccessControl",
+                            origin_access_control_name=f"andur-answer-{Aws.REGION}",
+                        ),
                         read_timeout=Duration.seconds(ORIGIN_RESPONSE_TIMEOUT_SECONDS),
                     ),
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,

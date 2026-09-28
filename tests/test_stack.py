@@ -25,6 +25,7 @@ import handler  # app/handler.py, likewise
 import pytest
 from aws_cdk.assertions import Match, Template
 
+from infra.answer_models import answer_model
 from infra.stacks.andur_stack import (
     ANSWER_FUNCTION_NAME,
     ANSWER_MAX_CONCURRENCY,
@@ -574,11 +575,13 @@ def test_cloudfront_gives_up_before_the_function_does() -> None:
     CloudFront may wait 120 seconds without an approved quota increase, and
     the function may run 180. An answer between the two reaches the browser as
     CloudFront's 504 while the function runs it to the end and charges the
-    question. Today an answer takes 0.7 to 3 seconds, so the gap is a corner,
-    not a case — and the alternative, a shorter function timeout, would cut
-    off answers that are merely slow.
+    question. An answer takes seconds (0.7 to 4.4 inside the function with Nova
+    Pro on 28.09.2026), so the gap is a corner, not a case — and the
+    alternative, a shorter function timeout, would cut off answers that are
+    merely slow.
     """
     assert ORIGIN_RESPONSE_TIMEOUT_SECONDS < ANSWER_TIMEOUT_SECONDS
+    assert aws.ORIGIN_TIMEOUT_SECONDS == ORIGIN_RESPONSE_TIMEOUT_SECONDS
     assert ORIGIN_RESPONSE_TIMEOUT_SECONDS < aws.worst_case_seconds()
 
 
@@ -649,11 +652,26 @@ def test_answer_role_has_six_permissions_each_on_one_resource(
     assert retrieve["Action"] == "bedrock:Retrieve"
     assert retrieve["Resource"] == get_att(stack, stack.knowledge_base, "KnowledgeBaseArn")
 
-    invoke, apply_guardrail = policies["InvokeAnswerModel"]["Statement"]
-    assert invoke["Action"] == "bedrock:InvokeModel"
-    assert joined_last_part(invoke["Resource"]) == f"::foundation-model/{ANSWER_MODEL_ID}"
+    # The default model is an EU profile: the profile needs the guardrail, the
+    # model behind it needs the profile.
+    profile, model, apply_guardrail = policies["InvokeAnswerModel"]["Statement"]
+    assert profile["Action"] == model["Action"] == "bedrock:InvokeModel"
+    assert joined_last_part(profile["Resource"]) == f":inference-profile/{ANSWER_MODEL_ID}"
+    assert model["Resource"] == {
+        "Fn::Join": [
+            "",
+            [
+                "arn:",
+                {"Ref": "AWS::Partition"},
+                ":bedrock:eu-*::foundation-model/" + ANSWER_MODEL_ID.removeprefix("eu."),
+            ],
+        ]
+    }
+    assert model["Condition"] == {
+        "StringEquals": {"bedrock:InferenceProfileArn": profile["Resource"]}
+    }
     # Only through the deployed guardrail version: <guardrail arn>:<version>.
-    assert invoke["Condition"] == {
+    assert profile["Condition"] == {
         "StringEquals": {
             "bedrock:GuardrailIdentifier": {
                 "Fn::Join": [
@@ -678,6 +696,63 @@ def test_answer_role_has_six_permissions_each_on_one_resource(
     assert write_logs["Resource"] == get_att(
         stack, stack.answer_log_group.node.default_child, "Arn"
     )
+
+
+REGIONAL_MODEL_ID = "nvidia.nemotron-super-3-120b"
+
+
+def test_a_model_in_the_region_is_invoked_directly_with_its_own_prices() -> None:
+    app = cdk.App(context=deploy_context())
+    stack = AndurStack(app, "RegionalModelStack", answer_model_id=REGIONAL_MODEL_ID)
+    template = Template.from_stack(stack)
+    policies = role_policies(stack, template, stack.answer_role)
+    invoke, apply_guardrail = policies["InvokeAnswerModel"]["Statement"]
+
+    assert invoke["Action"] == "bedrock:InvokeModel"
+    assert joined_last_part(invoke["Resource"]) == f"::foundation-model/{REGIONAL_MODEL_ID}"
+    assert set(invoke["Condition"]["StringEquals"]) == {"bedrock:GuardrailIdentifier"}
+    assert apply_guardrail["Action"] == "bedrock:ApplyGuardrail"
+    variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"]
+    assert variables["Variables"]["MODEL_ID"] == REGIONAL_MODEL_ID
+    assert variables["Variables"]["PRICE_INPUT_PER_1K_TOKENS"] == "0.00018"
+    assert variables["Variables"]["PRICE_OUTPUT_PER_1K_TOKENS"] == "0.00078"
+
+
+def test_a_model_without_a_price_does_not_synthesise() -> None:
+    app = cdk.App(context=deploy_context())
+    with pytest.raises(KeyError, match="has no price"):
+        AndurStack(app, "UnpricedModelStack", answer_model_id="eu.unpriced-model-v1:0")
+
+
+def test_the_default_model_carries_its_own_prices() -> None:
+    row = answer_model(ANSWER_MODEL_ID)
+    assert (PRICE_INPUT_PER_1K_TOKENS, PRICE_OUTPUT_PER_1K_TOKENS) == (
+        row.input_per_1k,
+        row.output_per_1k,
+    )
+    assert (row.name, row.input_per_1k, row.output_per_1k) == ("Nova Pro", "0.00092", "0.00368")
+
+
+def test_account_wide_names_carry_the_region(stack: AndurStack, template: Template) -> None:
+    """IAM and CloudFront names hold for the whole account: without the region,
+    a second stack in another region collides with the first."""
+    resources = template.to_json()["Resources"].values()
+    names = [
+        resource_of(stack, template, stack.knowledge_base_role)["Properties"]["RoleName"],
+        *(
+            r["Properties"]["ResponseHeadersPolicyConfig"]["Name"]
+            for r in resources
+            if r["Type"] == "AWS::CloudFront::ResponseHeadersPolicy"
+        ),
+        *(
+            r["Properties"]["OriginAccessControlConfig"]["Name"]
+            for r in resources
+            if r["Type"] == "AWS::CloudFront::OriginAccessControl"
+        ),
+    ]
+    assert len(names) == 4
+    for name in names:
+        assert {"Ref": "AWS::Region"} in name["Fn::Join"][1], name
 
 
 def test_answer_role_has_no_managed_policy(stack: AndurStack, template: Template) -> None:

@@ -323,7 +323,9 @@ def read_body(event: Mapping[str, Any]) -> dict[str, Any]:
             raise BadRequest("The body is not valid base64-encoded UTF-8.") from exc
     try:
         body = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    except (ValueError, RecursionError) as exc:
+        # ValueError: malformed JSON, or an integer past Python's digit limit;
+        # RecursionError: arrays or objects nested past the recursion limit.
         raise BadRequest("The body is not valid JSON.") from exc
     if not isinstance(body, dict):
         raise BadRequest('The body must be a JSON object with "question" and "workspace".')
@@ -778,29 +780,67 @@ def build_content(question: str, results: Sequence[Mapping[str, Any]]) -> list[d
 # --- Answering model -----------------------------------------------------
 
 
+#: Converse errors whose AWS description says the request was not run: denied
+#: over a quota, a service unable to handle it, a model not ready to serve.
+#: Not InternalServerException — processing had begun (docs/decisions.md).
+MODEL_REJECTION_CODES = frozenset(
+    {"ThrottlingException", "ServiceUnavailableException", "ModelNotReadyException"}
+)
+
+pause: Callable[[float], None] = time.sleep
+
+
 def ask_model(
-    bedrock_runtime: Any, settings: Settings, content: list[dict[str, Any]]
+    bedrock_runtime: Any,
+    settings: Settings,
+    content: list[dict[str, Any]],
+    record: "RequestRecord | None" = None,
 ) -> dict[str, Any]:
     """Send the system rules and the message to the model through the guardrail; return
-    Bedrock's raw response."""
-    try:
-        return bedrock_runtime.converse(
-            modelId=settings.model_id,
-            system=[{"text": SYSTEM_PROMPT}],
-            messages=[{"role": "user", "content": content}],
-            inferenceConfig={"maxTokens": MAX_ANSWER_TOKENS},
-            guardrailConfig={
-                "guardrailIdentifier": settings.guardrail_id,
-                "guardrailVersion": settings.guardrail_version,
-                "trace": "enabled",
-            },
-        )
-    except aws.botocore_errors() as exc:
-        log_event("converse-failed", model=settings.model_id, detail=aws.error_detail(exc))
-        cause = aws.error_cause(exc)
-        if aws.error_code(exc) in {"AccessDeniedException", "AccessDenied"}:
-            cause += " — the model or the guardrail may not be open to this function"
-        raise LLMError(f"The model {settings.model_id} could not answer: {cause}.") from exc
+    Bedrock's raw response. A call AWS turns away is made once more while there is time."""
+    record = record if record is not None else RequestRecord()
+    for attempt in (1, 2):
+        try:
+            return converse(bedrock_runtime, settings, content)
+        except aws.botocore_errors() as exc:
+            rejected = aws.error_code(exc) in MODEL_REJECTION_CODES
+            record.model_rejections += rejected
+            if attempt == 1 and rejected:
+                elapsed = clock() - record.started
+                retry = elapsed <= aws.latest_model_retry_start()
+                log_event(
+                    "converse-rejected",
+                    model=settings.model_id,
+                    detail=aws.error_detail(exc),
+                    elapsed_ms=round(elapsed * 1000),
+                    retry=retry,
+                )
+                if retry:
+                    pause(aws.MODEL_RETRY_PAUSE_SECONDS)
+                    continue
+            log_event("converse-failed", model=settings.model_id, detail=aws.error_detail(exc))
+            cause = aws.error_cause(exc)
+            if aws.error_code(exc) in {"AccessDeniedException", "AccessDenied"}:
+                cause += " — the model or the guardrail may not be open to this function"
+            raise LLMError(f"The model {settings.model_id} could not answer: {cause}.") from exc
+    raise AssertionError("unreachable: the second attempt returns or raises")
+
+
+def converse(
+    bedrock_runtime: Any, settings: Settings, content: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """One model call with the system rules, the message and the guardrail."""
+    return bedrock_runtime.converse(
+        modelId=settings.model_id,
+        system=[{"text": SYSTEM_PROMPT}],
+        messages=[{"role": "user", "content": content}],
+        inferenceConfig={"maxTokens": MAX_ANSWER_TOKENS},
+        guardrailConfig={
+            "guardrailIdentifier": settings.guardrail_id,
+            "guardrailVersion": settings.guardrail_version,
+            "trace": "enabled",
+        },
+    )
 
 
 def extract_answer(response: Mapping[str, Any], guardrail_action: str = "none") -> str:
@@ -1026,6 +1066,10 @@ class RequestRecord:
     hits: int = 0
     #: Personal details the excerpt guardrail masked, by type.
     excerpt_policies: list[str] = field(default_factory=list)
+    #: When the request began, on `clock`; a second model call needs time left.
+    started: float = field(default_factory=lambda: clock())
+    #: Model calls AWS turned away as busy or throttled.
+    model_rejections: int = 0
 
 
 def answer_question(
@@ -1063,7 +1107,10 @@ def answer_question(
         }
 
     response = ask_model(
-        client("bedrock-runtime", settings.region), settings, build_content(question, results)
+        client("bedrock-runtime", settings.region),
+        settings,
+        build_content(question, results),
+        record,
     )
     guardrail = read_guardrail(response)
     answer = extract_answer(response, guardrail["action"])

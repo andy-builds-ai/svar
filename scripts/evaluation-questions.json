@@ -1,0 +1,441 @@
+[
+  {
+    "id": "q01",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "How long does the link from the 'Forgot password' page stay usable?",
+    "documents": [
+      "faq",
+      "manual-01-getting-started"
+    ],
+    "facts": [
+      [
+        "60 minutes",
+        "sixty minutes",
+        "one hour",
+        "1 hour"
+      ]
+    ]
+  },
+  {
+    "id": "q02",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "What is the largest single file I can upload to Haldrum?",
+    "documents": [
+      "company-profile",
+      "manual-02-projects"
+    ],
+    "facts": [
+      [
+        "250 MB",
+        "250MB",
+        "250 megabytes"
+      ]
+    ]
+  },
+  {
+    "id": "q03",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "What service credit does a Business customer get if monthly uptime drops below 99.0 %?",
+    "documents": [
+      "service-level-agreement"
+    ],
+    "facts": [
+      [
+        "25 %",
+        "25%",
+        "25 percent",
+        "25 per cent"
+      ]
+    ]
+  },
+  {
+    "id": "q04",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "Once we give a Quillmoor support engineer permission to look into our organisation, how long does that access last at most?",
+    "documents": [
+      "support-process",
+      "data-protection-policy"
+    ],
+    "facts": [
+      [
+        "72 hours",
+        "72h",
+        "72 hrs",
+        "three days",
+        "3 days"
+      ]
+    ]
+  },
+  {
+    "id": "q05",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "How many days can a Haldrum payment be overdue before our organisation becomes read-only?",
+    "documents": [
+      "admin-billing-and-plans"
+    ],
+    "facts": [
+      [
+        "45 days",
+        "45"
+      ]
+    ]
+  },
+  {
+    "id": "q06",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "What is the minimum length for a Haldrum password?",
+    "documents": [
+      "admin-authentication-and-sso"
+    ],
+    "facts": [
+      [
+        "12",
+        "twelve"
+      ]
+    ]
+  },
+  {
+    "id": "q07",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "How long does someone I invite to Haldrum have before the invitation link expires?",
+    "documents": [
+      "admin-users-and-roles"
+    ],
+    "facts": [
+      [
+        "14 days",
+        "fourteen days",
+        "two weeks",
+        "2 weeks"
+      ]
+    ]
+  },
+  {
+    "id": "q08",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "What is the maximum number of items a single page of an API list response can contain?",
+    "documents": [
+      "api-overview-and-authentication"
+    ],
+    "facts": [
+      [
+        "200"
+      ]
+    ]
+  },
+  {
+    "id": "q09",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "How quickly does our endpoint have to acknowledge a Haldrum webhook delivery before it counts as failed?",
+    "documents": [
+      "api-webhooks"
+    ],
+    "facts": [
+      [
+        "10 seconds",
+        "ten seconds",
+        "10 s"
+      ]
+    ]
+  },
+  {
+    "id": "q10",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "How long does Quillmoor keep its daily full backups?",
+    "documents": [
+      "data-retention-and-deletion",
+      "information-security-policy"
+    ],
+    "facts": [
+      [
+        "35 days",
+        "35"
+      ]
+    ]
+  },
+  {
+    "id": "q11",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "How much advance notice do customers get before a new subprocessor starts handling their data?",
+    "documents": [
+      "data-protection-policy"
+    ],
+    "facts": [
+      [
+        "30 days",
+        "thirty days"
+      ]
+    ]
+  },
+  {
+    "id": "q12",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "On which day and at what time does Haldrum remind people to submit their timesheet?",
+    "documents": [
+      "manual-05-time-tracking",
+      "release-notes-4.2",
+      "onboarding-guide",
+      "summary-release-notes-4.1-to-4.3"
+    ],
+    "facts": [
+      [
+        "Friday"
+      ],
+      [
+        "15:00",
+        "3 pm",
+        "3pm",
+        "3:00 pm",
+        "3 p.m."
+      ]
+    ]
+  },
+  {
+    "id": "q13",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "How many support cases were closed in total in the second quarter of 2026?",
+    "documents": [
+      "summary-support-cases-2026-q2"
+    ],
+    "facts": [
+      [
+        "3,312",
+        "3312",
+        "3 312"
+      ]
+    ]
+  },
+  {
+    "id": "q14",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "When is the code freeze for Haldrum 4.4 planned?",
+    "documents": [
+      "meeting-notes-2026-09-08-release-4.4-planning"
+    ],
+    "facts": [
+      [
+        "27 oct",
+        "27th oct",
+        "27 october",
+        "27th october",
+        "oct 27",
+        "october 27",
+        "2026-10-27",
+        "27.10"
+      ]
+    ]
+  },
+  {
+    "id": "q15",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "According to the 4.4 draft, which new outcome value would the booking.conflict webhook report for projects in warn-only mode?",
+    "documents": [
+      "draft-release-notes-4.4"
+    ],
+    "facts": [
+      [
+        "warned"
+      ]
+    ]
+  },
+  {
+    "id": "q16",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "What are the workshop's opening hours on weekdays?",
+    "documents": [
+      "company-and-services"
+    ],
+    "facts": [
+      [
+        "07:30",
+        "7:30",
+        "7.30"
+      ],
+      [
+        "16:30",
+        "4:30",
+        "4.30"
+      ]
+    ]
+  },
+  {
+    "id": "q17",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "How long does a survey visit at my house usually take?",
+    "documents": [
+      "from-enquiry-to-fitting"
+    ],
+    "facts": [
+      [
+        "45"
+      ],
+      [
+        "90"
+      ]
+    ]
+  },
+  {
+    "id": "q18",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "How many days does it take to fit a new staircase on site?",
+    "documents": [
+      "from-enquiry-to-fitting"
+    ],
+    "facts": [
+      [
+        "two to four days",
+        "2 to 4 days",
+        "2-4 days",
+        "2–4 days",
+        "two to four",
+        "2 to 4"
+      ]
+    ]
+  },
+  {
+    "id": "q19",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "What do you charge per joiner for a full day of extra work that was not on the quote?",
+    "documents": [
+      "quotes-prices-and-payment"
+    ],
+    "facts": [
+      [
+        "380"
+      ]
+    ]
+  },
+  {
+    "id": "q20",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "Up to what amount can I pay you in cash?",
+    "documents": [
+      "quotes-prices-and-payment"
+    ],
+    "facts": [
+      [
+        "500"
+      ]
+    ]
+  },
+  {
+    "id": "q21",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "How long is the guarantee if condensation appears between the panes of a double-glazed unit you supplied?",
+    "documents": [
+      "window-and-door-care-and-guarantee"
+    ],
+    "facts": [
+      [
+        "5 years",
+        "five years",
+        "5-year",
+        "five-year"
+      ]
+    ]
+  },
+  {
+    "id": "q22",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "How often should I re-oil the outside of my oak front door?",
+    "documents": [
+      "window-and-door-care-and-guarantee"
+    ],
+    "facts": [
+      [
+        "once a year",
+        "every year",
+        "annually",
+        "yearly",
+        "once per year",
+        "each year"
+      ]
+    ]
+  },
+  {
+    "id": "q23",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Can we legally withhold payment under our Quillmoor contract after last month's outage, or could Quillmoor sue us for breach if we do?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "q24",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "Can I deduct the cost of my new Pellwick windows from my income tax as an improvement to the flat I rent out?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "q25",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "I have been coughing since I breathed in sawdust while my staircase was being fitted, what medicine should I take?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "q26",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Is Quillmoor's CEO Nora Ellison-Pike married, and does she have children?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "q27",
+    "workspace": "quillmoor",
+    "kind": "unanswerable",
+    "question": "Does Haldrum have a Gantt chart view for planning project milestones?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "q28",
+    "workspace": "quillmoor",
+    "kind": "unanswerable",
+    "question": "Can Haldrum bookings be synced to Google Calendar or Outlook?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "q29",
+    "workspace": "pellwick",
+    "kind": "unanswerable",
+    "question": "Do you make wooden garden gates?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "q30",
+    "workspace": "pellwick",
+    "kind": "unanswerable",
+    "question": "Can you fit a cat flap into a new back door you make for me?",
+    "documents": [],
+    "facts": []
+  }
+]

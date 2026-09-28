@@ -3,6 +3,34 @@
 Why the code is the way it is. One entry per decision: when, what, why.
 Measurements behind them are in the READMEs.
 
+## Region
+
+**2026-09-28 — eu-west-1 (Ireland), not us-east-1.** A company asks where
+its documents go. In Ireland the documents, the vectors, the question and the
+answer stay in the EU. S3 Vectors, Bedrock Knowledge Bases, Titan Text
+Embeddings V2, Guardrails and Nemotron 3 Super are all offered there (the
+Bedrock model list of eu-west-1, 28.09.2026). The stack in us-east-1 is left
+standing; removing it is a decision of its own.
+
+**2026-09-28 — Names that hold for the whole account carry the region.**
+IAM role names and CloudFront policy and origin access control names are
+account-wide. Without the region, the stack in eu-west-1 would have collided
+with the one in us-east-1 at four names: the knowledge base role, the
+response headers policy and both origin access controls.
+
+**2026-09-28 — A model runs in the region or behind an EU profile, never a
+global one.** An EU inference profile routes only to EU regions; a global
+profile may route anywhere. For an EU profile the answer role may invoke the
+profile with the guardrail condition, and the model itself in `eu-*` only
+through that profile (`bedrock:InferenceProfileArn`). Checked in the IAM
+policy simulator on 28.09.2026: the model in us-east-1, a direct call and a
+global profile are all denied.
+
+**2026-09-28 — Prices from the AWS Price List API.** It is the
+machine-readable source of the pricing pages, one row per model, region and
+tier. An EU profile is billed at the regional price, which for Claude is a
+tenth above the global one.
+
 ## Storage and retrieval
 
 **2026-09-17 — S3 Vectors behind a Bedrock knowledge base, not OpenSearch.**
@@ -89,6 +117,18 @@ spent; once it is gone, the key starts over.
 **2026-09-15 — Nemotron 3 Super answers.** The model id lives in the stack,
 never in the handler, so a change of model is a deploy, not a code change.
 
+**2026-09-28 — Nova Pro answers, through its EU profile.** Nemotron 3
+Super gave no response in eu-west-1 on 28.09.2026. Of the four models that
+did, Nova Pro was right as often as Claude Haiku 4.5 and Sonnet 4.6 (29 of
+30), cost less per answered question (0.0028 USD against 0.0034 and 0.0077)
+and was never turned away (scripts/README.md, *evaluate*).
+
+**2026-09-28 — A model and its price live in one table.**
+`infra/answer_models.py` holds each model id with its token prices; the
+stack looks the price up by the id it deploys, and the evaluation reads the
+same table. A model without a row fails at synthesis, so a change of model
+cannot carry the last model's prices.
+
 **2026-09-17 — The layers of an answer come from its citations, not from the
 model.** Asked to flag unconfirmed sources, the model ignored the rule or
 applied it everywhere.
@@ -96,6 +136,37 @@ applied it everywhere.
 **2026-09-17 — The model call is tried once, everything else twice.** A
 converse that timed out may have produced its answer; a second attempt pays
 for the input again.
+
+**2026-09-28 — A model call AWS turns away is made once more, if it can still
+end before CloudFront gives up.** Claude Haiku 4.5 was turned away with
+`ServiceUnavailableException` on 20 of 30 calls one afternoon, each a 502 and
+a spent question. Only the three Converse errors whose AWS description says
+the request was not run are repeated: `ThrottlingException` ("Your request
+was denied due to exceeding the account quotas"),
+`ServiceUnavailableException` ("temporarily unable to handle the request")
+and `ModelNotReadyException` ("not ready to serve inference requests") —
+Converse API reference and the Bedrock user guide's *Troubleshooting API
+error codes*, read 28.09.2026. `InternalServerException` is not ("The
+request processing has failed"): the model may have run, and a second call
+would pay twice, the same reason a timeout is never repeated. The other
+throttling codes the handler knows are no Converse errors, so nothing
+documents them either way. The second call waits 2 seconds and starts only
+up to second 50 of the request: 2 of pause, 43 of call and 20 of excerpt
+guardrail after it end at 115. The 5 seconds to CloudFront's 120 are for
+what the handler's clock does not see — the cold start (Init Duration 0.11
+seconds, measured), the way from CloudFront to the function and the runtime
+around the handler; they cost nothing measurable, since the model call
+starts within 5 seconds of a request. The worst case stays 171. The pause is short because its length made no
+measured difference: twenty calls back to back were turned away none of the
+time, twenty with ten seconds between them twice. It sits in the handler,
+not in botocore's retry setting, which would repeat timeouts too, and the
+first rejection is a log line of its own.
+
+**2026-09-28 — A body Python cannot parse is a 400, whatever the reason.**
+`json.loads` refuses an integer of more than 4,300 digits with `ValueError`
+and nesting past the recursion limit with `RecursionError`. Both used to end
+as a 500 with a traceback in the log, and the body is read before the key is
+checked, so anyone could cause them.
 
 **2026-09-17 — Every AWS call has a connect and a read timeout, and the sum
 of all of them stays under the function's timeout.** A hanging call ends as a
@@ -188,17 +259,47 @@ travels with it.
 statistical; a first name without a surname slipped through in the browser
 acceptance. What a reader must never see must not be in the documents.
 
+## Evaluation
+
+**2026-09-28 — The model comparison runs the handler's own path, not a
+deploy per model.** `scripts/evaluate.py` calls `answer_question` with the
+deployed function's settings and changes only the model id and its token
+prices. That is the same conversation — retrieval, prompt, `converse` with
+the guardrail, excerpt masking, cost line — with each model priced at its
+own rate, while the live default stays as it is. A deploy per model would
+take minutes per model and switch the page each time. The run uses the
+developer's credentials, not the function's role, so it proves the models
+and the guardrail, not the role's IAM.
+
+**2026-09-28 — An answer is right when it contains the expected facts.** Each
+question names its facts with their usual spellings, and the first spelling
+is checked against the document in the tests. A text check is repeatable and
+needs no second model to judge the first. A fact counts only where it stands
+on its own, so "12" is not found in "120" nor "4:30" in "14:30"; checked
+against the saved runs of 28.09.2026, this changed one answer, q14, whose
+right "27 October" had matched only as the start of a word, and the
+question now lists the spelled-out month. A right answer in words the
+question set did not foresee counts as wrong, so the hit rate is a lower
+bound. A question that must be refused or cannot be answered is right when
+Andur declines: the guardrail blocks, or the model says the sources do not
+answer.
+
+**2026-09-28 — A busy service is asked again, anything else is counted as
+wrong.** Bedrock answered some calls with `ServiceUnavailableException`; a run
+that counts those measures the day's capacity, not the model. A timeout is
+not retried: it is what the page would show.
+
 ## Code
 
 **2026-09-23 — Files over 500 lines, and why they stay whole.** Measured
-25.09.2026. `app/handler.py` (1,170 lines) is the Lambda function: one
+28.09.2026. `app/handler.py` (1,217 lines) is the Lambda function: one
 module with one entry point keeps the package, its imports and the test
 fakes simple, and its parts are the steps of one request in order.
-`infra/stacks/andur_stack.py` (1,009) is one CloudFormation stack whose
+`infra/stacks/andur_stack.py` (1,066) is one CloudFormation stack whose
 resources reference each other and deploy together. `scripts/ingest.py`
 (629) is one command with four steps: check, upload, prune, sync. The test
-files over 500 — `tests/test_handler.py` (2,467), `tests/test_stack.py`
-(1,365), `tests/test_ingest.py` (711) — follow the module they test and
+files over 500 — `tests/test_handler.py` (2,590), `tests/test_stack.py`
+(1,440), `tests/test_ingest.py` (711) — follow the module they test and
 share its fakes. A split is a step of its own, not part of a change that
 must not change behaviour.
 

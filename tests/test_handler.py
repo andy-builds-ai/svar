@@ -723,6 +723,17 @@ def test_a_body_that_is_no_json_object_is_a_bad_request(request_event: dict[str,
         handler.read_body(request_event)
 
 
+def test_a_number_past_the_digit_limit_is_a_bad_request_not_a_crash() -> None:
+    """Python refuses to turn more than 4,300 digits into an int (ValueError)."""
+    with pytest.raises(BadRequest, match="not valid JSON"):
+        handler.read_body({"body": '{"question": ' + "1" * 5000 + "}"})
+
+
+def test_a_body_nested_past_the_recursion_limit_is_a_bad_request_not_a_crash() -> None:
+    with pytest.raises(BadRequest, match="not valid JSON"):
+        handler.read_body({"body": "[" * 100_000 + "]" * 100_000})
+
+
 @pytest.mark.parametrize(
     "body",
     [
@@ -1671,6 +1682,118 @@ def test_a_model_timeout_is_an_llm_error() -> None:
     )
     with pytest.raises(LLMError, match="timeout"):
         handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
+
+
+class SequencedBedrockRuntime(FakeBedrockRuntime):
+    """A model that fails with each of ``errors`` in turn, then answers."""
+
+    def __init__(self, errors: list[Exception]) -> None:
+        super().__init__()
+        self.errors = errors
+
+    def converse(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        if self.errors:
+            raise self.errors.pop(0)
+        return self.response
+
+
+@pytest.fixture
+def pauses(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """The pauses the handler takes, instead of taking them."""
+    taken: list[float] = []
+    monkeypatch.setattr(handler, "pause", taken.append)
+    return taken
+
+
+@pytest.mark.parametrize(
+    "code", ["ServiceUnavailableException", "ThrottlingException", "ModelNotReadyException"]
+)
+def test_a_rejected_model_call_is_made_once_more_and_logged(
+    code: str, pauses: list[float], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="andur")
+    bedrock = SequencedBedrockRuntime([client_error(code)])
+    record = handler.RequestRecord()
+    response = handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+    assert response == bedrock.response
+    assert len(bedrock.calls) == 2 and bedrock.calls[0] == bedrock.calls[1]
+    assert pauses == [2]
+    assert record.model_rejections == 1
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "converse-rejected"]
+    assert line["retry"] is True and line["detail"] == f"ClientError: {code}"
+    assert not [line for line in log_lines(caplog) if line["event"] == "converse-failed"]
+
+
+def test_a_second_rejection_is_an_llm_error_and_there_is_no_third_call(
+    pauses: list[float],
+) -> None:
+    errors = [client_error("ServiceUnavailableException") for _ in range(3)]
+    bedrock = SequencedBedrockRuntime(errors)
+    record = handler.RequestRecord()
+    with pytest.raises(LLMError, match="the service is unavailable") as error:
+        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+    assert error.value.status == 502
+    assert len(bedrock.calls) == 2 and pauses == [2]
+    assert record.model_rejections == 2
+
+
+def test_a_timed_out_model_call_is_never_made_again(pauses: list[float]) -> None:
+    """A converse that timed out may already have been answered and paid for."""
+    exceptions = pytest.importorskip("botocore.exceptions")
+    bedrock = SequencedBedrockRuntime(
+        [exceptions.ReadTimeoutError(endpoint_url="https://bedrock-runtime")]
+    )
+    with pytest.raises(LLMError, match="timeout"):
+        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
+    assert len(bedrock.calls) == 1 and pauses == []
+
+
+@pytest.mark.parametrize(
+    "code", ["InternalServerException", "Throttling", "ServiceQuotaExceededException"]
+)
+def test_a_call_that_may_have_run_or_is_no_documented_rejection_is_not_made_again(
+    code: str, pauses: list[float]
+) -> None:
+    """An internal error may come after the model has begun; the others are no Converse
+    errors, so nothing documents that the call did not run."""
+    bedrock = SequencedBedrockRuntime([client_error(code)])
+    record = handler.RequestRecord()
+    with pytest.raises(LLMError):
+        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+    assert len(bedrock.calls) == 1 and pauses == [] and record.model_rejections == 0
+
+
+def test_an_access_error_is_not_made_again(pauses: list[float]) -> None:
+    bedrock = SequencedBedrockRuntime([client_error("AccessDeniedException")])
+    with pytest.raises(LLMError, match="may not be open"):
+        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
+    assert len(bedrock.calls) == 1 and pauses == []
+
+
+@pytest.mark.parametrize(("elapsed", "calls"), [(50, 2), (50.001, 1)])
+def test_the_second_model_call_starts_only_while_cloudfront_still_waits(
+    elapsed: float,
+    calls: int,
+    cold_start: FakeClock,
+    pauses: list[float],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """At second 50 there is still time for the pause, the call and the excerpts."""
+    caplog.set_level(logging.INFO, logger="andur")
+    record = handler.RequestRecord()
+    cold_start.advance(elapsed)
+    bedrock = SequencedBedrockRuntime([client_error("ServiceUnavailableException")])
+    if calls == 2:
+        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+    else:
+        with pytest.raises(LLMError, match="unavailable"):
+            handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+    assert len(bedrock.calls) == calls
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "converse-rejected"]
+    assert line["retry"] is (calls == 2)
+    assert line["elapsed_ms"] == round(elapsed * 1000)
+    assert record.model_rejections == 1
 
 
 def test_extract_answer_returns_the_text() -> None:

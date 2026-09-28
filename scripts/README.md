@@ -1,12 +1,13 @@
 # scripts — operating the knowledge base
 
-Three commands, all run from the repository root:
+Four commands, all run from the repository root:
 
 | Command | Does |
 |---|---|
 | `python -m scripts.ingest` | Checks a local folder, uploads it to the documents bucket, syncs the knowledge base. |
 | `python -m scripts.retrieve` | Asks the knowledge base a question inside one workspace and prints the hits. |
 | `python -m scripts.ask` | Asks the deployed answer function a question and prints the answer with its sources. |
+| `python -m scripts.evaluate` | Asks 30 fixed questions of each answer model the way the function does and prints hit rate, citations and cost. |
 
 ## What they need
 
@@ -17,7 +18,7 @@ Three commands, all run from the repository root:
   run out, both scripts stop with a message that says so; sign in with
   `aws login` and rerun.
 - The deployed stack. Bucket, knowledge base id, data source id, web address
-  and key path are read from the outputs of `AndurStack` in `us-east-1`. The
+  and key path are read from the outputs of `AndurStack` in `eu-west-1`. The
   region is pinned like in `infra/app.py`, so a shell profile pointing
   elsewhere does not matter. Each value can be passed by hand instead:
   `--bucket`, `--knowledge-base-id`, `--data-source-id`, `--url`, and
@@ -158,7 +159,8 @@ with `--url` as well, the script needs no AWS access at all.
 
 Output: the answer, the layers of the sources it cites, one line per source
 — number, `cited` or blank, layer, score, words, workspace and file — and
-then model, tokens in and out, and latency. For example (17.09.2026):
+then model, tokens in and out, and latency. For example (us-east-1, 17.09.2026,
+before the move to eu-west-1):
 
 ```
 Answer (quillmoor):
@@ -187,3 +189,76 @@ in [app/README.md](../app/README.md).
 | 0 | Answered. |
 | 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 402 key budget used up, 403 key of another workspace, 400 bad question, 502 Bedrock failed). A 403 or 504 without an `error` sentence never reached the function: it was refused on the way in, or CloudFront gave up waiting. |
 | 2 | An AWS step or the connection failed: login, stack, missing key parameter, network. |
+
+## evaluate — which model answers best
+
+```bash
+python -m scripts.evaluate                              # all five models
+python -m scripts.evaluate --model "Nova 2 Lite" --out results.json
+```
+
+It asks the 30 questions in `evaluation-questions.json` — 22 that the
+documents answer, 4 that the guardrail must refuse, 4 that no document
+answers — of every model in `MODELS`, through `answer_question` in
+`app/handler.py` with the deployed function's own settings. Only the model
+and its token prices change; see *Evaluation* in
+[docs/decisions.md](../docs/decisions.md). No key and no budget are used.
+Only models that run in the region or behind an EU profile are allowed; the
+script refuses any other.
+
+A question is **right** when the answer contains every expected fact, each
+standing on its own ("12" is not found in "120"), or, for the other eight,
+when Andur declines. **Cites the document** means a
+cited source comes from one of the documents that carry the answer; five
+facts stand in more than one, and the question lists them all. A model call
+that AWS documents as not run (throttled, unavailable, model not ready) is
+made once more by the function itself; a question that still comes back busy is asked again by the script
+after 10, 30 and 60 seconds. **Rejected on the first try** counts the
+questions whose first model call AWS turned away, whether the second call
+saved it or not; **Right on the first try** counts the questions answered
+right without the script asking again — what the page would have shown.
+
+The comparison, run on 28.09.2026 in eu-west-1 before the function made
+its own second call, one question at a time, 19 minutes and 0.38 USD for
+all five:
+
+| Model | Right | Right on the first try | Rejected on the first try | Answered right | Refused right | Declined right | Cites the document | USD per question | Median seconds | Errors |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Nemotron 3 Super | 4/30 | 4/30 | 0/30 | 0/22 | 4/4 | 0/4 | 0/22 | 0.000150 (refusals only) | 41.2 | 26 |
+| Nova Pro | 29/30 | 29/30 | 0/30 | 21/22 | 4/4 | 4/4 | 21/22 | 0.002291 | 2.0 | 0 |
+| Nova 2 Lite | 28/30 | 28/30 | 0/30 | 21/22 | 4/4 | 3/4 | 21/22 | 0.001664 | 2.1 | 0 |
+| Claude Haiku 4.5 | 29/30 | 29/30 | 0/30 | 21/22 | 4/4 | 4/4 | 21/22 | 0.002703 | 2.4 | 0 |
+| Claude Sonnet 4.6 | 29/30 | 29/30 | 0/30 | 21/22 | 4/4 | 4/4 | 21/22 | 0.005929 | 2.7 | 0 |
+
+- **Nemotron 3 Super did not answer in eu-west-1.** Every call that reached
+  the model ran into the function's 40-second limit; outside the handler it
+  gave no response in 300 seconds either, with or without the guardrail,
+  while the same call in us-east-1 answered in 1.2 seconds and Nemotron Nano
+  in eu-west-1 in 1.0. The four refusals are right because the guardrail
+  blocks the question before the model. Six questions of this run failed on
+  a network break at the retrieval and were run again alone; the table holds
+  the second run.
+- **After the switch to Nova Pro**, the same day, with the function's
+  second call in place — 54 seconds and 0.068 USD:
+
+  | Model | Right | Right on the first try | Rejected on the first try | Answered right | Refused right | Declined right | Cites the document | USD per question | Median seconds | Errors |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | Nova Pro | 28/30 | 28/30 | 0/30 | 20/22 | 4/4 | 4/4 | 20/22 | 0.002258 | 1.8 | 0 |
+
+  One point fewer than in the comparison: the relevance check withheld q21
+  (the guarantee for misted double glazing), as it had in an earlier run.
+- **Rejections come and go.** In an earlier run the same day, with the same
+  path and one question at a time, 20 of Haiku's 30 calls were turned away
+  with `ServiceUnavailableException`, none of Nova Pro's, Nova 2 Lite's or
+  Sonnet 4.6's. Twenty single calls to Haiku with ten seconds between them
+  were turned away twice, twenty back to back not once. The rejections do not
+  follow the rate of the calls.
+- **One question no model answers:** q07, how long an invitation link is
+  valid. Retrieval does not return the passage that says 14 days, so every
+  model answers that the sources do not say — correctly, from what it was
+  given.
+- Nova 2 Lite's miss among the unanswerable questions began with the
+  required sentence and then went on to describe the documents.
+- **USD per question** is the mean over all 30, refusals (0.00015 each)
+  included; per answered question see [docs/costs.md](../docs/costs.md).
+

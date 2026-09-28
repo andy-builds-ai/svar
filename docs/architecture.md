@@ -23,7 +23,7 @@ removes it.
 | Retrieval | Bedrock Knowledge Base | Chunking, embedding, search. Managed, so there is no index code to maintain. |
 | Embeddings | Titan Text Embeddings V2 | Turns text into the 1024-dimension vectors the index stores. |
 | Separation | Metadata filter | `workspace` on every chunk. The filter, not a separate deployment, is what keeps companies apart. |
-| Answering | Nemotron 3 Super on Bedrock, behind a Lambda function | Answers from the retrieved passages only and cites them. No idle cost; the function only runs while a question is in flight. |
+| Answering | Nova Pro on Bedrock, through its EU inference profile, behind a Lambda function | Answers from the retrieved passages only and cites them. No idle cost; the function only runs while a question is in flight. |
 | Access | One key per workspace | The key decides the workspace. Keys are generated during the deploy and kept as SecureString parameters, which cost nothing. |
 | Budget | DynamoDB, one item per key | A key is an allowance, not a password: 10 questions and 48 hours from the first one. Billed per request, so an idle month costs nothing. |
 | Guardrail | Bedrock Guardrails, on the model call and on the excerpts | Refuses legal, tax and medical advice and questions about people, masks personal details in the answer and in the excerpts of its sources, withholds an answer the passages do not carry. Billed per text unit read; nothing while idle. |

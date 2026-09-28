@@ -72,6 +72,25 @@ def test_worst_case_is_every_attempt_timing_out() -> None:
     assert aws.worst_case_seconds() == 2 * 22 + 2 * 16 + 32 + 43 + 20 == 171
 
 
+def test_a_second_model_call_ends_before_cloudfront_gives_up() -> None:
+    """It may start until second 50: 2 of pause, 3 + 40 of converse, 2 × (2 + 5) + 6 of
+    excerpts, and the answer is back at 115 — 5 seconds before CloudFront's 120, for the
+    cold start and the way in that the handler's clock does not see. The worst case of
+    every timeout stays 171."""
+    assert aws.ORIGIN_MARGIN_SECONDS == 5
+    assert aws.latest_model_retry_start() == 120 - 5 - 2 - 43 - 20 == 50
+    ends = (
+        aws.latest_model_retry_start()
+        + aws.MODEL_RETRY_PAUSE_SECONDS
+        + aws.call_seconds("bedrock-runtime")
+        + aws.call_seconds("guardrail")
+    )
+    assert ends + aws.ORIGIN_MARGIN_SECONDS <= aws.ORIGIN_TIMEOUT_SECONDS
+    assert ends < aws.ORIGIN_TIMEOUT_SECONDS
+    assert aws.worst_case_seconds() == 171
+    assert aws.CLIENT_LIMITS["bedrock-runtime"].attempts == 1
+
+
 def test_clients_get_their_service_limits_and_are_made_once() -> None:
     pytest.importorskip("boto3")
     for service, limits in aws.CLIENT_LIMITS.items():

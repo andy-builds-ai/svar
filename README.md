@@ -12,25 +12,37 @@ runs on AWS, defined as code, with no part that bills a monthly base fee.
 ![An answer in the browser: the question, the answer with a masked name and its citations, and the first source](docs/screenshot-answer.png)
 
 A walkthrough from workspace to answer — a question about the warranty on
-painted windows, answered with four sources and the cost line:
+painted windows, answered with four sources and the cost line (screenshot
+and walkthrough recorded in us-east-1, before the move to eu-west-1):
 
 ![Walkthrough: choosing the workspace, asking a question, the answer with four sources and its cost](docs/walkthrough.gif)
 
 ## Measured
 
-- **Cost per question:** 0.0011 to 0.0016 USD for an answered question,
-  0.00015 USD for one the guardrail refuses — `cost_usd` of five live
-  questions on 23.09.2026, at that day's prices. Details:
+- **Where the data is:** in `eu-west-1` (Ireland) — documents, vectors,
+  questions and answers. Models run in the region or behind an EU inference
+  profile, never a global one.
+- **How often the answer is right:** 30 fixed questions — 22 the documents
+  answer, 4 the guardrail must refuse, 4 no document answers. Nova Pro, the
+  configured model, got 28 right on 28.09.2026 and cited the expected
+  document in 20 of the 22 it should answer. In the comparison the same day
+  Nova Pro, Claude Haiku 4.5 and Claude Sonnet 4.6 got 29 right, Nova 2 Lite
+  28, and Nemotron 3 Super answered none in eu-west-1. Table and method:
+  [scripts/README.md](scripts/README.md#evaluate--which-model-answers-best).
+- **Cost per question:** 0.0029 USD on average for an answered question
+  with Nova Pro (0.0019 to 0.0046, 20 answers), 0.00015 USD for one the
+  guardrail refuses — `cost_usd` of that run, at that day's prices. Details:
   [docs/costs.md](docs/costs.md).
-- **Tests:** 479, all passing, without AWS — 17.9 seconds in CI on
-  23.09.2026, 24 to 37 seconds on a local laptop.
-- **Answer time:** 1.8 to 3.8 seconds inside the function for the four
-  answered questions, 0.7 seconds for the refused one (`latency_ms` in the
-  log).
+- **Answer time:** 0.7 to 4.4 seconds inside the function for four questions
+  on the page with Nova Pro, the first after a deploy included
+  (`latency_ms`); a median of 1.8 seconds from retrieval to cost line for
+  the 22 answerable questions, measured from a laptop in Germany.
+- **Tests:** 540, all passing, without AWS — 29 seconds on a local laptop on
+  28.09.2026.
 - **Documents:** 37 Markdown documents of two fictional companies, uploaded
   as 147 sections so that a hit is a passage, not a page.
 - **Key budget:** a key allows 10 questions within 48 hours of its first —
-  at the measured cost, at most about 0.016 USD per key.
+  at the measured cost, about 0.03 USD per key with Nova Pro.
 
 ## Decisions
 
@@ -38,8 +50,10 @@ Everything with a monthly base fee is left out: S3 Vectors behind a Bedrock
 knowledge base instead of a search cluster. A key is a budget, not a
 password, counted in one conditional DynamoDB write. Two guardrails, one on
 the answer and one that masks the excerpts of its sources. Every AWS call has
-a timeout, and their sum stays under the function's own. Why each of these,
-and 36 more, with dates: [docs/decisions.md](docs/decisions.md).
+a timeout, and their sum stays under the function's own; a model call AWS
+turns away is made once more while CloudFront still waits. Everything runs
+in Ireland, so the data stays in the EU. Why each of these, and 45 more,
+with dates: [docs/decisions.md](docs/decisions.md).
 
 ## Limits
 
@@ -62,14 +76,15 @@ the measurements are the author's.
 ## Try it
 
 Needs Python 3.11+, Node.js, the AWS CDK (`npm install -g aws-cdk`) and AWS
-credentials. Everything goes to `us-east-1`.
+credentials. Everything goes to `eu-west-1` (Ireland), so documents, vectors
+and answers stay in the EU.
 
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                  # 479 tests, no AWS needed
+pytest -q                                  # 540 tests, no AWS needed
 
-cdk bootstrap aws://<account>/us-east-1    # once per account and region
+cdk bootstrap aws://<account>/eu-west-1    # once per account and region
 cdk deploy                                 # builds everything
 python -m scripts.ingest                   # uploads the demo corpus and syncs
 python -m scripts.ask "How do I export project data?" --workspace quillmoor
