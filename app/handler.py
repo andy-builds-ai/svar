@@ -38,6 +38,9 @@ KEY_HEADER = "X-Andur-Key"
 #: Answers are a few sentences; this only stops a runaway answer.
 MAX_ANSWER_TOKENS = 1024
 
+#: The least random setting; AWS does not promise identical answers for it.
+ANSWER_TEMPERATURE = 0
+
 #: How much of each passage the response carries as its excerpt.
 EXCERPT_CHARACTERS = 300
 
@@ -834,7 +837,7 @@ def converse(
         modelId=settings.model_id,
         system=[{"text": SYSTEM_PROMPT}],
         messages=[{"role": "user", "content": content}],
-        inferenceConfig={"maxTokens": MAX_ANSWER_TOKENS},
+        inferenceConfig={"maxTokens": MAX_ANSWER_TOKENS, "temperature": ANSWER_TEMPERATURE},
         guardrailConfig={
             "guardrailIdentifier": settings.guardrail_id,
             "guardrailVersion": settings.guardrail_version,

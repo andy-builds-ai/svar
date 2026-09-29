@@ -157,6 +157,28 @@ stack looks the price up by the id it deploys, and the evaluation reads the
 same table. A model without a row fails at synthesis, so a change of model
 cannot carry the last model's prices.
 
+**2026-09-29 — Temperature 0, and what it did not fix.** The function set
+only `maxTokens`, so Nova Pro sampled at its default (0.7). It now sends
+`temperature` 0 (`ANSWER_TEMPERATURE` in `app/handler.py`). The Nova user
+guide gives the range for `temperature` as 0.00001 to 1 on its request-schema
+page and uses `temperature: 0` on its structured-output page; a call to Nova
+Pro through the EU profile accepted both 0 and 0.00001 (29.09.2026). AWS does
+not promise identical output: its pages say only that a lower temperature
+"leads to more deterministic responses" and that "model output is not
+deterministic". Measured: two runs of the 30 questions, Nova Pro at ten
+passages, 28 of 30 right in both, 27 of 30 questions with the same outcome
+(right or wrong, cited sources, withheld) and 26 of 30 with the same answer
+text. The sums hid it: q03 was right and then withheld by the relevance
+check, q16 the other way round. Retrieval did not move (same files, same
+scores, same input tokens). In q08 and q11 the guardrail did not intervene
+and the model's own output differed (12 against 9 and 9 against 11 output
+tokens; "200 [1][2]" against "200 [1]", "30 days" against "At least 30
+days"), so temperature 0 does not make Nova Pro repeat itself. Not proven for
+q03 and q16: the blocked text is not kept, so it is open whether the model
+wrote a different answer or the guardrail's check judged the same one
+differently. Not tried: `topK` (Nova takes it in `additionalModelRequestFields`).
+Two runs cannot say how often the answers differ.
+
 **2026-09-17 — The layers of an answer come from its citations, not from the
 model.** Asked to flag unconfirmed sources, the model ignored the rule or
 applied it everywhere.

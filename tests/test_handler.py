@@ -26,6 +26,7 @@ from typing import Any
 import handler  # app/handler.py
 import pytest
 from handler import (
+    ANSWER_TEMPERATURE,
     BUDGET_SPENT_MESSAGE,
     KEY_HEADER,
     MAX_ANSWER_TOKENS,
@@ -1660,7 +1661,11 @@ def test_model_gets_system_rules_message_token_limit_and_guardrail() -> None:
     assert arguments["modelId"] == ENVIRONMENT["MODEL_ID"]
     assert arguments["system"] == [{"text": handler.SYSTEM_PROMPT}]
     assert arguments["messages"] == [{"role": "user", "content": content}]
-    assert arguments["inferenceConfig"] == {"maxTokens": MAX_ANSWER_TOKENS}
+    assert arguments["inferenceConfig"] == {
+        "maxTokens": MAX_ANSWER_TOKENS,
+        "temperature": ANSWER_TEMPERATURE,
+    }
+    assert ANSWER_TEMPERATURE == 0
     assert arguments["guardrailConfig"] == {
         "guardrailIdentifier": "gr-test",
         "guardrailVersion": "1",
