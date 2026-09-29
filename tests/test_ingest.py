@@ -524,6 +524,22 @@ def test_one_workspace_prunes_only_inside_that_workspace(tmp_path: Path) -> None
     ]
 
 
+def test_a_folder_with_one_workspace_never_prunes_the_others(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A customer's own folder with --delete and no --workspace: only that customer is pruned."""
+    s3, _ = uploaded_bucket(tmp_path / "demo")
+    customer = tmp_path / "customer"
+    add_document(customer, "third", "human", name="c.md")
+    s3.objects["workspaces/third/human/gone--01-gone.md"] = b"old"
+    assert run_main_against(s3, ["--source", str(customer), "--delete"], monkeypatch) == 0
+    assert "Deleted 1 object(s) that are no longer in the folder:" in capsys.readouterr().out
+    assert "workspaces/third/human/gone--01-gone.md" not in s3.objects
+    assert "workspaces/pellwick/inbox/old.md" in s3.objects
+    assert "workspaces/quillmoor/human/gone--01-gone.md" in s3.objects
+    assert "workspaces/quillmoor/human/a--01-a-md.md" in s3.objects
+
+
 def test_delete_goes_in_batches_of_at_most_a_thousand() -> None:
     s3 = FakeS3()
     keys = [f"workspaces/quillmoor/human/{n:04d}.md" for n in range(2001)]
@@ -584,7 +600,29 @@ def test_main_says_so_when_nothing_is_stale(
 ) -> None:
     add_document(tmp_path, "quillmoor", "human", name="a.md")
     assert run_main_against(FakeS3(), ["--source", str(tmp_path), "--delete"], monkeypatch) == 0
-    assert "No object in the bucket is missing from the folder." in capsys.readouterr().out
+    assert (
+        "No object in the bucket is missing from the folder (compared: quillmoor)."
+        in capsys.readouterr().out
+    )
+
+
+def test_a_workspace_folder_without_documents_is_not_compared_and_the_all_clear_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A workspace emptied locally keeps its objects, and the all-clear does not claim it."""
+    s3, _ = uploaded_bucket(tmp_path / "demo")
+    folder = tmp_path / "emptied"
+    add_document(folder, "quillmoor", "human", name="a.md")
+    (folder / "pellwick" / "human").mkdir(parents=True)
+    del s3.objects["workspaces/quillmoor/human/gone--01-gone.md"]
+    del s3.objects["workspaces/quillmoor/human/gone--01-gone.md.metadata.json"]
+    assert run_main_against(s3, ["--source", str(folder), "--delete"], monkeypatch) == 0
+    assert (
+        "No object in the bucket is missing from the folder (compared: quillmoor)."
+        in capsys.readouterr().out
+    )
+    assert s3.deletes == []
+    assert "workspaces/pellwick/inbox/old.md" in s3.objects
 
 
 def test_upload_replaces_a_changed_document_under_the_same_key(tmp_path: Path) -> None:

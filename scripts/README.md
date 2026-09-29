@@ -34,7 +34,7 @@ python -m scripts.ingest --check                # check only, no AWS at all
 python -m scripts.ingest --source path/to/folder
 ```
 
-It runs three steps and stops at the first that fails.
+It runs four steps and stops at the first that fails.
 
 1. **Check.** The folder must be laid out as
    `<workspace>/<layer>/<document>` with a sidecar
@@ -53,12 +53,15 @@ It runs three steps and stops at the first that fails.
    rerun writes nothing new: no duplicates and no extra object versions in
    the versioned bucket. A changed section replaces the old one under the
    same key.
-3. **Sync.** Starts an ingestion job and waits until it is `COMPLETE`,
+3. **Prune.** Lists the objects in the bucket that the folder no longer
+   produces, and deletes them only with `--delete` (below).
+4. **Sync.** Starts an ingestion job and waits until it is `COMPLETE`,
    `FAILED` or `STOPPED` (polling every 5 seconds, giving up after 30
    minutes — the job itself keeps running in AWS).
 
 Output, in order: documents and sections per workspace and layer (also with
-`--check`), files uploaded and skipped, then the job's statistics —
+`--check`), files uploaded and skipped, the objects no longer in the folder
+(or an all-clear naming the workspaces compared), then the job's statistics —
 documents scanned, metadata files scanned, new and modified documents
 indexed, documents deleted, documents failed, and any failure reasons. The
 job counts section files as documents.
@@ -96,15 +99,22 @@ document's sidecar. The files in `knowledge/` stay whole.
 | 2 | An AWS step failed: login, stack, permissions, network. |
 | 3 | The ingestion job failed, stopped, or could not index every document. |
 
-Two things it deliberately does not do:
+**Deleting is opt-in.** A file removed locally stays in the bucket and in
+the index. The same happens to sections: renaming, adding or removing a
+`## ` heading can change section names, and the sections under the old names
+stay. After the upload the script lists every such object; with `--delete`
+it removes them, and the sync then drops their vectors. It compares only the
+workspaces with at least one document in the folder (or the one
+`--workspace` names), and the all-clear lists them: a folder with one
+customer in it never lists or deletes another customer's documents. A
+workspace whose documents were all removed locally is not compared, even if
+its folder is still there; remove it from the bucket by hand. Within a
+compared workspace, every layer counts: a folder holding only `human/` for a
+workspace takes that workspace's `agent/` and `inbox/` objects for stale. A
+deleted object stays recoverable for 30 days as a noncurrent version.
 
-- **Delete.** A file removed locally stays in the bucket and in the index.
-  The same happens to sections: renaming, adding or removing a `## `
-  heading can change section names, and the sections under the old names
-  stay. Remove them from the bucket by hand (`aws s3 rm` on the document's
-  `<document>--` files), then rerun; the sync drops their vectors.
-- **Sync one workspace only.** `--workspace` limits the upload. The ingestion
-  job always covers the whole data source.
+It does not **sync one workspace only.** `--workspace` limits the upload. The
+ingestion job always covers the whole data source.
 
 ## retrieve — the proof that workspaces stay apart
 

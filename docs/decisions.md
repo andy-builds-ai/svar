@@ -97,6 +97,15 @@ would keep it in the index. Listing first shows what would go; with
 takes the others for stale. A deleted object stays recoverable for 30 days
 as a noncurrent version.
 
+**2026-09-30 — Pruning compares only the workspaces the folder holds.** Until
+then, a folder without `--workspace` was compared with every workspace in the
+bucket. A dry run with one customer's own folder listed all 294 objects of
+the two demo workspaces as stale; with `--delete` it would have removed them.
+A workspace without a document in the folder is now never compared, so the
+one case it cannot prune — a workspace emptied locally — is left to a
+deliberate `aws s3 rm`. The all-clear names the workspaces it compared,
+because the bucket may hold others that were not looked at.
+
 ## Workspaces and keys
 
 **2026-09-17 — One installation, workspaces separated by a metadata filter,

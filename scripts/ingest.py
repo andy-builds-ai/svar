@@ -429,13 +429,35 @@ def remote_keys(s3: Any, bucket: str, prefix: str) -> list[str]:
     return sorted(keys)
 
 
+def compared_workspaces(
+    documents: Iterable[Document], only_workspace: str | None = None
+) -> list[str]:
+    """The workspaces a prune compares: the one ``--workspace`` names, or else every workspace
+    with at least one document in the folder. A workspace folder with no document left in it
+    is not compared."""
+    if only_workspace:
+        return [only_workspace]
+    return sorted({document.workspace for document in documents})
+
+
 def stale_keys(
     s3: Any, bucket: str, documents: Iterable[Document], only_workspace: str | None = None
 ) -> list[str]:
-    """Objects under the documents prefix that no local document produces any more."""
-    prefix = BUCKET_PREFIX + (f"{only_workspace}/" if only_workspace else "")
+    """Objects that no local document produces any more, inside `compared_workspaces`.
+
+    A workspace that is not compared is never touched, so a folder with one customer in it
+    cannot take every other customer's documents for stale — nor delete them with
+    ``--delete``.
+    """
+    documents = list(documents)
+    workspaces = compared_workspaces(documents, only_workspace)
     expected = {item.key for document in documents for item in upload_items(document)}
-    return [key for key in remote_keys(s3, bucket, prefix) if key not in expected]
+    return sorted(
+        key
+        for workspace in workspaces
+        for key in remote_keys(s3, bucket, f"{BUCKET_PREFIX}{workspace}/")
+        if key not in expected
+    )
 
 
 def delete_keys(s3: Any, bucket: str, keys: list[str]) -> None:
@@ -455,10 +477,17 @@ def delete_keys(s3: Any, bucket: str, keys: list[str]) -> None:
             )
 
 
-def format_stale(keys: list[str], deleted: bool) -> list[str]:
-    """The objects that are no longer in the folder, and what happened to them."""
+def format_stale(keys: list[str], deleted: bool, workspaces: list[str]) -> list[str]:
+    """The objects that are no longer in the folder, and what happened to them.
+
+    The all-clear names the workspaces it compared: the bucket may hold others that were not
+    looked at.
+    """
     if not keys:
-        return ["No object in the bucket is missing from the folder."]
+        return [
+            "No object in the bucket is missing from the folder "
+            f"(compared: {', '.join(workspaces)})."
+        ]
     if deleted:
         head = f"Deleted {len(keys)} object(s) that are no longer in the folder:"
     else:
@@ -609,7 +638,8 @@ def main(argv: list[str] | None = None) -> int:
         stale = stale_keys(s3, bucket, documents, args.workspace)
         if args.delete and stale:
             delete_keys(s3, bucket, stale)
-        for line in format_stale(stale, deleted=args.delete):
+        workspaces = compared_workspaces(documents, args.workspace)
+        for line in format_stale(stale, deleted=args.delete, workspaces=workspaces):
             print(line)
         job = run_ingestion_job(
             client("bedrock-agent", args.region),
