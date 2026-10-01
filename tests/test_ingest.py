@@ -4,6 +4,7 @@ Nothing here calls AWS or needs boto3. The upload and the job wait are
 exercised with small fake clients that record what they were asked.
 """
 
+import codecs
 import hashlib
 import json
 from collections import Counter
@@ -22,6 +23,7 @@ from scripts.ingest import (
     count_documents,
     count_sections,
     delete_keys,
+    detect_encoding,
     discover,
     format_counts,
     job_succeeded,
@@ -486,6 +488,265 @@ def test_non_markdown_files_are_uploaded_whole(tmp_path: Path) -> None:
         "workspaces/pellwick/human/prices.txt",
         "workspaces/pellwick/human/prices.txt.metadata.json",
     ]
+
+
+# --- Text encodings ------------------------------------------------------
+
+GERMAN = "# Preise\n\nÄnderungen an Türen kosten 68 € je Stunde, Größe egal.\n"
+
+
+def add_stored(root: Path, name: str, data: bytes) -> Path:
+    """A document in ``quillmoor/human`` whose file holds exactly ``data``."""
+    path = add_document(root, "quillmoor", "human", name=name)
+    path.write_bytes(data)
+    return path
+
+
+def uploaded_body(root: Path) -> bytes:
+    """The body of the one document file the folder produces."""
+    documents, problems = discover(root)
+    assert problems == []
+    [item] = [item for item in upload_items(documents[0]) if not item.key.endswith(".json")]
+    return item.body
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        (GERMAN.encode("utf-8"), "utf-8"),
+        (codecs.BOM_UTF8 + GERMAN.encode("utf-8"), "utf-8-sig"),
+        (GERMAN.encode("utf-16"), "utf-16"),
+        (codecs.BOM_UTF16_BE + GERMAN.encode("utf-16-be"), "utf-16"),
+        (GERMAN.encode("cp1252"), "cp1252"),
+        (b"", "utf-8"),
+    ],
+    ids=["utf-8", "utf-8-bom", "utf-16-le-bom", "utf-16-be-bom", "windows-1252", "empty"],
+)
+def test_detect_encoding_recognises_each_supported_encoding(data: bytes, expected: str) -> None:
+    assert detect_encoding(data) == expected
+    assert data.decode(expected) == (GERMAN if data else "")
+
+
+@pytest.mark.parametrize("byte", [0x81, 0x8D, 0x8F, 0x90, 0x9D])
+def test_a_byte_undefined_in_windows_1252_is_named_with_its_line(byte: int) -> None:
+    data = "Preis: 68 €\n".encode("cp1252") + b"Stra" + bytes([byte]) + b"e\n"
+    with pytest.raises(ValueError, match=f"byte 0x{byte:02x} in line 2 is undefined"):
+        detect_encoding(data)
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        (
+            "Größe: 12 €\n".encode() + b"Stra\xe4e\n",
+            "mixed: holds UTF-8 characters, but byte 0xe4 in line 2 is not UTF-8",
+        ),
+        (
+            "Türen\nfür 68 ".encode() + "€".encode()[:2],
+            "mixed: holds UTF-8 characters, but byte 0xe2 in line 2 is not UTF-8",
+        ),
+    ],
+    ids=["stray-byte", "cut-off-character"],
+)
+def test_utf_8_mixed_with_other_bytes_is_refused_not_read_as_windows_1252(
+    data: bytes, expected: str
+) -> None:
+    with pytest.raises(ValueError, match=expected):
+        detect_encoding(data)
+
+
+def test_windows_1252_with_umlauts_and_euro_is_still_converted(tmp_path: Path) -> None:
+    text = "Öffnungszeiten für Türen: Mo–Fr, „Notdienst“ 89 €, Größe egal, Gebühr ½.\n"
+    add_stored(tmp_path, "hours.txt", text.encode("cp1252"))
+    assert uploaded_body(tmp_path) == text.encode("utf-8")
+
+
+def test_a_file_that_cannot_be_opened_is_a_problem_not_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    locked = add_stored(tmp_path, "locked.txt", b"text")
+    read_bytes = Path.read_bytes
+
+    def refuse(path: Path) -> bytes:
+        if path == locked:
+            raise PermissionError(13, "Permission denied", str(path))
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", refuse)
+    documents, problems = discover(tmp_path)
+    assert documents == []
+    assert len(problems) == 1
+    assert problems[0].startswith(f"{locked}: ")
+    assert "Permission denied" in problems[0]
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ("Größe\n".encode("utf-16-le"), "zero character in line 1"),
+        (b"text\n\0binary", "zero character in line 2"),
+        (codecs.BOM_UTF16_LE + b"a\0b", "UTF-16 byte order mark, but is not valid UTF-16"),
+        (
+            codecs.BOM_UTF8 + b"ok\n\xe4",
+            "UTF-8 byte order mark, but is not valid UTF-8 from line 2",
+        ),
+    ],
+    ids=["utf-16-without-bom", "zero-byte", "broken-utf-16", "broken-utf-8-after-bom"],
+)
+def test_detect_encoding_refuses_what_it_cannot_tell_for_sure(data: bytes, expected: str) -> None:
+    with pytest.raises(ValueError, match=expected):
+        detect_encoding(data)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        codecs.BOM_UTF8 + GERMAN.encode("utf-8"),
+        GERMAN.encode("utf-16"),
+        GERMAN.encode("cp1252"),
+    ],
+    ids=["utf-8-bom", "utf-16", "windows-1252"],
+)
+@pytest.mark.parametrize("name", ["prices.md", "prices.txt", "prices.csv"])
+def test_text_files_go_up_as_utf_8_without_byte_order_mark(
+    tmp_path: Path, data: bytes, name: str
+) -> None:
+    add_stored(tmp_path, name, data)
+    assert uploaded_body(tmp_path) == GERMAN.encode("utf-8")
+
+
+def test_a_markdown_title_behind_a_byte_order_mark_still_names_the_section(
+    tmp_path: Path,
+) -> None:
+    add_stored(tmp_path, "faq.md", codecs.BOM_UTF8 + b"# FAQ\n\n## Billing\n\n" + b"word " * 90)
+    documents, _ = discover(tmp_path)
+    [key, _] = [item.key for item in upload_items(documents[0])]
+    assert key.endswith("faq--01-billing.md")
+    assert uploaded_body(tmp_path).startswith(b"# FAQ\n\n## Billing")
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        '<meta charset="windows-1252">',
+        "<META CHARSET=windows-1252>",
+        '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">',
+    ],
+)
+def test_converted_html_declares_the_charset_it_now_has(tmp_path: Path, head: str) -> None:
+    page = f"<html><head>{head}</head><body><p>Türen für 68 €</p></body></html>\n"
+    add_stored(tmp_path, "page.html", page.encode("cp1252"))
+    body = uploaded_body(tmp_path).decode("utf-8")
+    assert "Türen für 68 €" in body
+    assert "utf-8" in body
+    assert "1252" not in body and "8859" not in body
+
+
+def test_utf_8_html_keeps_its_bytes_whatever_it_declares(tmp_path: Path) -> None:
+    data = b'<meta charset="windows-1252"><p>plain ascii</p>\n'
+    add_stored(tmp_path, "page.html", data)
+    assert uploaded_body(tmp_path) == data
+
+
+def test_an_empty_file_is_utf_8_and_goes_up_as_it_does_today(tmp_path: Path) -> None:
+    add_stored(tmp_path, "empty.txt", b"")
+    add_stored(tmp_path, "empty.md", b"")
+    documents, problems = discover(tmp_path)
+    assert problems == []
+    assert [document.encoding for document in documents] == ["utf-8", "utf-8"]
+    bodies = {
+        item.key.rsplit("/", 1)[-1]: item.body
+        for document in documents
+        for item in upload_items(document)
+        if not item.key.endswith(".json")
+    }
+    assert bodies == {"empty.txt": b""}
+
+
+def test_a_file_that_cannot_be_read_as_text_is_a_problem_not_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    add_document(tmp_path, "quillmoor", "human", name="good.md")
+    add_stored(tmp_path, "old.txt", b"Gr\x81e\n")
+    assert main(["--source", str(tmp_path), "--check"]) == 1
+    error = capsys.readouterr().err
+    assert "old.txt: neither UTF-8 nor Windows-1252: byte 0x81 in line 1" in error
+    assert "Nothing was uploaded." in error
+    assert "Traceback" not in error
+
+
+def test_an_unreadable_file_and_its_missing_sidecar_are_both_reported(tmp_path: Path) -> None:
+    folder = tmp_path / "quillmoor" / "human"
+    folder.mkdir(parents=True)
+    (folder / "old.txt").write_bytes(b"\x81")
+    _, problems = discover(tmp_path)
+    assert len(problems) == 2
+    assert "undefined in Windows-1252" in problems[0]
+    assert "sidecar old.txt.metadata.json is missing" in problems[1]
+
+
+def test_check_names_every_converted_file_with_its_encoding(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    add_document(tmp_path, "quillmoor", "human", name="clean.md")
+    add_stored(tmp_path, "prices.md", GERMAN.encode("cp1252"))
+    add_stored(tmp_path, "hours.txt", GERMAN.encode("utf-16"))
+    add_stored(tmp_path, "page.html", b'<meta charset="windows-1252"><p>T\xfcr</p>')
+    assert main(["--source", str(tmp_path), "--check"]) == 0
+    out = capsys.readouterr().out
+    folder = tmp_path / "quillmoor" / "human"
+    assert "3 file(s) not stored as UTF-8 go up converted to UTF-8:" in out
+    assert f"  {folder / 'hours.txt'}: UTF-16\n" in out
+    assert f"  {folder / 'page.html'}: Windows-1252, its <meta> charset set to utf-8\n" in out
+    assert f"  {folder / 'prices.md'}: Windows-1252\n" in out
+    assert "clean.md" not in out
+
+
+def test_check_names_no_file_when_everything_is_utf_8(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    add_document(tmp_path, "quillmoor", "human", text=GERMAN)
+    assert main(["--source", str(tmp_path), "--check"]) == 0
+    assert "converted" not in capsys.readouterr().out
+
+
+def items_as_before(document: Document) -> list[tuple[str, bytes, str]]:
+    """What `upload_items` produced before encodings were recognised, sidecars left out."""
+    suffix = document.path.suffix.lower()
+    if suffix != ".md":
+        key = object_key(document.workspace, document.layer, document.path.name)
+        return [(key, document.path.read_bytes(), ingest.CONTENT_TYPES[suffix])]
+    sections = split_markdown(document.path.read_text(encoding="utf-8"))
+    return [
+        (
+            object_key(
+                document.workspace, document.layer, section_filename(document.path.stem, n, slug)
+            ),
+            text.encode("utf-8"),
+            ingest.CONTENT_TYPES[".md"],
+        )
+        for n, (slug, text) in enumerate(sections, start=1)
+    ]
+
+
+def test_a_clean_folder_goes_up_byte_for_byte_as_before(tmp_path: Path) -> None:
+    """The demo corpus, and UTF-8 files with Windows line ends and umlauts in every text type."""
+    for name in ("crlf.md", "crlf.txt", "crlf.csv", "crlf.html"):
+        add_stored(tmp_path, name, sectioned_text(3).replace("\n", "\r\n").encode("utf-8"))
+    add_stored(tmp_path, "umlaut.md", GERMAN.encode("utf-8"))
+    add_stored(tmp_path, "scan.pdf", b"%PDF-1.4 \x81\x00\xff")
+
+    for root in (REPOSITORY / "knowledge", tmp_path):
+        documents, problems = discover(root)
+        assert problems == []
+        assert all(document.encoding == "utf-8" for document in documents)
+        for document in documents:
+            now = [
+                (item.key, item.body, item.content_type)
+                for item in upload_items(document)
+                if not item.key.endswith(".metadata.json")
+            ]
+            assert now == items_as_before(document), document.path
 
 
 # --- Prune -------------------------------------------------------------

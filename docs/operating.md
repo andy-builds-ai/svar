@@ -150,7 +150,9 @@ lists the key, the budget items and every document under
 ingestion job, which removes their vectors. Nothing outside that one name is
 touched: the documents prefix ends in a slash, so `kalv` never reaches
 `kalvenstett`. The documents of a new workspace go in with
-`python -m scripts.ingest --source <folder> --workspace <name>`. Details,
+`python -m scripts.ingest --source <folder> --workspace <name>`; text files
+stored in Windows-1252 or UTF-16 go up converted to UTF-8, and `--check`
+names each one ([Encodings](../scripts/README.md#encodings)). Details,
 output and exit codes: [scripts/README.md](../scripts/README.md#workspace--adding-and-removing-a-workspace).
 
 ## Asking it

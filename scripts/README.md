@@ -44,7 +44,9 @@ It runs four steps and stops at the first that fails.
    `agent`, `inbox`. Each sidecar must carry exactly the four keys from
    [docs/metadata.md](../docs/metadata.md), as STRING values with
    `includeForEmbedding: false`, and its `workspace` and `layer` must match
-   the folders. File types the knowledge base cannot read are rejected. All
+   the folders. File types the knowledge base cannot read are rejected. Text
+   files (`.md`, `.txt`, `.html`, `.csv`) are read to recognise their
+   encoding (below); a file it cannot tell for sure is a problem. All
    problems are listed at once, and **nothing is uploaded** while there is
    one.
 2. **Upload.** Markdown documents go up split into sections (below); other
@@ -72,6 +74,62 @@ job counts section files as documents.
   pellwick: 4 documents -> 17 sections (human 4 -> 17, agent 0 -> 0, inbox 0 -> 0)
   quillmoor: 33 documents -> 130 sections (human 25 -> 102, agent 5 -> 23, inbox 3 -> 5)
 ```
+
+### Encodings
+
+Every text file goes up as UTF-8, whatever it was stored in, because the
+upload declares `charset=utf-8`. Files from older Windows programs are often
+stored in Windows-1252, which UTF-8 would read with broken umlauts. Step 1
+recognises each text file's encoding in this order:
+
+1. **UTF-8**, with or without a byte order mark. The mark is dropped.
+2. **UTF-16** with a byte order mark.
+3. **Windows-1252**, if the file has none of the five bytes Windows-1252
+   leaves undefined (`0x81`, `0x8d`, `0x8f`, `0x90`, `0x9d`).
+
+A file that fits none of them is a problem naming the byte and its line:
+
+```
+problem: knowledge/kalvenstett/human/old.txt: neither UTF-8 nor Windows-1252: byte 0x81 in line 3 is undefined in Windows-1252
+```
+
+So is a file that holds UTF-8 characters and still is not UTF-8, say a UTF-8
+file with one stray byte from another program, or with its last character
+cut off. Read as Windows-1252, every `ä` in it would turn into `Ã¤`, so it is
+refused, naming the first byte that is not UTF-8:
+
+```
+problem: knowledge/kalvenstett/human/notes.md: mixed: holds UTF-8 characters, but byte 0xe4 in line 2 is not UTF-8
+```
+
+So is a file with a zero character in it: it is no text, or it is UTF-16
+without a byte order mark, which cannot be told for sure. Re-save such a file
+as UTF-8 and rerun. A file that cannot be opened at all, for lack of
+permission or as a broken link, is a problem too.
+
+A file that was not plain UTF-8 is named with its encoding, also with
+`--check`, so no conversion goes unnoticed:
+
+```
+2 file(s) not stored as UTF-8 go up converted to UTF-8:
+  knowledge/kalvenstett/human/prices.md: Windows-1252
+  knowledge/kalvenstett/human/services.html: Windows-1252, its <meta> charset set to utf-8
+```
+
+In a converted HTML file a `<meta>` charset declaration is set to `utf-8`, so
+the file does not contradict its bytes. An HTML file in UTF-8 without a byte
+order mark goes up unchanged whatever it declares: the bytes decide the
+encoding, not the tag. A `.txt`, `.html` or `.csv` file in UTF-8 without a
+byte order mark goes up byte for byte as it is stored; Markdown is split into
+sections in any case. Binary formats (`.pdf`, `.doc`, `.docx`, `.xls`,
+`.xlsx`) always go up as they are. The files in the folder are never changed.
+
+Windows-1252 is the last guess, not a proof. A file in another single-byte
+encoding, such as Mac Roman, passes as Windows-1252 with wrong special
+characters; the line naming its encoding is where to notice. A Windows-1252
+file that happens to hold a valid UTF-8 sequence, such as `Ã¤` written on
+purpose, is refused as mixed; in real Windows-1252 text that practically
+never occurs.
 
 ### Sections
 

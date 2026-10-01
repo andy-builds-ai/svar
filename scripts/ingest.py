@@ -1,6 +1,7 @@
 """Fill the knowledge base from a local folder."""
 
 import argparse
+import codecs
 import hashlib
 import json
 import re
@@ -49,6 +50,17 @@ CONTENT_TYPES = {
 }
 SIDECAR_CONTENT_TYPE = "application/json"
 
+#: File types read as text and uploaded as UTF-8, whatever they were stored in.
+TEXT_SUFFIXES = {".md", ".txt", ".html", ".csv"}
+
+#: The encodings a text file is recognised in, by codec, with the name the output uses.
+ENCODING_NAMES = {
+    "utf-8": "UTF-8",
+    "utf-8-sig": "UTF-8 with byte order mark",
+    "utf-16": "UTF-16",
+    "cp1252": "Windows-1252",
+}
+
 #: Top-level files in the source folder that describe it and are not uploaded.
 IGNORED_TOP_LEVEL_FILES = {"README.md"}
 
@@ -65,6 +77,8 @@ class Document:
     path: Path
     workspace: str
     layer: str
+    #: The codec a text document is stored in, from `detect_encoding`; unused for binary ones.
+    encoding: str = "utf-8"
 
     @property
     def sidecar(self) -> Path:
@@ -167,6 +181,83 @@ def section_filename(stem: str, number: int, slug: str) -> str:
     return f"{stem}{SECTION_SEPARATOR}{number:02d}-{slug}.md"
 
 
+#: A charset declared in an HTML meta tag, in either of its two spellings.
+_HTML_CHARSET = re.compile(r"(<meta\b[^>]*?charset\s*=\s*[\"']?)([\w.:-]+)", re.IGNORECASE)
+
+
+#: One well-formed UTF-8 character of two to four bytes.
+_UTF8_MULTIBYTE = re.compile(
+    rb"[\xc2-\xdf][\x80-\xbf]"
+    rb"|\xe0[\xa0-\xbf][\x80-\xbf]|[\xe1-\xec\xee\xef][\x80-\xbf]{2}|\xed[\x80-\x9f][\x80-\xbf]"
+    rb"|\xf0[\x90-\xbf][\x80-\xbf]{2}|[\xf1-\xf3][\x80-\xbf]{3}|\xf4[\x80-\x8f][\x80-\xbf]{2}"
+)
+
+
+def _line(data: bytes, position: int) -> int:
+    return data.count(b"\n", 0, position) + 1
+
+
+def detect_encoding(data: bytes) -> str:
+    """The codec a text file is stored in, one of `ENCODING_NAMES`.
+
+    UTF-8 (with or without a byte order mark), then UTF-16 with a byte order mark,
+    then Windows-1252. Raises ValueError with the reason when none of them fits for sure:
+    UTF-8 mixed with bytes that are not, a byte Windows-1252 leaves undefined, or a zero
+    character, which no text file holds.
+    """
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        encoding = "utf-16"
+    elif data.startswith(codecs.BOM_UTF8):
+        encoding = "utf-8-sig"
+    else:
+        try:
+            data.decode("utf-8")
+            encoding = "utf-8"
+        except UnicodeDecodeError as exc:
+            # Windows-1252 text practically never holds a valid UTF-8 sequence; one that does
+            # is UTF-8 with stray bytes, and reading it as Windows-1252 would garble every ä.
+            if _UTF8_MULTIBYTE.search(data):
+                raise ValueError(
+                    f"mixed: holds UTF-8 characters, but byte 0x{data[exc.start]:02x} in line "
+                    f"{_line(data, exc.start)} is not UTF-8"
+                ) from exc
+            encoding = "cp1252"
+    try:
+        text = data.decode(encoding)
+    except UnicodeDecodeError as exc:
+        # exc.object is what the codec read: for utf-8-sig the bytes after the mark.
+        line = _line(exc.object, exc.start)
+        if encoding == "cp1252":
+            raise ValueError(
+                f"neither UTF-8 nor Windows-1252: byte 0x{exc.object[exc.start]:02x} in line "
+                f"{line} is undefined in Windows-1252"
+            ) from exc
+        if encoding == "utf-16":
+            raise ValueError(
+                "starts with a UTF-16 byte order mark, but is not valid UTF-16"
+            ) from exc
+        raise ValueError(
+            f"starts with a UTF-8 byte order mark, but is not valid UTF-8 from line {line} on"
+        ) from exc
+    zero = text.find("\0")
+    if zero != -1:
+        line = text.count("\n", 0, zero) + 1
+        raise ValueError(
+            f"zero character in line {line}: not a text file, or "
+            "stored in an encoding that cannot be told for sure, such as UTF-16 without a "
+            "byte order mark"
+        )
+    return encoding
+
+
+def decoded_text(document: Document) -> str:
+    """A text document's text; an HTML one converted from another encoding declares UTF-8."""
+    text = document.path.read_bytes().decode(document.encoding)
+    if document.encoding != "utf-8" and document.path.suffix.lower() == ".html":
+        text = _HTML_CHARSET.sub(r"\g<1>utf-8", text)
+    return text
+
+
 @dataclass(frozen=True)
 class UploadItem:
     """One object to put into the bucket."""
@@ -182,9 +273,13 @@ def upload_items(document: Document) -> list[UploadItem]:
     suffix = document.path.suffix.lower()
     if suffix != ".md":
         key = object_key(document.workspace, document.layer, document.path.name)
-        parts = [(key, document.path.read_bytes(), CONTENT_TYPES[suffix])]
+        if suffix in TEXT_SUFFIXES and document.encoding != "utf-8":
+            body = decoded_text(document).encode("utf-8")
+        else:
+            body = document.path.read_bytes()
+        parts = [(key, body, CONTENT_TYPES[suffix])]
     else:
-        sections = split_markdown(document.path.read_text(encoding="utf-8"))
+        sections = split_markdown(decoded_text(document))
         parts = [
             (
                 object_key(
@@ -280,12 +375,20 @@ def _check_layer_folder(
             )
         else:
             document = Document(entry, workspace, layer)
+            document_problems = []
+            if entry.suffix.lower() in TEXT_SUFFIXES:
+                try:
+                    document = Document(
+                        entry, workspace, layer, detect_encoding(entry.read_bytes())
+                    )
+                except (OSError, ValueError) as exc:
+                    document_problems.append(f"{entry}: {exc}")
             if not document.sidecar.is_file():
-                problems.append(f"{entry}: sidecar {document.sidecar.name} is missing")
-                continue
-            sidecar_problems = check_sidecar(document.sidecar, workspace, layer)
-            problems.extend(sidecar_problems)
-            if not sidecar_problems:
+                document_problems.append(f"{entry}: sidecar {document.sidecar.name} is missing")
+            else:
+                document_problems.extend(check_sidecar(document.sidecar, workspace, layer))
+            problems.extend(document_problems)
+            if not document_problems:
                 documents.append(document)
     return documents, problems
 
@@ -372,6 +475,23 @@ def format_counts(
             f"  {workspace}: {total_documents} documents -> {total_sections} sections ({per_layer})"
         )
     return lines
+
+
+def format_conversions(documents: Iterable[Document]) -> list[str]:
+    """Every text document not stored as UTF-8 without a byte order mark, and what it was."""
+    lines = []
+    for document in documents:
+        if document.encoding == "utf-8":
+            continue
+        line = f"  {document.path}: {ENCODING_NAMES[document.encoding]}"
+        if document.path.suffix.lower() == ".html" and _HTML_CHARSET.search(
+            document.path.read_bytes().decode(document.encoding)
+        ):
+            line += ", its <meta> charset set to utf-8"
+        lines.append(line)
+    if not lines:
+        return []
+    return [f"{len(lines)} file(s) not stored as UTF-8 go up converted to UTF-8:"] + lines
 
 
 # --- Step 2: upload ------------------------------------------------------
@@ -618,6 +738,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"{len(documents)} documents checked in {args.source}:")
     for line in format_counts(count_documents(documents), count_sections(documents)):
+        print(line)
+    for line in format_conversions(documents):
         print(line)
     if args.check:
         return 0
