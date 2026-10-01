@@ -13,6 +13,12 @@ import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py
 import pytest
 
 from scripts import workspace
+from tests.test_handler import (
+    apply_update,
+    assert_every_placeholder_is_used,
+    condition_holds,
+    with_names,
+)
 
 PATH = "/andur/api-keys"
 TABLE = "andur-key-budgets"
@@ -90,6 +96,31 @@ class FakeDynamoDB:
         self.items: dict[str, dict[str, Any]] = {}
         self.deleted: list[str] = []
         self.extra_in_scan: list[dict[str, Any]] = []
+        self.updates: list[dict[str, Any]] = []
+        self.fail_update: str | None = None
+
+    def update_item(self, **request: Any) -> dict[str, Any]:
+        """The script's update and condition, executed as the answer function's tests do."""
+        assert request["TableName"] == TABLE
+        self.updates.append(request)
+        if self.fail_update:
+            raise FakeClientError(self.fail_update)
+        assert_every_placeholder_is_used(request)
+        names = request.get("ExpressionAttributeNames", {})
+        values = request["ExpressionAttributeValues"]
+        digest = request["Key"]["key_hash"]["S"]
+        before = self.items.get(digest)
+        if not condition_holds(
+            with_names(request["ConditionExpression"], names), before or {}, values
+        ):
+            raise FakeClientError("ConditionalCheckFailedException")
+        self.items[digest] = apply_update(
+            with_names(request["UpdateExpression"], names),
+            before or {"key_hash": {"S": digest}},
+            values,
+        )
+        wants_old = request.get("ReturnValues") == "ALL_OLD" and before is not None
+        return {"Attributes": dict(before)} if wants_old else {}
 
     def get_item(self, TableName: str, Key: dict[str, Any], ConsistentRead: bool) -> dict[str, Any]:
         assert TableName == TABLE
@@ -266,7 +297,12 @@ BAD_NAMES = [
 @pytest.mark.parametrize("name", BAD_NAMES)
 def test_a_bad_name_is_refused_before_any_aws_call(name: str) -> None:
     """``-kalv`` never gets that far: the command line takes it for an option and stops."""
-    for command in (["add", name], ["remove", name, "--yes"]):
+    for command in (
+        ["add", name],
+        ["add", name, "--plan", "firma"],
+        ["plan", name, "betrieb"],
+        ["remove", name, "--yes"],
+    ):
         account = Account()
         try:
             code = run(account, *command)
@@ -359,6 +395,180 @@ def test_add_reads_only_the_key_path_from_the_stack() -> None:
     account = Account({"ApiKeyParameterPath": PATH})
     assert run(account, "add", "new-firm") == 0
     assert account.connected == ["cloudformation", "ssm"]
+    assert account.dynamodb.updates == []
+
+
+# --- plans ---------------------------------------------------------------
+
+
+def test_the_plans_and_names_are_the_answer_functions() -> None:
+    assert workspace.PLAN_CHOICES == (
+        "demo",
+        *(plan.name for plan in handler.plans.PLANS),
+    )
+    assert workspace.PLAN_ATTRIBUTE == handler.PLAN_ATTRIBUTE
+    assert workspace.BUDGET_TTL_ATTRIBUTE == handler.BUDGET_TTL_ATTRIBUTE
+    assert workspace.BUDGET_WORKSPACE_ATTRIBUTE == "workspace"
+    assert "workspace = if_not_exists(workspace, :workspace)" in handler.BUDGET_UPDATE_EXPRESSION
+
+
+def test_add_with_a_plan_puts_the_new_key_on_it(capsys: pytest.CaptureFixture[str]) -> None:
+    account = Account()
+    assert run(account, "add", "new-firm", "--plan", "betrieb") == 0
+    out, err = capsys.readouterr()
+
+    key = account.ssm.parameters[f"{PATH}/new-firm"]["Value"]
+    assert out == key + "\n"
+    assert key not in err
+    assert "plan betrieb: 6,000 questions a calendar month, at most 600 a day" in err
+    item = account.dynamodb.items[workspace.key_hash(key)]
+    assert item == {
+        "key_hash": {"S": workspace.key_hash(key)},
+        "plan": {"S": "betrieb"},
+        "workspace": {"S": "new-firm"},
+    }
+    account.neighbours_untouched()
+
+
+def test_a_plan_nobody_defined_is_refused_before_any_aws_call() -> None:
+    for command in (["add", "new-firm", "--plan", "gold"], ["plan", TARGET, "gold"]):
+        account = Account()
+        with pytest.raises(SystemExit) as stop:
+            run(account, *command)
+        assert stop.value.code == 2
+        assert account.connected == []
+
+
+def test_a_plan_that_does_not_get_through_still_prints_the_key_and_says_what_to_run(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The key is printed once, ever; losing it to a failed plan would lose it for good."""
+    account = Account()
+    account.dynamodb.fail_update = "ThrottlingException"
+    assert run(account, "add", "new-firm", "--plan", "firma") == 2
+    out, err = capsys.readouterr()
+
+    assert out == account.ssm.parameters[f"{PATH}/new-firm"]["Value"] + "\n"
+    assert "the key is stored, its plan is not" in err
+    assert "python -m scripts.workspace plan new-firm firma" in err
+    assert "default budget" in err
+
+
+def test_plan_changes_the_plan_and_leaves_the_key_alone(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    account = Account()
+    digest = workspace.key_hash(key_of(TARGET))
+    account.dynamodb.items[digest]["delete_after"] = {"N": "1900000000"}
+    keys_before = {name: dict(value) for name, value in account.ssm.parameters.items()}
+
+    assert run(account, "plan", TARGET, "firma") == 0
+    out = capsys.readouterr().out
+    item = account.dynamodb.items[digest]
+    assert item["plan"] == {"S": "firma"}
+    assert "delete_after" not in item
+    # The demo counts stay where they were; they are not what a plan key is counted by.
+    assert item["questions_used"] == {"N": "3"}
+    assert account.ssm.parameters == keys_before
+    assert "plan demo -> firma" in out
+    assert "15,000 questions a calendar month, at most 1,500 a day" in out
+    assert key_of(TARGET) not in out
+
+    assert run(account, "plan", TARGET, "betrieb") == 0
+    assert "plan firma -> betrieb" in capsys.readouterr().out
+    assert account.dynamodb.items[digest]["plan"] == {"S": "betrieb"}
+    account.neighbours_untouched()
+
+
+def test_plan_demo_takes_the_key_off_its_plan() -> None:
+    account = Account()
+    digest = workspace.key_hash(key_of(TARGET))
+    assert run(account, "plan", TARGET, "betrieb") == 0
+    account.dynamodb.items[digest]["month_2026-10"] = {"N": "120"}
+
+    assert run(account, "plan", TARGET, "demo") == 0
+    item = account.dynamodb.items[digest]
+    assert "plan" not in item
+    assert item["month_2026-10"] == {"N": "120"}
+    assert item["workspace"] == {"S": TARGET}
+
+
+def test_plan_for_a_key_that_has_not_asked_yet_writes_an_item_remove_will_find() -> None:
+    account = Account()
+    digest = workspace.key_hash(key_of(TARGET))
+    del account.dynamodb.items[digest]
+
+    assert run(account, "plan", TARGET, "betrieb") == 0
+    assert account.dynamodb.items[digest] == {
+        "key_hash": {"S": digest},
+        "plan": {"S": "betrieb"},
+        "workspace": {"S": TARGET},
+    }
+
+
+def test_plan_without_a_key_changes_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    account = Account()
+    del account.ssm.parameters[f"{PATH}/{TARGET}"]
+    before = account.snapshot()
+
+    assert run(account, "plan", TARGET, "firma") == 2
+    assert account.snapshot() == before
+    assert f"add {TARGET} --plan firma" in capsys.readouterr().err
+
+
+def test_plan_leaves_an_item_of_another_workspace_alone(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    account = Account()
+    digest = workspace.key_hash(key_of(TARGET))
+    account.dynamodb.items[digest]["workspace"] = {"S": "kalvenstett"}
+    before = account.snapshot()
+
+    assert run(account, "plan", TARGET, "firma") == 2
+    assert account.snapshot() == before
+    assert "another workspace" in capsys.readouterr().err
+
+
+def test_plan_reads_the_key_path_and_the_table_and_nothing_else() -> None:
+    account = Account({"ApiKeyParameterPath": PATH, "BudgetTableName": TABLE})
+    assert run(account, "plan", TARGET, "firma") == 0
+    assert account.connected == ["cloudformation", "ssm", "dynamodb"]
+
+
+def test_remove_shows_and_deletes_the_plan_items_of_every_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A plan item has no TTL, so nothing but `remove` ever takes it away."""
+    account = Account()
+    digest = workspace.key_hash(key_of(TARGET))
+    assert run(account, "plan", TARGET, "betrieb") == 0
+    account.dynamodb.items[digest] |= {
+        "month_2026-09": {"N": "4000"},
+        "month_2026-10": {"N": "120"},
+        "day_2026-09-30": {"N": "40"},
+        "day_2026-10-01": {"N": "7"},
+    }
+    account.dynamodb.items["old-hash"] = {
+        "key_hash": {"S": "old-hash"},
+        "plan": {"S": "firma"},
+        "workspace": {"S": TARGET},
+    }
+    capsys.readouterr()
+
+    assert run(account, "remove", TARGET) == 0
+    out = capsys.readouterr().out
+    assert (
+        "2 item(s):\n"
+        "    plan betrieb, 120 questions in 2026-10, 7 on 2026-10-01 (current key)\n"
+        "    plan firma\n"
+    ) in out
+
+    assert run(account, "remove", TARGET, "--yes") == 0
+    assert sorted(account.dynamodb.deleted) == sorted(["old-hash", digest])
+    assert not any(
+        item.get("workspace", {}).get("S") == TARGET for item in account.dynamodb.items.values()
+    )
+    account.neighbours_untouched()
 
 
 # --- remove without --yes ------------------------------------------------

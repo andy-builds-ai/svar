@@ -86,13 +86,18 @@ query in one company's workspace never returns the other's documents, and an
 ask script puts a question to the deployed address. The page itself is four
 files in `web/` — no framework, no build step, nothing from another server.
 
-Every key carries a budget: ten questions, and 48 hours from the first of
-them. The handler counts a question against the key that asked before it
-retrieves anything, in one conditional write against a DynamoDB item found by
-the SHA-256 of the key. A key with nothing left gets a 402 that says which
-half ran out. Both numbers can be set per key without a deploy; what that
-costs, how to set it and how to reset it is in
-[app/README.md](../app/README.md).
+Every key carries a budget. A demo key has ten questions, and 48 hours from
+the first of them; a paying customer's key carries a plan from
+`app/plans.py`, a quota per German calendar month and per day that renews
+itself. The handler counts a question against the key that asked before it
+retrieves anything, in a conditional write against a DynamoDB item found by
+the SHA-256 of the key — one for a demo key, and for a key on a plan a
+second after the first has refused it and handed back the plan. A demo key
+with nothing left gets a 402 that says which half ran out; a key on a plan
+whose quota is full gets a 429 that says whether it is the month's or the
+day's. The demo's numbers can be set per key without a deploy, and
+`python -m scripts.workspace plan` changes a key's plan; how both work is
+in [app/README.md](../app/README.md).
 
 Every answer passes a guardrail on the same model call: it refuses legal,
 tax and medical advice and questions about people's private lives, masks
@@ -129,7 +134,8 @@ tests/       stack template, answer function, scripts, page
    retrieval, model, answer with sources and layer, token counts per answer
    in the log. *(done)*
 4. **Key budgets** — a key is an allowance: ten questions and 48 hours,
-   counted in DynamoDB. *(done)*
+   counted in DynamoDB. *(done)* A paying customer's key carries a plan,
+   a quota per month and per day. *(built 01.10.2026, not deployed yet)*
 5. **The page** — a page behind CloudFront, with the answer function on the
    same address. *(done)*
 6. **Guardrails** — topic, PII and hallucination filters, and the cost of

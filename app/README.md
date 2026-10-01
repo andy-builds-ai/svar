@@ -16,8 +16,9 @@ in the [main README](../docs/architecture.md#one-address-for-everything).
 
 It runs only while a question is in flight; there is nothing to pay while
 nobody asks. `aws.py` holds the AWS clients with their timeouts and retries.
-Lambda packages this folder and imports both modules by their plain names,
-`handler` and `aws`; the tests import them the same way
+`plans.py` holds the plans a paying customer's key can carry (*Plans* below).
+Lambda packages this folder and imports the modules by their plain names,
+`handler`, `aws` and `plans`; the tests import them the same way
 ([tests/conftest.py](../tests/conftest.py)). Nothing else is needed but the
 standard library and the boto3 the Lambda runtime brings.
 
@@ -118,10 +119,12 @@ opens neither; the log names both.
 
 ## Keys are budgets, not passwords
 
-A key does not open its workspace without end. It carries an allowance: **10
-questions**, and **48 hours** counted from the first of them. A key that has
-spent either is refused with 402 before anything is paid for. A key that is
-never used never starts its clock.
+A key does not open its workspace without end. A key without a plan is a
+demo key and carries an allowance: **10 questions**, and **48 hours** counted
+from the first of them. A key that has spent either is refused with 402
+before anything is paid for. A key that is never used never starts its
+clock. A paying customer's key carries a plan instead: a quota per calendar
+month and per day that comes back by itself, and no end (*Plans* below).
 
 The count lives in the DynamoDB table `andur-key-budgets` (stack output
 `BudgetTableName`), one item per key. The item is found by the **SHA-256 of
@@ -145,14 +148,22 @@ together cannot all see the same count and all pass:
 
 ```
 ConditionExpression:
-  attribute_not_exists(first_used_at)
-  OR (
-       (attribute_not_exists(questions_used)
-        OR attribute_not_exists(question_limit)
-        OR questions_used < question_limit)
-       AND (attribute_not_exists(expires_at) OR expires_at > :now)
-     )
+  attribute_not_exists(#plan) AND (
+    attribute_not_exists(first_used_at)
+    OR (
+         (attribute_not_exists(questions_used)
+          OR attribute_not_exists(question_limit)
+          OR questions_used < question_limit)
+         AND (attribute_not_exists(expires_at) OR expires_at > :now)
+       )
+  )
 ```
+
+`#plan` stands for the attribute `plan` (PLAN is one of DynamoDB's reserved
+words). The check in front refuses an item that names a plan and so hands
+the key to its plan's count (*Plans*); a demo item never has a `plan`, so for
+it the condition says what it said before plans existed, and a test keeps
+the rest of the string as it was.
 
 The two `attribute_not_exists` in the middle are for an item that lost an
 attribute — a half-finished edit by hand. In DynamoDB a comparison against a
@@ -249,7 +260,8 @@ passes it rewrites `expires_at` from `first_used_at + window_seconds` and
 
 The simplest way to give a used key a fresh start is to reset it with
 `delete-item` above; a changed budget for it is then a preset item as for a
-new key.
+new key. On a key with a plan, `delete-item` deletes the plan too and leaves
+a demo key; use `python -m scripts.workspace plan` to change a plan.
 
 **A replaced key has a fresh budget by itself.** Deleting the parameter and
 adding it again gives the workspace a new key, and a new key has a different
@@ -258,6 +270,115 @@ own. That also means the reverse: a key stays spent only as long as its item
 exists. After `KEEP_DAYS` (365 by default, counted from the first question)
 the item is gone and the key would work again. To end a key for good, replace
 it.
+
+### Plans
+
+A paying customer's key carries a plan in its budget item, and the plans are
+defined in one place, `plans.py`:
+
+| Plan | Questions per calendar month | At most per day |
+|---|---|---|
+| `betrieb` | 6,000 | 600 |
+| `firma` | 15,000 | 1,500 |
+
+Change a number there and deploy, and every key on that plan has the new
+number from its next question. `python -m scripts.workspace` puts a key on a
+plan, when it adds the key or later, and takes it off again
+([scripts/README.md](../scripts/README.md#workspace--adding-and-removing-a-workspace)).
+The quota is there for a key in the wrong hands, not for the bill: at the
+measured mean of 0.0043 USD per answered question with Nova Pro at ten
+passages ([docs/costs.md](../docs/costs.md)), a month used to the last
+question is about 26 USD on `betrieb` and 65 USD on `firma`.
+
+**German time.** A month and a day are German calendar months and days: they
+begin at midnight in Germany, which is 23:00 UTC in winter and 22:00 UTC in
+summer. The function works German time out itself (`german_date`): UTC+1,
+and UTC+2 from 01:00 UTC on the last Sunday of March to 01:00 UTC on the last
+Sunday of October, the EU rule. It does not ask `zoneinfo`, which needs a
+time zone database that nothing promises the Lambda runtime brings. A test
+compares the rule with the database every half hour from 2026 to 2030
+wherever a database is installed, as in CI; on 01.10.2026 it agreed with
+`tzdata` on every one.
+
+**The item** of a key on a plan:
+
+| Attribute | Meaning |
+|---|---|
+| `plan` | The plan's name. Written by `python -m scripts.workspace`, never by the function. |
+| `workspace` | As for a demo key. |
+| `month_<YYYY-MM>` | Questions counted in that German month, such as `month_2026-10`. |
+| `day_<YYYY-MM-DD>` | Questions counted on that German day, such as `day_2026-10-01`. |
+
+It has no `delete_after`. The TTL would delete the item one day, and the key
+would fall back to the demo budget; every question on a plan removes the
+attribute, should one be there from the key's demo days or by hand. Attributes
+of the demo budget may stay in the item; nothing reads them while it names a
+plan.
+
+**Counting.** The first write of every question is the demo's above, and its
+condition refuses an item with a `plan`. DynamoDB sends the refused item back
+with the refusal, so the function knows the plan without a read, and counts
+with a second write:
+
+```
+UpdateExpression:
+  SET #month = if_not_exists(#month, :zero) + :one,
+      #day = if_not_exists(#day, :zero) + :one,
+      workspace = if_not_exists(workspace, :workspace)
+  REMOVE delete_after[, counts older than last month and yesterday]
+ConditionExpression:
+  (attribute_not_exists(#month) OR #month < :month_limit)
+  AND (attribute_not_exists(#day) OR #day < :day_limit)
+```
+
+`#month` and `#day` are the counts of the month and the day the question set
+out in. A new month or day is a new attribute that starts from nothing:
+nothing is reset at midnight and nothing is locked. Two questions at the
+limit cannot both pass, because the condition reads the count as it is when
+the write arrives, not as it was when the plan was read. A question that set
+out at 23:59:59 and arrives after one from 00:00:00 is counted in its own
+day, and finds that day's count still there: each write removes the counts
+older than last month and yesterday, at most 10 at a time, and keeps those
+two for exactly this case. So an item holds four counts, or a few more for a
+moment.
+
+A question on a plan is two writes, the refused one and the count. That is
+the number the worst case of the timeouts already allows for (*Configuration*:
+for a demo key it is the count and the TTL repair, which a plan item never
+needs). A demo question is still one write.
+
+**A full quota** is a **429** with one sentence, in the language of the
+request:
+
+- *This key's quota of 6,000 questions for this month is reached. Please get
+  in touch with your contact person.* (*Das Kontingent von 6.000 Fragen für
+  diesen Monat ist erreicht. Bitte melden Sie sich bei Ihrem
+  Ansprechpartner.*)
+- the same for *today* (*für heute*) with the day's number.
+
+When both are full, the month's sentence wins: tomorrow would not help. 429
+and not 402, because the quota comes back by itself and a 402 says it does
+not; the page shows the sentence alone, without the line about a new key it
+adds to a 402 ([web/README.md](../web/README.md#what-an-error-says)).
+
+**What fails closed.** No item gives a key on a plan a question that nothing
+counts:
+
+- A `plan` that `plans.py` does not know — a typo, a plan since removed,
+  `demo` written by hand, a number — is a 500 with the log line
+  `budget-plan-unknown`, and nothing is asked. Put the key on a plan again
+  with the script.
+- A count of this month or this day that is not a number is a 500 with
+  `budget-item-broken`, until that month or day is over and its count is no
+  longer read. Delete the attribute to end it sooner.
+- A count that is missing is the start of its month or day.
+
+**Changing a plan** keeps the key and the counts, so a new plan is no way to
+a fresh month: from `firma` to `betrieb` with 8,000 questions in the month,
+the next one is refused. A demo key put on a plan asks again at once,
+whatever its demo budget says. A key taken off its plan (`plan <name> demo`)
+is a demo key with what is left of its demo budget — nothing, if it ever
+spent it.
 
 ## The answer
 
@@ -324,8 +445,8 @@ tables at the top of `app/handler.py`:
   (`STOP_NOTES`) or whose personal details were masked (`GUARDRAIL_NOTES`);
 - the sentence for a question the guardrail refused and for an answer it
   withheld (below);
-- the `error` of every status in *Errors*: the 400, 401, 402, 403 and 502
-  sentences, the fixed sentence of a 500, and the one for a crash.
+- the `error` of every status in *Errors*: the 400, 401, 402, 403, 429 and
+  502 sentences, the fixed sentence of a 500, and the one for a crash.
 
 What stays as it is: the model's answer is in the language of the
 **question**, as before, so an English question on the German page gets an
@@ -496,7 +617,7 @@ below describe the English one.
 | 402 | A valid key for this workspace with nothing left: its questions are used up, or its window has closed. The sentence says which. Waiting does not help — a new key does. |
 | 403 | A valid key, but for another workspace. |
 | 405 | Any method other than `POST`. The response carries `Allow: POST`. |
-| 429 | More requests at once than the function may run (5). Lambda refuses them before any code runs, so the body is Lambda's own: `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
+| 429 | With an `error` sentence: a key on a plan has used its questions for this month or for today (*Plans*); the sentence says which, and the quota comes back with the next day or month. Without one: more requests at once than the function may run (5). Lambda refuses those before any code runs, so the body is Lambda's own: `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
 | 500 | The function is set up wrong (an environment variable, unreadable keys), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.* (*Der Dienst ist nicht eingerichtet.*); the cause is in the log. |
 | 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer. The sentence names the cause. |
 
@@ -518,7 +639,8 @@ question the handler refuses anyway costs its key nothing.
 unknown, 403 that it belongs to another workspace — this key is valid and
 opens this workspace. 429 is Lambda's concurrency limit and means *too many
 at once, try again in a moment*; a spent budget means the opposite, that
-trying again will not help.
+trying again will not help. A key on a plan never gets a 402: its quota
+comes back, so a full one is a 429, with a sentence that Lambda's has not.
 
 ## Logs
 
@@ -547,7 +669,9 @@ call AWS turned away gives a `converse-rejected` line first, with the error
 code, the time into the request (`elapsed_ms`) and whether the second call is
 made (`retry`); counting these lines tells how often it happens. Parameter
 Store and the budget table do add the full exception (`keys-unreadable`,
-`budget-unreadable`); neither call carries a question. A key shared by two
+`budget-unreadable`); neither call carries a question. A budget item with a
+plan nobody defined gives a `budget-plan-unknown` line, one whose count of
+this month or day is not a number a `budget-item-broken` line (*Plans*). A key shared by two
 workspaces gives a `duplicate-key` line. A failed reread of the keys
 is a `keys-reload-failed` line, with `stale: true` when the keys were already
 past their five minutes and the old ones went on deciding. A key path that is
@@ -635,7 +759,8 @@ past the function's timeout. Added up, the worst case is 171 seconds —
 Parameter Store counts twice, because an
 unknown key makes the function read the keys again before it answers 401, and
 the budget table counts twice, because an item whose own window outlasts it is
-put right with a second write. A request with the second model call ends
+put right with a second write, and a key on a plan is counted with a second
+write after the demo's refused it. A request with the second model call ends
 by second 115, so it does not add to the 171. The
 function's timeout is 180, so a hanging Bedrock call still ends as a 502 with
 a reason, not as a bare timeout.

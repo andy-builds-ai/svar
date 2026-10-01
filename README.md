@@ -44,12 +44,16 @@ USD, 3425 ms in the function):
   on the page with Nova Pro, the first after a deploy included
   (`latency_ms`); a median of 1.8 seconds from retrieval to cost line for
   the 22 answerable questions, measured from a laptop in Germany.
-- **Tests:** 689, all passing, without AWS — 43 seconds on a local laptop on
-  01.10.2026.
+- **Tests:** 768 passing and one skipped, without AWS — 42 seconds on a
+  local laptop on 01.10.2026. The skipped one compares German time with the
+  time zone database, which that laptop does not have and CI does.
 - **Documents:** 37 Markdown documents of two fictional companies, uploaded
   as 147 sections so that a hit is a passage, not a page.
-- **Key budget:** a key allows 10 questions within 48 hours of its first —
-  at the measured cost, about 0.04 USD per key with Nova Pro.
+- **Key budget:** a demo key allows 10 questions within 48 hours of its
+  first — at the measured cost, about 0.04 USD per key with Nova Pro. A
+  paying customer's key carries a plan instead: `betrieb`, 6,000 questions
+  a calendar month and at most 600 a day, or `firma`, 15,000 and 1,500,
+  German time, renewed every month (`app/plans.py`).
 
 ## Decisions
 

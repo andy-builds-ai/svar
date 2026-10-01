@@ -20,7 +20,8 @@ import operator
 import re
 import subprocess
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -329,15 +330,18 @@ def operand(text: str, before: dict[str, Any], values: dict[str, Any]) -> dict[s
 
 
 def apply_update(expression: str, before: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
-    """The SET actions of an update expression, every operand read from `before`.
+    """The SET and REMOVE actions of an update expression, every operand read from `before`.
 
     That is DynamoDB's rule: the actions of one expression are applied
     together, so an operand always names the value an attribute had before
     the update, even when another action in the same expression changes it.
+    One path in two actions is an error there, and here.
     """
     assert expression.startswith("SET "), expression
+    sets, _, removes = expression.removeprefix("SET ").partition(" REMOVE ")
     after = dict(before)
-    for action in split_on(expression.removeprefix("SET "), ","):
+    written: list[str] = []
+    for action in split_on(sets, ","):
         path, _, value = action.partition(" = ")
         summands = split_on(value, "+")
         resolved = [operand(part, before, values) for part in summands]
@@ -346,7 +350,27 @@ def apply_update(expression: str, before: dict[str, Any], values: dict[str, Any]
             if len(resolved) == 1
             else {"N": str(sum(int(number["N"]) for number in resolved))}
         )
+        written.append(path)
+    removed = split_on(removes, ",")
+    assert not set(written) & set(removed), "two actions on one path"
+    for path in removed:
+        after.pop(path, None)
     return after
+
+
+def with_names(expression: str, names: Mapping[str, str]) -> str:
+    """The expression with every ``#placeholder`` replaced by the attribute it stands for."""
+    return re.sub(r"#\w+", lambda match: names[match.group(0)], expression)
+
+
+def assert_every_placeholder_is_used(request: Mapping[str, Any]) -> None:
+    """DynamoDB refuses a request with a name or a value its expressions never use."""
+    used = " ".join(request.get(part, "") for part in ("UpdateExpression", "ConditionExpression"))
+    for placeholder in [
+        *request.get("ExpressionAttributeNames", {}),
+        *request.get("ExpressionAttributeValues", {}),
+    ]:
+        assert re.search(rf"{re.escape(placeholder)}\b", used), f"{placeholder} is not used"
 
 
 #: The comparisons a condition expression can make on numbers.
@@ -370,11 +394,12 @@ class ConditionReader:
     every test green while the deployed budget let an eleventh question
     through. Read from the text, the same change turns tests red.
 
-    Enough of the grammar for the conditions this handler sends: ``AND``,
-    ``OR``, brackets, ``attribute_exists`` and ``attribute_not_exists``, and
-    a comparison between two operands, each an attribute name or a ``:``
-    placeholder. DynamoDB's rule for a missing attribute is kept: it does not
-    raise, it makes the comparison false.
+    Enough of the grammar for the conditions this handler and
+    scripts/workspace.py send: ``AND``, ``OR``, brackets, ``attribute_exists``
+    and ``attribute_not_exists``, and a comparison between two operands, each
+    an attribute name or a ``:`` placeholder. DynamoDB's rule for a missing
+    attribute, or one of another type, is kept: it does not raise, it makes the
+    comparison false. ``#`` placeholders are replaced first (`with_names`).
     """
 
     def __init__(self, expression: str) -> None:
@@ -419,19 +444,24 @@ class ConditionReader:
             return (path in item) == (name == "attribute_exists")
         comparison = self.take()
         assert comparison in COMPARISONS, comparison
-        left, right = self.number(name, item, values), self.number(self.take(), item, values)
-        if left is None or right is None:
+        left, right = self.operand(name, item, values), self.operand(self.take(), item, values)
+        if left is None or right is None or left[0] != right[0]:
             return False
-        return COMPARISONS[comparison](left, right)
+        return COMPARISONS[comparison](left[1], right[1])
 
     @staticmethod
-    def number(token: str, item: Mapping[str, Any], values: Mapping[str, Any]) -> int | None:
-        """One side of a comparison: a placeholder or an attribute, as a whole number."""
+    def operand(
+        token: str, item: Mapping[str, Any], values: Mapping[str, Any]
+    ) -> tuple[str, int | str] | None:
+        """One side of a comparison: a placeholder or an attribute, a whole number or a text,
+        with its type. Two sides of different types make the comparison false."""
         source = values if token.startswith(":") else item
         entry = source.get(token)
-        if not isinstance(entry, Mapping) or "N" not in entry:
-            return None
-        return int(entry["N"])
+        if isinstance(entry, Mapping) and "N" in entry:
+            return "N", int(entry["N"])
+        if isinstance(entry, Mapping) and "S" in entry:
+            return "S", entry["S"]
+        return None
 
 
 def condition_holds(expression: str, item: Mapping[str, Any], values: Mapping[str, Any]) -> bool:
@@ -458,21 +488,31 @@ class FakeDynamoDB:
         #: is how a repair that does not get through is tested.
         self.error_from_call = error_from_call
         self.calls: list[dict[str, Any]] = []
+        #: Runs once, just before the next write of a plan count reaches the
+        #: table: other questions that overtake one already on its way.
+        self.before_plan_write: Callable[[], None] | None = None
 
     def update_item(self, **kwargs: Any) -> dict[str, Any]:
+        names = kwargs.get("ExpressionAttributeNames", {})
+        if self.before_plan_write and "#month" in names:
+            overtaking, self.before_plan_write = self.before_plan_write, None
+            overtaking()
         self.calls.append(kwargs)
         if self.error and len(self.calls) >= self.error_from_call:
             raise self.error
+        assert_every_placeholder_is_used(kwargs)
         key = kwargs["Key"][handler.BUDGET_KEY_ATTRIBUTE]["S"]
         before = self.items.get(key, {})
         values = kwargs.get("ExpressionAttributeValues", {})
         condition = kwargs.get("ConditionExpression")
-        if condition is not None and not condition_holds(condition, before, values):
+        if condition is not None and not condition_holds(
+            with_names(condition, names), before, values
+        ):
             returned = (
                 before if kwargs.get("ReturnValuesOnConditionCheckFailure") == "ALL_OLD" else None
             )
             raise conditional_check_failed(returned or None)
-        after = apply_update(kwargs["UpdateExpression"], before, values)
+        after = apply_update(with_names(kwargs["UpdateExpression"], names), before, values)
         self.items[key] = after
         return {"Attributes": after} if kwargs.get("ReturnValues") == "ALL_NEW" else {}
 
@@ -1301,10 +1341,12 @@ def test_the_budget_is_never_read_before_it_is_written(aws: dict[str, Any]) -> N
         "Key",
         "UpdateExpression",
         "ConditionExpression",
+        "ExpressionAttributeNames",
         "ExpressionAttributeValues",
         "ReturnValues",
         "ReturnValuesOnConditionCheckFailure",
     }
+    assert update["ExpressionAttributeNames"] == {"#plan": "plan"}
     assert update["TableName"] == ENVIRONMENT["BUDGET_TABLE_NAME"]
     assert update["ReturnValuesOnConditionCheckFailure"] == "ALL_OLD"
     # What the write itself wrote, not a read of its own: `ReturnValues` is
@@ -1536,6 +1578,576 @@ def test_a_repair_that_does_not_get_through_does_not_cost_the_answer(
     assert call(event())[0] == 200
     (line,) = [line for line in log_lines(caplog) if line["event"] == "budget-ttl-unrepaired"]
     assert line["detail"] == "ClientError: ThrottlingException"
+
+
+#: `handler.BUDGET_CONDITION` as it was before plans, copied by hand on 2026-10-01.
+#: The demo budget is this condition, with nothing but the plan check in front.
+DEMO_CONDITION_BEFORE_PLANS = (
+    "attribute_not_exists(first_used_at)"
+    " OR ("
+    "(attribute_not_exists(questions_used)"
+    " OR attribute_not_exists(question_limit)"
+    " OR questions_used < question_limit)"
+    " AND (attribute_not_exists(expires_at) OR expires_at > :now)"
+    ")"
+)
+
+
+def test_the_demo_condition_is_the_one_before_plans_behind_the_plan_check() -> None:
+    assert handler.BUDGET_CONDITION == (
+        f"attribute_not_exists(#plan) AND ({DEMO_CONDITION_BEFORE_PLANS})"
+    )
+
+
+# --- Plans ---------------------------------------------------------------
+
+
+def german(moment: str) -> int:
+    """Epoch seconds of a moment written with its offset, ``2026-10-31T23:59:59+01:00``."""
+    return int(datetime.fromisoformat(moment).timestamp())
+
+
+def key_on_plan(
+    aws: dict[str, Any], plan: str = "betrieb", key: str = KEYS["quillmoor"], **counts: int
+) -> dict[str, Any]:
+    """Preset the key's item the way `python -m scripts.workspace plan` writes it, with
+    counts already spent, such as ``day_2026_10_01=599`` for ``day_2026-10-01``."""
+    item: dict[str, Any] = {
+        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(key)},
+        "plan": {"S": plan},
+        "workspace": {"S": "quillmoor"},
+    }
+    for name, used in counts.items():
+        period, _, rest = name.partition("_")
+        item[f"{period}_{rest.replace('_', '-')}"] = {"N": str(used)}
+    aws["dynamodb"].items[handler.key_hash(key)] = item
+    return item
+
+
+def at(clock: "FakeWallClock", moment: str) -> None:
+    clock.now = float(german(moment))
+
+
+def german_call(request_event: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
+    """A question from the German page."""
+    return call(request_event or event(in_("de")))
+
+
+BETRIEB = handler.plans.plan_named("betrieb")
+FIRMA = handler.plans.plan_named("firma")
+
+
+def test_the_plans_are_the_ones_decided_on_2026_10_01() -> None:
+    assert [tuple(plan) for plan in handler.plans.PLANS] == [
+        ("betrieb", 6000, 600),
+        ("firma", 15000, 1500),
+    ]
+    assert handler.plans.DEMO not in {plan.name for plan in handler.plans.PLANS}
+
+
+def test_every_plan_allows_less_a_day_than_a_month() -> None:
+    names = [plan.name for plan in handler.plans.PLANS]
+    assert len(names) == len(set(names))
+    for plan in handler.plans.PLANS:
+        assert 0 < plan.questions_per_day <= plan.questions_per_month
+        assert handler.WORKSPACE_NAME.match(plan.name)
+
+
+@pytest.mark.parametrize(
+    ("year", "month", "day"),
+    [
+        (2024, 3, 31),
+        (2024, 10, 27),
+        (2025, 3, 30),
+        (2025, 10, 26),
+        (2026, 3, 29),
+        (2026, 10, 25),
+        (2027, 3, 28),
+        (2027, 10, 31),
+    ],
+)
+def test_summer_time_begins_and_ends_on_the_last_sunday(year: int, month: int, day: int) -> None:
+    """The dates the clocks changed or will change in Germany."""
+    assert handler.last_sunday(year, month) == date(year, month, day)
+
+
+@pytest.mark.parametrize(
+    ("utc", "german_day"),
+    [
+        # Winter: midnight is 23:00 UTC.
+        ("2026-01-31T22:59:59", "2026-01-31"),
+        ("2026-01-31T23:00:00", "2026-02-01"),
+        # Summer: midnight is 22:00 UTC.
+        ("2026-07-14T21:59:59", "2026-07-14"),
+        ("2026-07-14T22:00:00", "2026-07-15"),
+        # The night summer time begins: 01:00 UTC on 29 March 2026 is 03:00 in Germany.
+        ("2026-03-29T00:59:59", "2026-03-29"),
+        ("2026-03-29T21:59:59", "2026-03-29"),
+        ("2026-03-29T22:00:00", "2026-03-30"),
+        # The night it ends: 25 October 2026 begins in summer and ends in winter.
+        ("2026-10-24T21:59:59", "2026-10-24"),
+        ("2026-10-24T22:00:00", "2026-10-25"),
+        ("2026-10-25T22:59:59", "2026-10-25"),
+        ("2026-10-25T23:00:00", "2026-10-26"),
+        # The month and the year change in German time, an hour before UTC.
+        ("2026-10-31T22:59:59", "2026-10-31"),
+        ("2026-10-31T23:00:00", "2026-11-01"),
+        ("2026-12-31T23:00:00", "2027-01-01"),
+    ],
+)
+def test_the_day_is_the_german_calendar_day(utc: str, german_day: str) -> None:
+    now = int(datetime.fromisoformat(utc).replace(tzinfo=UTC).timestamp())
+    assert handler.german_date(now).isoformat() == german_day
+
+
+def test_the_german_day_is_the_time_zone_databases_every_hour_for_five_years() -> None:
+    """Where a time zone database is at hand (CI on Linux), every hour from 2026 to 2030."""
+    import zoneinfo
+
+    try:
+        berlin = zoneinfo.ZoneInfo("Europe/Berlin")
+    except zoneinfo.ZoneInfoNotFoundError:
+        pytest.skip("no time zone database on this machine")
+    moment = datetime(2026, 1, 1, tzinfo=UTC)
+    while moment.year < 2031:
+        now = int(moment.timestamp())
+        assert handler.german_date(now) == moment.astimezone(berlin).date(), moment
+        moment += timedelta(minutes=30)
+
+
+def test_a_key_on_a_plan_counts_its_day_and_its_month_and_keeps_no_end(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    key_on_plan(aws)[handler.BUDGET_TTL_ATTRIBUTE] = {"N": "1"}
+    at(budget_clock, "2026-10-01T09:00:00+02:00")
+
+    assert call(event())[0] == 200
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    assert number(item, "month_2026-10") == 2
+    assert number(item, "day_2026-10-01") == 2
+    # A plan item is never removed by the table's TTL: a key that lost it would fall
+    # back to the demo budget.
+    assert handler.BUDGET_TTL_ATTRIBUTE not in item
+    assert "questions_used" not in item and "first_used_at" not in item
+    assert item["workspace"] == {"S": "quillmoor"}
+
+
+def test_a_plan_question_is_two_writes_and_never_a_read(aws: dict[str, Any]) -> None:
+    """The demo write that refuses, and the plan's count: as many as `aws` plans time for."""
+    key_on_plan(aws)
+    assert call(event())[0] == 200
+    demo, counted = aws["dynamodb"].calls
+    assert demo["ConditionExpression"] == handler.BUDGET_CONDITION
+    assert counted["ConditionExpression"] == handler.PLAN_CONDITION
+    assert "ReturnValues" not in counted
+    assert len(aws["dynamodb"].calls) == handler.aws.BUDGET_WRITES_PER_REQUEST
+
+
+def test_the_last_question_of_the_day_goes_through_and_the_next_is_429(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    key_on_plan(aws, month_2026_10=1000, day_2026_10_01=599)
+    at(budget_clock, "2026-10-01T15:00:00+02:00")
+
+    assert call(event())[0] == 200
+    status, body = call(event())
+    assert status == 429
+    assert body == {"error": handler.DAY_QUOTA_MESSAGES["en"].format(limit="600")}
+    status, body = german_call()
+    assert status == 429
+    assert body == {"error": handler.DAY_QUOTA_MESSAGES["de"].format(limit="600")}
+    assert len(aws["bedrock-runtime"].calls) == 1
+    item = budget_item(aws)
+    assert number(item, "day_2026-10-01") == 600
+    assert number(item, "month_2026-10") == 1001
+
+
+def test_the_last_question_of_the_month_goes_through_and_the_next_is_429(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    key_on_plan(aws, month_2026_10=5999)
+    at(budget_clock, "2026-10-20T15:00:00+02:00")
+
+    assert call(event())[0] == 200
+    status, body = call(event())
+    assert status == 429
+    assert body == {"error": handler.MONTH_QUOTA_MESSAGES["en"].format(limit="6,000")}
+    status, body = german_call()
+    assert body == {"error": handler.MONTH_QUOTA_MESSAGES["de"].format(limit="6.000")}
+    assert number(budget_item(aws), "month_2026-10") == 6000
+
+
+def test_a_month_that_is_used_up_says_so_even_when_the_day_is_too(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """Waiting for tomorrow would not help, so the sentence does not suggest it."""
+    key_on_plan(aws, month_2026_10=6000, day_2026_10_20=600)
+    at(budget_clock, "2026-10-20T15:00:00+02:00")
+    assert call(event()) == (
+        429,
+        {"error": handler.MONTH_QUOTA_MESSAGES["en"].format(limit="6,000")},
+    )
+
+
+def test_the_quota_message_says_what_a_customer_needs_and_nothing_about_a_new_key() -> None:
+    for messages in (handler.MONTH_QUOTA_MESSAGES, handler.DAY_QUOTA_MESSAGES):
+        assert "contact person" in messages["en"]
+        assert "Ansprechpartner" in messages["de"]
+        assert "new key" not in messages["en"]
+        assert "neuen" not in messages["de"]
+    assert "this month" in handler.MONTH_QUOTA_MESSAGES["en"]
+    assert "diesen Monat" in handler.MONTH_QUOTA_MESSAGES["de"]
+    assert "today" in handler.DAY_QUOTA_MESSAGES["en"]
+    assert "heute" in handler.DAY_QUOTA_MESSAGES["de"]
+
+
+def test_a_full_quota_is_429_and_a_spent_demo_still_402() -> None:
+    """429 says: later. A demo key that is spent stays spent, so it keeps its 402."""
+    assert handler.QuotaReached.status == 429
+    assert handler.QuotaReached.headers == {}
+    assert BudgetSpent.status == 402
+
+
+@pytest.mark.parametrize(
+    ("last_second", "first_second"),
+    [
+        ("2026-07-14T23:59:59+02:00", "2026-07-15T00:00:00+02:00"),
+        ("2026-01-14T23:59:59+01:00", "2026-01-15T00:00:00+01:00"),
+        ("2026-10-25T23:59:59+01:00", "2026-10-26T00:00:00+01:00"),
+    ],
+    ids=["summer", "winter", "the-day-summer-time-ends"],
+)
+def test_a_full_day_ends_at_german_midnight_to_the_second(
+    aws: dict[str, Any], budget_clock: "FakeWallClock", last_second: str, first_second: str
+) -> None:
+    day = datetime.fromisoformat(last_second).date()
+    key_on_plan(aws, **{f"day_{day:%Y_%m_%d}": 600, f"month_{day:%Y_%m}": 2000})
+    at(budget_clock, last_second)
+    assert call(event())[0] == 429
+
+    at(budget_clock, first_second)
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    assert number(item, handler.day_count(day + timedelta(days=1))) == 1
+    assert number(item, handler.day_count(day)) == 600
+    assert number(item, handler.month_count(day)) == 2001
+
+
+def test_a_full_month_ends_at_german_midnight_on_the_first(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    key_on_plan(aws, month_2026_10=6000, day_2026_10_31=5)
+    at(budget_clock, "2026-10-31T23:59:59+01:00")
+    assert call(event())[0] == 429
+
+    at(budget_clock, "2026-11-01T00:00:00+01:00")
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    assert number(item, "month_2026-11") == 1
+    assert number(item, "day_2026-11-01") == 1
+    assert number(item, "month_2026-10") == 6000
+
+
+def test_a_question_at_half_past_eleven_utc_on_the_31st_belongs_to_november(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """German time, not UTC: 23:30 UTC on 31 October is 00:30 on 1 November in Germany."""
+    key_on_plan(aws, month_2026_10=6000)
+    budget_clock.now = datetime(2026, 10, 31, 23, 30, tzinfo=UTC).timestamp()
+    assert call(event())[0] == 200
+    assert number(budget_item(aws), "month_2026-11") == 1
+
+
+def test_many_days_and_months_count_one_after_the_other(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """Three questions a day for 70 days: no count leaks into another, none is reset early."""
+    key_on_plan(aws, "firma")
+    at(budget_clock, "2026-09-25T08:00:00+02:00")
+    asked: dict[str, int] = {}
+    for _ in range(70):
+        for _ in range(3):
+            assert call(event())[0] == 200
+            month = handler.month_count(handler.german_date(int(budget_clock())))
+            asked[month] = asked.get(month, 0) + 1
+        budget_clock.advance(SECONDS_PER_DAY)
+    item = budget_item(aws)
+    today = handler.german_date(int(budget_clock()) - SECONDS_PER_DAY)
+    assert number(item, handler.month_count(today)) == asked[handler.month_count(today)]
+    assert number(item, handler.day_count(today)) == 3
+
+
+def test_questions_at_the_limit_at_the_same_time_pass_only_up_to_it(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """The count is checked where it is written, not where it was read.
+
+    The first question has its plan from the refused demo write, 599 of 600 used, and is
+    on its way to the count. Two more overtake it and count the 600th before it arrives.
+    The condition reads the count as it is when the write arrives, so the first one is
+    refused: three questions, one answer, 600 counted.
+    """
+    key_on_plan(aws, month_2026_10=10, day_2026_10_01=599)
+    at(budget_clock, "2026-10-01T12:00:00+02:00")
+    overtaking: list[int] = []
+
+    def two_questions_overtake() -> None:
+        overtaking.extend(call(event())[0] for _ in range(2))
+
+    aws["dynamodb"].before_plan_write = two_questions_overtake
+    status, _ = call(event())
+
+    assert overtaking == [200, 429]
+    assert status == 429
+    item = budget_item(aws)
+    assert number(item, "day_2026-10-01") == 600
+    assert number(item, "month_2026-10") == 11
+    assert len(aws["bedrock-runtime"].calls) == 1
+
+
+def test_a_question_that_set_out_before_midnight_counts_in_its_own_full_day(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """The race at midnight, the other way round from a lost count.
+
+    The 31 October is full. One question sets out at 23:59:59 and is overtaken by one at
+    00:00:00 that opens November and tidies the item. The late one still finds its own
+    full day — yesterday's count is kept for exactly this — and is refused, rather than
+    finding nothing and starting October's count again from zero.
+    """
+    key_on_plan(aws, month_2026_10=3000, day_2026_10_31=600)
+    at(budget_clock, "2026-10-31T23:59:59+01:00")
+
+    def a_question_after_midnight() -> None:
+        at(budget_clock, "2026-11-01T00:00:00+01:00")
+        assert call(event())[0] == 200
+
+    aws["dynamodb"].before_plan_write = a_question_after_midnight
+    assert call(event())[0] == 429
+    item = budget_item(aws)
+    assert number(item, "day_2026-10-31") == 600
+    assert number(item, "month_2026-10") == 3000
+    assert number(item, "day_2026-11-01") == 1
+    assert number(item, "month_2026-11") == 1
+
+
+def test_a_question_that_set_out_before_midnight_with_room_left_counts_in_october(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    key_on_plan(aws, month_2026_10=3000, day_2026_10_31=20)
+    at(budget_clock, "2026-10-31T23:59:59+01:00")
+
+    def a_question_after_midnight() -> None:
+        at(budget_clock, "2026-11-01T00:00:00+01:00")
+        assert call(event())[0] == 200
+
+    aws["dynamodb"].before_plan_write = a_question_after_midnight
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    assert number(item, "day_2026-10-31") == 21
+    assert number(item, "month_2026-10") == 3001
+    assert number(item, "month_2026-11") == 1
+
+
+def test_old_counts_are_cleared_and_yesterday_and_last_month_kept(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    key_on_plan(
+        aws,
+        month_2026_08=40,
+        month_2026_09=50,
+        day_2026_09_28=1,
+        day_2026_09_29=2,
+        day_2026_09_30=3,
+    )
+    budget_item(aws)["day_note"] = {"S": "written by hand"}
+    at(budget_clock, "2026-10-01T09:00:00+02:00")
+
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    counts = sorted(name for name in item if name.startswith(("day_2", "month_")))
+    assert counts == [
+        "day_2026-09-30",
+        "day_2026-10-01",
+        "month_2026-09",
+        "month_2026-10",
+    ]
+    assert item["day_note"] == {"S": "written by hand"}
+
+
+def test_a_long_tail_of_old_counts_is_cleared_a_few_at_a_time(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    key_on_plan(aws, **{f"day_2026_09_{day:02}": 1 for day in range(1, 16)})
+    at(budget_clock, "2026-10-01T09:00:00+02:00")
+
+    assert call(event())[0] == 200
+    left = [name for name in budget_item(aws) if name.startswith("day_2026-09")]
+    assert len(left) == 15 - handler.MAX_STALE_COUNTS
+    assert call(event())[0] == 200
+    assert not [name for name in budget_item(aws) if name.startswith("day_2026-09")]
+
+
+def test_a_spent_demo_key_put_on_a_plan_asks_again_and_loses_its_end(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """The step from a test to a paying customer, with the key kept."""
+    for _ in range(10):
+        call(event())
+    assert call(event())[0] == 402
+    budget_item(aws)["plan"] = {"S": "betrieb"}
+
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    assert handler.BUDGET_TTL_ATTRIBUTE not in item
+    assert number(item, "questions_used") == 10
+
+
+def test_a_new_plan_takes_its_limits_and_keeps_the_months_count(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    """Changing the plan is no way to a fresh month: the count stays, the limit changes."""
+    key_on_plan(aws, month_2026_10=6000)
+    at(budget_clock, "2026-10-20T15:00:00+02:00")
+    assert call(event())[0] == 429
+
+    budget_item(aws)["plan"] = {"S": "firma"}
+    assert call(event())[0] == 200
+    assert number(budget_item(aws), "month_2026-10") == 6001
+
+    key_on_plan(aws, "firma", month_2026_10=8000)
+    budget_item(aws)["plan"] = {"S": "betrieb"}
+    assert call(event()) == (
+        429,
+        {"error": handler.MONTH_QUOTA_MESSAGES["en"].format(limit="6,000")},
+    )
+
+
+def test_a_key_taken_off_its_plan_is_a_demo_key_again(aws: dict[str, Any]) -> None:
+    key_on_plan(aws, month_2026_10=6000)
+    del budget_item(aws)["plan"]
+    assert call(event())[0] == 200
+    item = budget_item(aws)
+    assert number(item, "questions_used") == 1
+    assert number(item, "question_limit") == int(ENVIRONMENT["QUESTION_LIMIT"])
+
+
+@pytest.mark.parametrize(
+    "plan",
+    [{"S": "gold"}, {"S": ""}, {"S": "Betrieb"}, {"S": "demo"}, {"N": "1"}, {"NULL": True}],
+    ids=["unknown", "empty", "capitalised", "demo-by-name", "number", "null"],
+)
+def test_a_plan_nobody_defined_answers_nothing_and_says_so_in_the_log(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture, plan: dict[str, Any]
+) -> None:
+    """A key on a plan never falls through to a question nothing counts."""
+    caplog.set_level(logging.INFO, logger="andur")
+    key_on_plan(aws)
+    budget_item(aws)["plan"] = plan
+
+    assert call(event()) == (500, {"error": NOT_CONFIGURED_MESSAGE})
+    assert aws["bedrock-runtime"].calls == []
+    assert len(aws["dynamodb"].calls) == 1
+    assert any(line["event"] == "budget-plan-unknown" for line in log_lines(caplog))
+
+
+@pytest.mark.parametrize("count", ["month_2026-10", "day_2026-10-01"])
+def test_a_count_that_is_not_a_number_answers_nothing_until_its_period_is_over(
+    aws: dict[str, Any],
+    budget_clock: "FakeWallClock",
+    caplog: pytest.LogCaptureFixture,
+    count: str,
+) -> None:
+    caplog.set_level(logging.INFO, logger="andur")
+    key_on_plan(aws)
+    budget_item(aws)[count] = {"S": "many"}
+    at(budget_clock, "2026-10-01T09:00:00+02:00")
+
+    assert call(event()) == (500, {"error": NOT_CONFIGURED_MESSAGE})
+    assert aws["bedrock-runtime"].calls == []
+    assert any(line["event"] == "budget-item-broken" for line in log_lines(caplog))
+
+    at(budget_clock, "2026-11-01T09:00:00+01:00")
+    assert call(event())[0] == 200
+
+
+def test_missing_counts_are_a_fresh_period_and_the_item_needs_nothing_else(
+    aws: dict[str, Any],
+) -> None:
+    """A plan item written with the plan alone, no workspace, no counts."""
+    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
+        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+        "plan": {"S": "firma"},
+    }
+    assert call(event())[0] == 200
+    assert budget_item(aws)["workspace"] == {"S": "quillmoor"}
+
+
+def test_a_refusal_without_the_item_is_no_answer(aws: dict[str, Any]) -> None:
+    """Should DynamoDB send a refused plan write back without the item, nothing passes."""
+    key_on_plan(aws)
+    table = aws["dynamodb"]
+    refuse_bare = conditional_check_failed(None)
+    original = table.update_item
+
+    def update_item(**kwargs: Any) -> dict[str, Any]:
+        if "#month" in kwargs.get("ExpressionAttributeNames", {}):
+            table.calls.append(kwargs)
+            raise refuse_bare
+        return original(**kwargs)
+
+    table.update_item = update_item
+    assert call(event()) == (500, {"error": NOT_CONFIGURED_MESSAGE})
+    assert aws["bedrock-runtime"].calls == []
+
+
+def test_a_plan_count_the_table_cannot_take_is_500_and_not_a_free_pass(
+    aws: dict[str, Any],
+) -> None:
+    key_on_plan(aws)
+    aws["dynamodb"].error = client_error("ThrottlingException", operation="UpdateItem")
+    aws["dynamodb"].error_from_call = 2
+    assert call(event()) == (500, {"error": NOT_CONFIGURED_MESSAGE})
+    assert aws["bedrock-runtime"].calls == []
+
+
+def test_a_condition_that_allowed_the_601st_question_would_show_here(
+    aws: dict[str, Any], budget_clock: "FakeWallClock", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """As for the demo: the tests read the plan condition the handler sends."""
+    monkeypatch.setattr(
+        handler, "PLAN_CONDITION", handler.PLAN_CONDITION.replace("#day <", "#day <=")
+    )
+    key_on_plan(aws, day_2026_10_01=600)
+    at(budget_clock, "2026-10-01T09:00:00+02:00")
+    assert call(event())[0] == 200
+    assert number(budget_item(aws), "day_2026-10-01") == 601
+
+
+def test_a_refused_plan_question_is_logged_with_its_reason_and_without_the_key(
+    aws: dict[str, Any], budget_clock: "FakeWallClock", caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="andur")
+    key_on_plan(aws, day_2026_10_01=600)
+    at(budget_clock, "2026-10-01T09:00:00+02:00")
+
+    assert call(event())[0] == 429
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "refused"]
+    assert line["status"] == 429
+    assert line["error"] == handler.DAY_QUOTA_MESSAGES["en"].format(limit="600")
+    assert KEYS["quillmoor"] not in caplog.text
+    assert handler.key_hash(KEYS["quillmoor"]) not in caplog.text
+
+
+def test_two_keys_on_plans_count_apart(aws: dict[str, Any], budget_clock: "FakeWallClock") -> None:
+    key_on_plan(aws, day_2026_10_01=600)
+    key_on_plan(aws, "firma", key=KEYS["pellwick"])
+    at(budget_clock, "2026-10-01T09:00:00+02:00")
+    assert call(event())[0] == 429
+    pellwick = event({"question": "How?", "workspace": "pellwick"}, key=KEYS["pellwick"])
+    assert call(pellwick)[0] == 200
+    assert number(budget_item(aws, KEYS["pellwick"]), "day_2026-10-01") == 1
 
 
 # --- Retrieval and prompt ------------------------------------------------
@@ -2624,6 +3236,8 @@ SENTENCE_TABLES = {
         "QUESTIONS_SPENT_MESSAGES",
         "WINDOW_CLOSED_MESSAGES",
         "BUDGET_SPENT_MESSAGES",
+        "MONTH_QUOTA_MESSAGES",
+        "DAY_QUOTA_MESSAGES",
         "QUESTION_REFUSED_ANSWERS",
         "ANSWER_WITHHELD_ANSWERS",
     )
@@ -2673,6 +3287,7 @@ def test_every_error_read_after_the_body_has_a_german_sentence() -> None:
         "Unauthorized",
         "Forbidden",
         "BudgetSpent",
+        "QuotaReached",
         "RetrievalError",
         "LLMError",
     }

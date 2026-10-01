@@ -80,10 +80,14 @@ That bounds the rate at which anything can arrive; what one key may spend in
 total is its budget — ten questions and 48 hours, so about 0.04 USD with
 Nova Pro at ten passages before the key is refused (0.02 to 0.08 across the
 models above, measured at six passages). A leaked key is a leak of ten questions, not of an
-open tap.
+open tap. A key on a plan may spend a month's quota: at 0.0043 USD per
+answered question, about 26 USD a month on `betrieb` (6,000 questions) and
+65 USD on `firma` (15,000), if every question is used and answered.
 
 **Counting it:** one conditional write per question, which is one write unit
 on a table billed per request — 0.705 USD per million writes in `eu-west-1`.
+A question on a plan is two, the refused demo write and the count; still a
+fraction of a cent per thousand questions.
 That is 0.71 USD per million questions, against roughly 1,900 to 7,700 USD
 per million at the model and the guardrail. The counter is not what the bill is made of. Note that the permanent free tier of
 25 write and 25 read units is for provisioned capacity, not for on-demand

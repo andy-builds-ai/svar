@@ -275,6 +275,15 @@ def test_a_spent_key_gets_the_hint_to_ask_for_a_new_one_in_the_page_language(
 
 
 @pytest.mark.parametrize("language", ["en", "de"])
+def test_a_full_quota_is_the_functions_sentence_alone_without_the_hint(language: str) -> None:
+    """A key on a plan gets 429 with a sentence (app/handler.py, QuotaReached): its quota
+    comes back by itself, and a new key is not what helps. Lambda's own 429 has no
+    sentence and keeps the page's (below)."""
+    payload = {"error": "Das Kontingent von 600 Fragen für heute ist erreicht."}
+    assert run("problemSentence", language, 429, payload) == payload["error"]
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
 @pytest.mark.parametrize(
     ("status", "key"),
     [

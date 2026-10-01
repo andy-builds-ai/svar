@@ -195,6 +195,53 @@ hash. On demand, because a public URL has no rate to provision for.
 **2026-09-17 — An item is kept 365 days.** The item is what keeps a spent key
 spent; once it is gone, the key starts over.
 
+**2026-10-01 — A paying customer's key carries a plan, and the plans live in
+one table.** Until now every key ended after 48 hours, and a customer would
+have been locked out on day three. `betrieb` allows 6,000 questions a
+calendar month and at most 600 a day, `firma` 15,000 and 1,500; the quota
+renews every month and the key never ends. Generous on purpose: it guards
+against a key in the wrong hands, not against the bill. The numbers stand
+in `app/plans.py` alone, which the function and `scripts/workspace.py` both
+read, so a change is one line and a deploy. The item names its plan; an item
+without one is the demo, exactly as before, so the demo keys in use go on
+unchanged.
+
+**2026-10-01 — German calendar months and days, worked out in the code.**
+The quota renews at midnight in Germany, where the customers are. `zoneinfo`
+needs a time zone database that nothing promises the Lambda runtime brings
+(this laptop's Python has none either), so the handler applies the EU rule
+for summer time itself; a test compares it with the database every half hour
+from 2026 to 2030 where one is installed. Should the EU ever drop the clock
+change, this is the line to change.
+
+**2026-10-01 — One count per month and per day, named by the period.** A key
+on a plan counts in `month_2026-10` and `day_2026-10-01`. A new day is a new
+attribute, so nothing is reset and nothing races at midnight, and a question
+that set out before midnight counts in its own day. The other way, a single
+`day` and `day_used` reset when the day changes, needs a second conditional
+write whenever two questions meet at the change, and more writes than the
+worst case of the timeouts allows for. Each write clears the counts older
+than last month and yesterday.
+
+**2026-10-01 — The demo write comes first and hands over the plan.** Its
+condition refuses an item with a plan, and DynamoDB returns the refused item;
+the second write counts against the plan. No read, and two writes per
+question on a plan, which the worst case already counts for a demo key (the
+count and the TTL repair). A plan item has no TTL: losing the item would turn
+the key back into a demo key.
+
+**2026-10-01 — A full quota is a 429, a spent demo key still a 402.** 402 says
+nothing comes back and a new key is needed, which the page adds in a line of
+its own. A quota does come back, and 429 says to come back later; its body
+carries a sentence, which Lambda's own 429 does not, so the page shows it
+alone. The sentence asks the customer to get in touch with their contact
+person, in German or English like every other.
+
+**2026-10-01 — A plan item that cannot be counted answers nothing.** An
+unknown plan and a count that is not a number are a 500 with a log line,
+never a question that nothing counted. A missing count is the start of its
+period.
+
 ## The answer
 
 **2026-09-15 — Nemotron 3 Super answers.** The model id lives in the stack,

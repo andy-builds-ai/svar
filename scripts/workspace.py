@@ -1,18 +1,22 @@
-"""Add a workspace's key, or remove a workspace: its key, budget, documents and vectors.
+"""Add a workspace's key, change its plan, or remove a workspace: its key, budget,
+documents and vectors.
 
 No customer is named in the repository. A workspace exists in AWS: a key under the
 stack output ``ApiKeyParameterPath``, documents under ``workspaces/<name>/`` in the
-documents bucket. This script adds the first and removes all of it again.
+documents bucket, and for a paying customer a plan in the key's budget item. This
+script adds the key and the plan, changes the plan, and removes all of it again.
 """
 
 import argparse
 import hashlib
+import re
 import secrets
 import sys
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.plans import DEMO, PLANS, plan_named
 from scripts import utf8_output
 from scripts.aws import (
     REGION,
@@ -47,7 +51,17 @@ KEY_DESCRIPTION = "Andur workspace key. Send it in the header X-Andur-Key."
 #: (``BUDGET_KEY_ATTRIBUTE`` and ``key_hash`` in app/handler.py).
 BUDGET_KEY_ATTRIBUTE = "key_hash"
 
+#: The attribute that names a key's plan, and the one the table's TTL reads
+#: (``PLAN_ATTRIBUTE`` and ``BUDGET_TTL_ATTRIBUTE`` in app/handler.py).
+PLAN_ATTRIBUTE = "plan"
+BUDGET_TTL_ATTRIBUTE = "delete_after"
+
+#: What ``--plan`` and ``plan`` accept: the demo budget, or a plan of app/plans.py.
+PLAN_CHOICES = (DEMO, *(plan.name for plan in PLANS))
+
 ADD_OUTPUTS = ("ApiKeyParameterPath",)
+ADD_WITH_PLAN_OUTPUTS = ("ApiKeyParameterPath", "BudgetTableName")
+PLAN_OUTPUTS = ("ApiKeyParameterPath", "BudgetTableName")
 REMOVE_OUTPUTS = (
     "ApiKeyParameterPath",
     "BudgetTableName",
@@ -114,6 +128,64 @@ def add_key(ssm: Any, name: str) -> str:
                 f"There is a key {name} already. It stays as it is; nothing was changed."
             ) from problem.__cause__
     return key
+
+
+# --- plan ----------------------------------------------------------------
+
+
+def describe_plan(name: str) -> str:
+    """What a key on this plan may ask, in one line."""
+    plan = plan_named(name)
+    if plan is None:
+        return "demo: the stack's demo budget (app/README.md, 'Keys are budgets, not passwords')"
+    return (
+        f"{plan.name}: {plan.questions_per_month:,} questions a calendar month, at most "
+        f"{plan.questions_per_day:,} a day, German time"
+    )
+
+
+def set_plan(dynamodb: Any, table: str, key: str, workspace: str, name: str) -> str:
+    """Put the key's budget item on the plan ``name``, or back on the demo budget; return
+    the plan it was on.
+
+    A plan item has no ``delete_after``: the table's TTL would otherwise delete it one day,
+    and the key would fall back to the demo budget. Back on the demo, the next question
+    that passes writes it again; on a key whose demo budget is spent none passes, and the
+    item stays until `remove`. The counts stay either way, so changing the plan is no
+    way to a fresh month. An item of another workspace is left alone.
+    """
+    request: dict[str, Any] = {
+        "TableName": table,
+        "Key": budget_key(key),
+        "ConditionExpression": "attribute_not_exists(#workspace) OR #workspace = :workspace",
+        "ExpressionAttributeNames": {
+            "#workspace": BUDGET_WORKSPACE_ATTRIBUTE,
+            "#plan": PLAN_ATTRIBUTE,
+        },
+        "ExpressionAttributeValues": {":workspace": {"S": workspace}},
+        "ReturnValues": "ALL_OLD",
+    }
+    if name == DEMO:
+        request["UpdateExpression"] = (
+            "SET #workspace = if_not_exists(#workspace, :workspace) REMOVE #plan"
+        )
+    else:
+        request["UpdateExpression"] = (
+            "SET #plan = :plan, #workspace = if_not_exists(#workspace, :workspace)"
+            f" REMOVE {BUDGET_TTL_ATTRIBUTE}"
+        )
+        request["ExpressionAttributeValues"][":plan"] = {"S": name}
+    try:
+        with explained(f"Setting the plan of the key in {table}"):
+            response = dynamodb.update_item(**request)
+    except AwsProblem as problem:
+        if error_code(problem.__cause__) != "ConditionalCheckFailedException":
+            raise
+        raise AwsProblem(
+            "The budget item of this key names another workspace. Nothing was changed."
+        ) from problem.__cause__
+    before = response.get("Attributes", {}).get(PLAN_ATTRIBUTE, {})
+    return before.get("S", "unknown") if before else DEMO
 
 
 # --- remove --------------------------------------------------------------
@@ -233,7 +305,25 @@ def find_removal(
     return removal
 
 
+MONTH_COUNT_NAME = re.compile(r"month_\d{4}-\d{2}")
+DAY_COUNT_NAME = re.compile(r"day_\d{4}-\d{2}-\d{2}")
+
+
+def plan_line(item: Mapping[str, Any]) -> str:
+    """The plan of an item and its latest counts: ``plan betrieb, 120 questions in 2026-10``."""
+    parts = [f"plan {item[PLAN_ATTRIBUTE].get('S', 'unknown')}"]
+    months = sorted(name for name in item if MONTH_COUNT_NAME.fullmatch(name))
+    days = sorted(name for name in item if DAY_COUNT_NAME.fullmatch(name))
+    if months:
+        parts.append(f"{item[months[-1]].get('N', '?')} questions in {months[-1][6:]}")
+    if days:
+        parts.append(f"{item[days[-1]].get('N', '?')} on {days[-1][4:]}")
+    return ", ".join(parts)
+
+
 def budget_line(item: Mapping[str, Any]) -> str:
+    if PLAN_ATTRIBUTE in item:
+        return plan_line(item)
     used = item.get("questions_used", {}).get("N", "0")
     limit = item.get("question_limit", {}).get("N")
     return f"{used} of {limit} questions used" if limit else f"{used} questions used"
@@ -311,7 +401,7 @@ KEY_CACHE_MINUTES = 5
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m scripts.workspace",
-        description="Add a workspace's key, or remove a workspace from Andur.",
+        description="Add a workspace's key, change its plan, or remove a workspace from Andur.",
     )
     parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
     parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
@@ -320,6 +410,17 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "add", help="create the workspace's key and print it once; never replaces a key"
     )
     add.add_argument("workspace")
+    add.add_argument(
+        "--plan",
+        choices=PLAN_CHOICES,
+        default=DEMO,
+        help=f"the key's plan (app/plans.py); default: {DEMO}",
+    )
+    plan = commands.add_parser(
+        "plan", help="put the workspace's key on another plan; the key stays as it is"
+    )
+    plan.add_argument("workspace")
+    plan.add_argument("plan", choices=PLAN_CHOICES)
     remove = commands.add_parser(
         "remove",
         help="show what belongs to the workspace; with --yes delete key, budget and documents",
@@ -334,15 +435,65 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def run_add(args: argparse.Namespace, settings: Mapping[str, str], connect: Any) -> int:
     name = key_parameter(settings["ApiKeyParameterPath"], args.workspace)
     key = add_key(connect("ssm", args.region), name)
+    # Nobody has the key yet, so no question can arrive before its plan does. Should the
+    # plan not get through, the key is printed all the same: this is its only showing.
+    failed = None
+    if args.plan != DEMO:
+        try:
+            set_plan(
+                connect("dynamodb", args.region),
+                settings["BudgetTableName"],
+                key,
+                args.workspace,
+                args.plan,
+            )
+        except AwsProblem as problem:
+            failed = problem
     # The key alone goes to stdout, everything else to stderr: `> file` keeps the key and
     # nothing else, `> /dev/null` keeps it off the screen.
     print(f"Stored a new key for workspace {args.workspace} under {name}.", file=sys.stderr)
+    budget = (
+        "has the default budget (app/README.md, 'Keys are budgets, not passwords')"
+        if args.plan == DEMO or failed
+        else f"is on the plan {describe_plan(args.plan)}"
+    )
     print(
-        "It works at once and has the default budget (app/README.md, 'Keys are budgets, not "
-        "passwords'). This is the only time this script prints it:",
+        f"It works at once and {budget}. This is the only time this script prints it:",
         file=sys.stderr,
     )
     print(key)
+    if failed:
+        print(f"error: the key is stored, its plan is not: {failed}", file=sys.stderr)
+        print(
+            f"Run `python -m scripts.workspace plan {args.workspace} {args.plan}` before the "
+            "key is handed out.",
+            file=sys.stderr,
+        )
+        return 2
+    return 0
+
+
+def run_plan(args: argparse.Namespace, settings: Mapping[str, str], connect: Any) -> int:
+    name = key_parameter(settings["ApiKeyParameterPath"], args.workspace)
+    key = read_key(connect("ssm", args.region), name)
+    if key is None:
+        raise AwsProblem(
+            f"There is no key {name}. Add one with "
+            f"`python -m scripts.workspace add {args.workspace} --plan {args.plan}`."
+        )
+    before = set_plan(
+        connect("dynamodb", args.region),
+        settings["BudgetTableName"],
+        key,
+        args.workspace,
+        args.plan,
+    )
+    print(f"Workspace {args.workspace}: plan {before} -> {args.plan}")
+    print(f"  {describe_plan(args.plan)}")
+    print(
+        "The key stays as it is. The answer function reads the plan with the next question; "
+        "the counts of this month and day go on."
+    )
     return 0
 
 
@@ -379,15 +530,18 @@ def main(argv: list[str] | None = None, connect: Callable[[str, str], Any] = cli
     if problem:
         print(f"error: {args.workspace!r}: {problem}", file=sys.stderr)
         return 1
-    wanted = ADD_OUTPUTS if args.command == "add" else REMOVE_OUTPUTS
+    if args.command == "add":
+        wanted, run = (ADD_OUTPUTS if args.plan == DEMO else ADD_WITH_PLAN_OUTPUTS), run_add
+    elif args.command == "plan":
+        wanted, run = PLAN_OUTPUTS, run_plan
+    else:
+        wanted, run = REMOVE_OUTPUTS, run_remove
     try:
         settings = resolve(
             dict.fromkeys(wanted),
             lambda: read_stack_outputs(connect("cloudformation", args.region), args.stack_name),
         )
-        if args.command == "add":
-            return run_add(args, settings, connect)
-        return run_remove(args, settings, connect)
+        return run(args, settings, connect)
     except AwsProblem as problem:
         print(f"error: {problem}", file=sys.stderr)
         return 2

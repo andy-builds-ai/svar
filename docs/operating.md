@@ -131,6 +131,8 @@ documents.
 
 ```bash
 python -m scripts.workspace add <name>             # create the key, print it once
+python -m scripts.workspace add <name> --plan firma   # the same, on a plan
+python -m scripts.workspace plan <name> betrieb    # change the plan; the key stays
 python -m scripts.workspace remove <name>          # show what belongs to it, delete nothing
 python -m scripts.workspace remove <name> --yes    # delete key, budget items and documents
 ```

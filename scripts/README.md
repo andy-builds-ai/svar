@@ -8,7 +8,7 @@ Five commands, all run from the repository root:
 | `python -m scripts.retrieve` | Asks the knowledge base a question inside one workspace and prints the hits. |
 | `python -m scripts.ask` | Asks the deployed answer function a question and prints the answer with its sources. |
 | `python -m scripts.evaluate` | Asks 30 fixed questions of each answer model the way the function does and prints hit rate, citations and cost. |
-| `python -m scripts.workspace` | Adds a workspace's key, or removes a workspace: key, budget items, documents and vectors. |
+| `python -m scripts.workspace` | Adds a workspace's key, puts it on a plan, or removes a workspace: key, budget items, documents and vectors. |
 
 ## What they need
 
@@ -203,20 +203,23 @@ language and they are English.
 | Exit code | Meaning |
 |---|---|
 | 0 | Answered. |
-| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 402 key budget used up, 403 key of another workspace, 400 bad question, 502 Bedrock failed). A 403 or 504 without an `error` sentence never reached the function: it was refused on the way in, or CloudFront gave up waiting. |
+| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 402 demo budget used up, 429 with a sentence: the plan's quota for the month or the day reached, 403 key of another workspace, 400 bad question, 502 Bedrock failed). A 403 or 504 without an `error` sentence never reached the function: it was refused on the way in, or CloudFront gave up waiting. |
 | 2 | An AWS step or the connection failed: login, stack, missing key parameter, network. |
 
 ## workspace — adding and removing a workspace
 
 ```bash
 python -m scripts.workspace add kalvenstett                # create the key, print it once
+python -m scripts.workspace add kalvenstett --plan firma   # the same, on the plan firma
+python -m scripts.workspace plan kalvenstett betrieb       # put the key on another plan
 python -m scripts.workspace remove kalvenstett             # show what belongs to it
 python -m scripts.workspace remove kalvenstett --yes       # delete it
 ```
 
 No customer is named in the repository and none needs a deploy. A workspace
 is what AWS holds under its name: the key `/andur/api-keys/<name>`, the budget
-item of that key, and the documents under `workspaces/<name>/`. The name
+item of that key with its plan, if it has one, and the documents under
+`workspaces/<name>/`. The name
 follows the answer function's rule — lowercase letters, digits and single
 hyphens, at most 64 characters — and a name outside it is refused before any
 AWS call.
@@ -234,8 +237,28 @@ another before its first question, see
 [app/README.md](../app/README.md#setting-a-budget-for-one-key). Its documents
 go in with `python -m scripts.ingest --source <folder> --workspace <name>`.
 
+**add --plan** `betrieb` or `firma` puts the new key on that plan in the
+same run: it writes the key's budget item with the plan and the workspace,
+and nothing else (*Plans* in
+[app/README.md](../app/README.md#plans)). The plans and their numbers are the
+ones in `app/plans.py`, the table the answer function counts by; `demo`, the
+default, writes no item. Nobody has the key yet, so no question can come
+before its plan. Should the plan not get through, the key is still printed —
+it is its only showing — and `add` ends with exit code 2 and the `plan`
+command to run before the key is handed out.
+
+**plan** `<name> <plan>` puts the workspace's existing key on another plan,
+or with `demo` takes it off its plan. The key stays as it is; the function
+reads the plan with the next question. It prints the plan before and after,
+never the key. The month's and the day's counts stay, so a new plan is no
+way to a fresh month. Putting a key on a plan also removes the item's
+`delete_after`, which the table's TTL would one day act on: a plan item lives
+until `remove`. An item that names another workspace is left alone (exit
+code 2).
+
 **remove** first finds everything that belongs to the name and prints it: the
-key (never its value), every budget item with the questions used, and every
+key (never its value), every budget item with the questions used — for a key
+on a plan the plan and its latest month's and day's counts — and every
 document object. The budget items are the one of the current key's hash and
 every item whose `workspace` is the name — the function writes it into each
 item it creates — so items of earlier keys are found too, and so are all of
@@ -268,9 +291,9 @@ outputs.
 
 | Exit code | Meaning |
 |---|---|
-| 0 | Done: the key was added; or `remove` listed, or deleted and the job completed. |
+| 0 | Done: the key was added, or its plan changed; or `remove` listed, or deleted and the job completed. |
 | 1 | The name breaks the naming rule. Nothing was called. |
-| 2 | An AWS step failed, or `add` found a key there already. What was deleted before the failure is gone; rerun to finish. |
+| 2 | An AWS step failed, `add` found a key there already, `add --plan` stored the key but not its plan, or `plan` found no key or an item of another workspace. A plan nobody defined is refused by the command line with 2 too, before any call. What was deleted before the failure is gone; rerun to finish. |
 | 3 | Everything was deleted, but the ingestion job failed; the vectors may still be there. Rerun `remove <name> --yes`. |
 
 ## evaluate — which model answers best
