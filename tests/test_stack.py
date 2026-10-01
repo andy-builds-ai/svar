@@ -52,6 +52,8 @@ from infra.stacks.andur_stack import (
     EXCERPT_GUARDRAIL_NAME,
     GROUNDING_THRESHOLD,
     GUARDRAIL_NAME,
+    GUARDRAIL_PROFILE_ID,
+    GUARDRAIL_PROFILE_REGIONS,
     HSTS_MAX_AGE_DAYS,
     KNOWLEDGE_BASE_NAME,
     MASKED_PII_TYPES,
@@ -68,6 +70,7 @@ from infra.stacks.andur_stack import (
     RELEVANCE_THRESHOLD,
     REPOSITORY_ROOT,
     SITE_ROOT_DOCUMENT,
+    TOPICS_TIER,
     VECTOR_DATA_TYPE,
     VECTOR_INDEX_NAME,
     WEB_FOLDER,
@@ -131,6 +134,23 @@ def role_policies(stack: AndurStack, template: Template, role: Any) -> dict[str,
 def joined_last_part(value: Mapping[str, Any]) -> str:
     """The literal end of an ARN that CloudFormation renders as a Fn::Join."""
     return value["Fn::Join"][1][-1]
+
+
+def profile_arn(region: Any) -> dict[str, Any]:
+    """The EU guardrail profile in ``region`` as CloudFormation renders it."""
+    middle = [":bedrock:", region, ":"] if isinstance(region, dict) else [f":bedrock:{region}:"]
+    return {
+        "Fn::Join": [
+            "",
+            [
+                "arn:",
+                {"Ref": "AWS::Partition"},
+                *middle,
+                {"Ref": "AWS::AccountId"},
+                f":guardrail-profile/{GUARDRAIL_PROFILE_ID}",
+            ],
+        ]
+    }
 
 
 # --- Documents bucket ----------------------------------------------------
@@ -627,7 +647,7 @@ def test_the_model_id_is_configuration_not_handler_code() -> None:
         assert ANSWER_MODEL_ID not in module.read_text(encoding="utf-8"), module.name
 
 
-def test_answer_role_has_six_permissions_each_on_one_resource(
+def test_answer_role_has_five_policies_on_named_resources(
     stack: AndurStack, template: Template
 ) -> None:
     policies = role_policies(stack, template, stack.answer_role)
@@ -684,11 +704,20 @@ def test_answer_role_has_six_permissions_each_on_one_resource(
             }
         }
     }
+    # The answer guardrail runs through the EU profile: the profile in every region it
+    # routes to, and in none outside the EU.
+    # The CDK sorts the resources of a statement; compared without order.
     assert apply_guardrail["Action"] == "bedrock:ApplyGuardrail"
-    assert apply_guardrail["Resource"] == [
-        get_att(stack, stack.guardrail, "GuardrailArn"),
-        get_att(stack, stack.excerpt_guardrail, "GuardrailArn"),
-    ]
+    assert sorted(map(json.dumps, apply_guardrail["Resource"])) == sorted(
+        map(
+            json.dumps,
+            [
+                get_att(stack, stack.guardrail, "GuardrailArn"),
+                get_att(stack, stack.excerpt_guardrail, "GuardrailArn"),
+                *(profile_arn(region) for region in GUARDRAIL_PROFILE_REGIONS),
+            ],
+        )
+    )
 
     (write_logs,) = policies["WriteLogs"]["Statement"]
     assert sorted(write_logs["Action"]) == ["logs:CreateLogStream", "logs:PutLogEvents"]
@@ -1191,10 +1220,56 @@ def test_the_four_topics_are_refused_in_question_and_answer(
         assert (topic["OutputEnabled"], topic["OutputAction"]) == (True, "BLOCK")
 
 
-def test_topics_stay_inside_what_bedrock_accepts() -> None:
-    """Classic tier: a definition of at most 200 characters, up to five examples of at most 100.
+def test_denied_topics_run_in_the_standard_tier_through_the_eu_profile(
+    stack: AndurStack, template: Template
+) -> None:
+    """The Classic tier reads English, French and Spanish only. Measured 01.10.2026 against
+    the deployed guardrail: 5 of 16 German refusals passed, among them a tax question. The
+    Standard tier reads German and needs a guardrail profile; the EU one stays in the EU."""
+    properties = resource_of(stack, template, stack.guardrail)["Properties"]
+    assert TOPICS_TIER == "STANDARD"
+    assert properties["TopicPolicyConfig"]["TopicsTierConfig"] == {"TierName": "STANDARD"}
+    assert properties["CrossRegionConfig"] == {
+        "GuardrailProfileArn": profile_arn({"Ref": "AWS::Region"})
+    }
+    excerpt = resource_of(stack, template, stack.excerpt_guardrail)["Properties"]
+    assert "CrossRegionConfig" not in excerpt
 
-    Too long is no synth error; it is a failed deploy after several minutes.
+
+def test_the_eu_guardrail_profile_routes_inside_the_eu_only() -> None:
+    """The destination regions of eu.guardrail.v1:0 called from an EU region, as the user
+    guide lists them: Frankfurt, Ireland, Paris, Stockholm, Milan, Spain."""
+    assert GUARDRAIL_PROFILE_ID == "eu.guardrail.v1:0"
+    assert GUARDRAIL_PROFILE_REGIONS == (
+        "eu-central-1",
+        "eu-west-1",
+        "eu-west-3",
+        "eu-north-1",
+        "eu-south-1",
+        "eu-south-2",
+    )
+
+
+def test_the_pinned_region_synthesises_with_its_own_profile() -> None:
+    app = cdk.App(context=deploy_context())
+    stack = AndurStack(app, "IrelandStack", env=cdk.Environment(region="eu-west-1"))
+    properties = resource_of(stack, Template.from_stack(stack), stack.guardrail)["Properties"]
+    assert properties["CrossRegionConfig"] == {"GuardrailProfileArn": profile_arn("eu-west-1")}
+
+
+@pytest.mark.parametrize("region", ["us-east-1", "eu-west-2", "il-central-1"])
+def test_a_stack_outside_the_profiles_regions_does_not_synthesise(region: str) -> None:
+    """London has its own UK profile, and from Tel Aviv the EU profile also routes to
+    Tel Aviv: neither keeps the guardrail's checks in the EU."""
+    app = cdk.App(context=deploy_context())
+    with pytest.raises(ValueError, match="not a source region"):
+        AndurStack(app, "OutsideStack", env=cdk.Environment(region=region))
+
+
+def test_topics_stay_inside_what_bedrock_accepts() -> None:
+    """The Classic tier's limits, which the Standard tier's (definitions up to 1,000
+    characters) contain: a definition of at most 200 characters, up to five examples of at
+    most 100. Too long is no synth error; it is a failed deploy after several minutes.
     """
     name_pattern = re.compile(r"^[0-9a-zA-Z-_ !?.]+$")
     for name, definition, examples in DENIED_TOPICS:

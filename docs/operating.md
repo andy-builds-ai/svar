@@ -27,6 +27,13 @@ The first deploy of the distribution takes a few minutes longer than the
 others: CloudFront rolls a new configuration out to its edge locations before
 the stack reports success.
 
+A deploy that changes a guardrail setting makes a new guardrail version, and
+CloudFormation updates the answer role to that version before it updates the
+function. For a few seconds the function still calls the model with the old
+version, the role refuses it, and the question ends in 502 although it was
+already counted against the key. Deploy such a change when no customer is
+asking.
+
 The deploy creates no workspace key, and no customer is named anywhere in the
 repository. A workspace exists only in AWS: its key under
 `/andur/api-keys/<workspace>` and its documents under `workspaces/<workspace>/`

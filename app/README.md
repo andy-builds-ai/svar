@@ -480,7 +480,14 @@ Three policies, set in `infra/stacks/andur_stack.py`:
   guardrail's message, the status is still 200, and the question is spent.
   It comes back without sources: nothing was answered from them, and their
   excerpts would put the documents' text next to a refusal. An answer the
-  grounding check withholds keeps its sources.
+  grounding check withholds keeps its sources. The topics run in the
+  Standard tier, which reads German; the Classic tier reads only English,
+  French and Spanish and let 5 of 16 German refusals through (measured with
+  `ApplyGuardrail` on 01.10.2026). The Standard tier needs a guardrail
+  profile: the EU one, `eu.guardrail.v1:0`, which from eu-west-1 routes the
+  checks to six EU regions and no others (`GUARDRAIL_PROFILE_REGIONS`). The
+  answer role may apply the guardrail through that profile in those six
+  regions only.
 - **Masked personal details:** names, e-mail addresses, phone numbers and
   addresses in the answer are replaced by their type, such as `{EMAIL}`. The
   question is not checked, and neither are the passages: the model reads the
@@ -489,7 +496,9 @@ Three policies, set in `infra/stacks/andur_stack.py`:
   or that does not answer the question (relevance) is withheld. Both
   thresholds are 0.7, the value the user guide works its example with; AWS
   names no default. Every answered log line carries both scores, which is
-  what a threshold is tuned by.
+  what a threshold is tuned by. The user guide lists English, French and
+  Spanish for this check and no tier that adds German; how it scores a
+  German answer is not measured yet.
 
 How the message tells them apart: the passages go in a `guardContent`
 block qualified `grounding_source` — the reference for the grounding check
@@ -507,7 +516,11 @@ the passages do not mention is caught by the grounding check instead.
 The guardrail's version is a number, never `DRAFT`. A changed setting
 changes a digest in the version's description, and since that description is
 create-only, the deploy makes a new version and hands its number to the
-function in the same step.
+function — not at the same instant: CloudFormation updates the execution
+role, whose model permission names the version, before the function. For
+those seconds the running function still calls with the old version, the
+role refuses it, and a question ends in 502 after it was counted. See
+[docs/operating.md](../docs/operating.md#deploy).
 
 What the trace says goes to the log, never what it matched: a masked phone
 number is logged as `pii:PHONE`, not as the number, and the trace's copy of

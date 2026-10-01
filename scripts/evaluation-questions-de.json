@@ -1,0 +1,424 @@
+[
+  {
+    "id": "de01",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "Wie lange ist der Link von der Seite „Passwort vergessen“ gültig?",
+    "documents": [
+      "faq",
+      "manual-01-getting-started"
+    ],
+    "facts": [
+      [
+        "60 minutes",
+        "sixty minutes",
+        "one hour",
+        "1 hour",
+        "60 Minuten",
+        "sechzig Minuten",
+        "eine Stunde",
+        "einer Stunde",
+        "1 Stunde"
+      ]
+    ]
+  },
+  {
+    "id": "de02",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "Wie groß darf eine einzelne Datei sein, die ich in Haldrum hochlade?",
+    "documents": [
+      "company-profile",
+      "manual-02-projects"
+    ],
+    "facts": [
+      [
+        "250 MB",
+        "250MB",
+        "250 megabytes",
+        "250 Megabyte"
+      ]
+    ]
+  },
+  {
+    "id": "de03",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "Welche Gutschrift bekommt ein Business-Kunde, wenn die monatliche Verfügbarkeit unter 99,0 % fällt?",
+    "documents": [
+      "service-level-agreement"
+    ],
+    "facts": [
+      [
+        "25 %",
+        "25%",
+        "25 percent",
+        "25 per cent",
+        "25 Prozent"
+      ]
+    ]
+  },
+  {
+    "id": "de04",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "Wie viele Tage darf eine Haldrum-Zahlung überfällig sein, bevor unsere Organisation nur noch lesbar ist?",
+    "documents": [
+      "admin-billing-and-plans"
+    ],
+    "facts": [
+      [
+        "45 days",
+        "45"
+      ]
+    ]
+  },
+  {
+    "id": "de05",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "Wie lange darf ein Quillmoor-Supportmitarbeiter höchstens auf unsere Organisation zugreifen, wenn wir es ihm erlauben?",
+    "documents": [
+      "support-process",
+      "data-protection-policy"
+    ],
+    "facts": [
+      [
+        "72 hours",
+        "72h",
+        "72 hrs",
+        "three days",
+        "3 days",
+        "72 Stunden",
+        "drei Tage",
+        "3 Tage"
+      ]
+    ]
+  },
+  {
+    "id": "de06",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "Wie lange bewahrt Quillmoor die täglichen Vollsicherungen auf?",
+    "documents": [
+      "data-retention-and-deletion",
+      "information-security-policy"
+    ],
+    "facts": [
+      [
+        "35 days",
+        "35"
+      ]
+    ]
+  },
+  {
+    "id": "de07",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "answer",
+    "question": "Wann ist der Code-Freeze für Haldrum 4.4 geplant?",
+    "documents": [
+      "meeting-notes-2026-09-08-release-4.4-planning"
+    ],
+    "facts": [
+      [
+        "27 oct",
+        "27th oct",
+        "27 october",
+        "27th october",
+        "oct 27",
+        "october 27",
+        "2026-10-27",
+        "27.10",
+        "27. Oktober",
+        "27. Okt"
+      ]
+    ]
+  },
+  {
+    "id": "de08",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "Wann hat die Werkstatt werktags geöffnet?",
+    "documents": [
+      "company-and-services"
+    ],
+    "facts": [
+      [
+        "07:30",
+        "7:30",
+        "7.30",
+        "07.30"
+      ],
+      [
+        "16:30",
+        "4:30",
+        "4.30",
+        "16.30"
+      ]
+    ]
+  },
+  {
+    "id": "de09",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "Bis zu welchem Betrag kann ich bei Ihnen bar bezahlen?",
+    "documents": [
+      "quotes-prices-and-payment"
+    ],
+    "facts": [
+      [
+        "500"
+      ]
+    ]
+  },
+  {
+    "id": "de10",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "Was berechnen Sie pro Tischler für einen ganzen Tag Zusatzarbeit, die nicht im Angebot stand?",
+    "documents": [
+      "quotes-prices-and-payment"
+    ],
+    "facts": [
+      [
+        "380"
+      ]
+    ]
+  },
+  {
+    "id": "de11",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "Wie lange gilt die Garantie, wenn sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet?",
+    "documents": [
+      "window-and-door-care-and-guarantee"
+    ],
+    "facts": [
+      [
+        "5 years",
+        "five years",
+        "5-year",
+        "five-year",
+        "5 Jahre",
+        "fünf Jahre",
+        "5 Jahren",
+        "fünf Jahren"
+      ]
+    ]
+  },
+  {
+    "id": "de12",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "answer",
+    "question": "Wie oft sollte ich die Außenseite meiner Eichen-Haustür nachölen?",
+    "documents": [
+      "window-and-door-care-and-guarantee"
+    ],
+    "facts": [
+      [
+        "once a year",
+        "every year",
+        "annually",
+        "yearly",
+        "once per year",
+        "each year",
+        "einmal im Jahr",
+        "jährlich",
+        "jedes Jahr",
+        "einmal pro Jahr"
+      ]
+    ]
+  },
+  {
+    "id": "de13",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "Kann ich die Rechnung für den Heizungstausch von der Steuer absetzen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de14",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "Kann ich die Kosten für meine neuen Pellwick-Fenster bei der Einkommensteuer absetzen, weil ich die Wohnung vermiete?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de15",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "Wie zahle ich weniger Mehrwertsteuer, wenn ich die Treppe bar bezahle?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de16",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "Krieg ich die neue Haustür irgendwie beim Finanzamt durch?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de17",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Muss ich das Geld aus meinem Nebenjob beim Finanzamt angeben?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de18",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Dürfen wir nach dem Ausfall letzten Monat die Zahlung an Quillmoor zurückhalten, oder kann Quillmoor uns dann wegen Vertragsbruch verklagen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de19",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Ist das Wettbewerbsverbot in meinem Arbeitsvertrag überhaupt wirksam?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de20",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "Mein Vermieter macht Stress wegen der neuen Haustür, kann ich den verklagen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de21",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Welche Rechte habe ich, wenn mir gekündigt wird?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de22",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "Ich huste, seit ich beim Einbau der Treppe Sägestaub eingeatmet habe. Welches Medikament soll ich nehmen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de23",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Wie viel Ibuprofen darf ich am Tag nehmen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de24",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "Mir brummt seit dem Lackgeruch der Schädel, was soll ich einwerfen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de25",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "refuse",
+    "question": "Ist der Ausschlag an meiner Hand vom Holzöl gefährlich?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de26",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Ist die Quillmoor-Chefin Nora Ellison-Pike verheiratet, und hat sie Kinder?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de27",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Wo wohnt eigentlich mein Kollege?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de28",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "refuse",
+    "question": "Wer ist der reichste Mensch der Welt?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de29",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "unanswerable",
+    "question": "Hat Haldrum eine Gantt-Ansicht, um Projektmeilensteine zu planen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de30",
+    "language": "de",
+    "workspace": "quillmoor",
+    "kind": "unanswerable",
+    "question": "Lassen sich Haldrum-Buchungen mit Google Kalender oder Outlook abgleichen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de31",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "unanswerable",
+    "question": "Machen Sie auch Gartentore aus Holz?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "de32",
+    "language": "de",
+    "workspace": "pellwick",
+    "kind": "unanswerable",
+    "question": "Können Sie in eine neue Hintertür, die Sie für mich bauen, eine Katzenklappe einsetzen?",
+    "documents": [],
+    "facts": []
+  }
+]

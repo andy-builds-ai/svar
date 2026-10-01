@@ -11,6 +11,7 @@ from aws_cdk import (
     Duration,
     RemovalPolicy,
     Stack,
+    Token,
     aws_bedrock as bedrock,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
@@ -66,6 +67,24 @@ NUMBER_OF_RESULTS = 10
 
 
 GUARDRAIL_NAME = "andur-answer-guardrail"
+
+#: The Classic tier reads denied topics in English, French and Spanish only; it let
+#: German tax, legal and medical questions through. The Standard tier reads German
+#: and needs a guardrail profile. Both tiers cost the same per text unit.
+TOPICS_TIER = "STANDARD"
+
+#: The EU guardrail profile. Called from an EU region, it routes the guardrail's
+#: checks to these regions and no others (Bedrock user guide, "Supported Regions
+#: for cross-Region guardrail inference").
+GUARDRAIL_PROFILE_ID = "eu.guardrail.v1:0"
+GUARDRAIL_PROFILE_REGIONS = (
+    "eu-central-1",
+    "eu-west-1",
+    "eu-west-3",
+    "eu-north-1",
+    "eu-south-1",
+    "eu-south-2",
+)
 
 DENIED_TOPICS = (
     (
@@ -607,6 +626,26 @@ class AndurStack(Stack):
         )
         return guardrail, version
 
+    def _guardrail_profile_arn(self, region: str) -> str:
+        """The EU guardrail profile in ``region``.
+
+        A stack whose region is set to one outside the profile's regions would send
+        its checks across a border; it does not synthesise. Without a set region
+        (no ``env``) the region is unknown at synth time and cannot be checked;
+        infra/app.py always sets it.
+        """
+        if not Token.is_unresolved(self.region) and self.region not in GUARDRAIL_PROFILE_REGIONS:
+            raise ValueError(
+                f"{self.region} is not a source region of {GUARDRAIL_PROFILE_ID}; "
+                f"Andur's guardrail stays in {', '.join(GUARDRAIL_PROFILE_REGIONS)}."
+            )
+        return self.format_arn(
+            service="bedrock",
+            region=region,
+            resource="guardrail-profile",
+            resource_name=GUARDRAIL_PROFILE_ID,
+        )
+
     def _create_guardrail(self) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
         """The guardrail on every answer, and the numbered version the function uses."""
         return self._guardrail_with_version(
@@ -633,7 +672,13 @@ class AndurStack(Stack):
                             output_action="BLOCK",
                         )
                         for name, definition, examples in DENIED_TOPICS
-                    ]
+                    ],
+                    topics_tier_config=bedrock.CfnGuardrail.TopicsTierConfigProperty(
+                        tier_name=TOPICS_TIER
+                    ),
+                ),
+                "cross_region_config": bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
+                    guardrail_profile_arn=self._guardrail_profile_arn(self.region)
                 ),
                 "sensitive_information_policy_config": masking_policy(),
                 "contextual_grounding_policy_config": bedrock.CfnGuardrail.ContextualGroundingPolicyConfigProperty(  # noqa: E501
@@ -719,7 +764,9 @@ class AndurStack(Stack):
         guardrail_version: bedrock.CfnGuardrailVersion,
         excerpt_guardrail: bedrock.CfnGuardrail,
     ) -> iam.Role:
-        """The execution role of the answer function: six things, each on one resource."""
+        """The execution role of the answer function: five inline policies, every statement
+        on named resources. Most name one; `ApplyAnswerGuardrail` names eight — both
+        guardrails, and the EU guardrail profile in each of its six regions."""
         return iam.Role(
             self,
             "AnswerFunctionRole",
@@ -766,6 +813,11 @@ class AndurStack(Stack):
                             resources=[
                                 guardrail.attr_guardrail_arn,
                                 excerpt_guardrail.attr_guardrail_arn,
+                                # The answer guardrail runs through the EU profile.
+                                *(
+                                    self._guardrail_profile_arn(region)
+                                    for region in GUARDRAIL_PROFILE_REGIONS
+                                ),
                             ],
                         ),
                     ]

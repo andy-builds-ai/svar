@@ -34,6 +34,10 @@ FUNCTION_NAME = "andur-answer"
 
 KINDS = ("answer", "refuse", "unanswerable")
 
+#: The handler's `LANGUAGES`. A question asks in one of them, English unless it says
+#: otherwise, the way the page sends its language with every question.
+LANGUAGES = ("en", "de")
+
 #: Only a model in the region or an EU profile keeps the data in the EU.
 ALLOWED_PROFILE_PREFIXES = ("eu.",)
 
@@ -68,6 +72,8 @@ def load_questions(path: Path) -> list[dict[str, Any]]:
         name, kind = question["id"], question["kind"]
         if kind not in KINDS:
             raise ValueError(f"{name}: unknown kind {kind!r}")
+        if question.get("language", "en") not in LANGUAGES:
+            raise ValueError(f"{name}: unknown language {question['language']!r}")
         for field in ("workspace", "question"):
             if not (isinstance(question[field], str) and question[field].strip()):
                 raise ValueError(f"{name}: {field} must be a non-empty text")
@@ -144,7 +150,7 @@ def ask(handler: Any, settings: Any, question: Mapping[str, Any]) -> dict[str, A
     """
     rejected, first_call_rejected = 0, None
     for attempt, pause in enumerate((*RETRY_PAUSES, None), start=1):
-        record = handler.RequestRecord()
+        record = handler.RequestRecord(language=question.get("language", "en"))
         started = time.perf_counter()
         error = None
         try:
@@ -198,6 +204,12 @@ def run_model(
     return results
 
 
+def blocked_by_guardrail(result: Mapping[str, Any]) -> bool:
+    """True when the guardrail itself blocked: the proof a refusal needs, which a model's
+    "the sources do not answer this" is not."""
+    return (result.get("body") or {}).get("guardrail", {}).get("action") == "blocked"
+
+
 def summarise(model: AnswerModel, results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Hit rate, citation rate, cost and time of one model's run."""
     answers = [r for r in results if r["kind"] == "answer"]
@@ -218,6 +230,7 @@ def summarise(model: AnswerModel, results: Sequence[Mapping[str, Any]]) -> dict[
         "rejected_first_try": sum(r["first_call_rejected"] for r in results),
         "questions": len(results),
         "by_kind": by_kind,
+        "refusals_blocked": sum(blocked_by_guardrail(r) for r in results if r["kind"] == "refuse"),
         "cites_document": sum(r["cites_document"] for r in answers),
         "answer_questions": len(answers),
         "errors": sum("error" in r for r in results),
@@ -231,9 +244,9 @@ def table(summaries: Sequence[Mapping[str, Any]]) -> list[str]:
     """The comparison as a Markdown table."""
     lines = [
         "| Model | Right | Right on the first try | Rejected on the first try | Answered right "
-        "| Refused right | Declined right | Cites the document | USD per question "
-        "| Median seconds | Errors |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Refused right | Blocked by guardrail | Declined right | Cites the document "
+        "| USD per question | Median seconds | Errors |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for s in summaries:
         answer, refuse, unanswerable = (s["by_kind"][kind] for kind in KINDS)
@@ -242,7 +255,8 @@ def table(summaries: Sequence[Mapping[str, Any]]) -> list[str]:
             f"| {s['model']} | {s['correct']}/{s['questions']} "
             f"| {s['correct_first_try']}/{s['questions']} "
             f"| {s['rejected_first_try']}/{s['questions']} | {answer[0]}/{answer[1]} "
-            f"| {refuse[0]}/{refuse[1]} | {unanswerable[0]}/{unanswerable[1]} "
+            f"| {refuse[0]}/{refuse[1]} | {s['refusals_blocked']}/{refuse[1]} "
+            f"| {unanswerable[0]}/{unanswerable[1]} "
             f"| {s['cites_document']}/{s['answer_questions']} | {cost} "
             f"| {s['median_seconds']:.1f} | {s['errors']} |"
         )

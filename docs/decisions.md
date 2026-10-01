@@ -423,6 +423,25 @@ filter cannot see the documents; it refuses public figures and private
 lives, and the grounding check withholds answers about people the passages
 do not name.
 
+**2026-10-01 — Denied topics in the Standard tier, through the EU guardrail
+profile.** The first customers are German, and a German tax question went
+through: measured with `ApplyGuardrail` against the deployed guardrail, which
+ran in the Classic tier, 11 of 16 German refusals were refused and 5 were
+not, among them "Kann ich die Rechnung für den Heizungstausch von der Steuer
+absetzen?". 14 harmless German questions passed, and the 4 English refusals
+were refused. The user guide lists English, French and Spanish for the
+Classic tier's topics, German ("optimized") for the Standard tier's. The
+Standard tier needs a guardrail profile; `eu.guardrail.v1:0` routes from
+eu-west-1 to eu-central-1, eu-west-1, eu-west-3, eu-north-1, eu-south-1 and
+eu-south-2 only, and a stack whose region is set to one outside those six
+does not synthesise (without a set region there is nothing to check;
+`infra/app.py` always sets it). Both tiers cost 0.15 USD per 1,000 topic
+units (Price List API and pricing page, 01.10.2026), and the profile costs
+nothing extra, so a question costs what it did. Not done: German examples in
+`DENIED_TOPICS`. Taken from the questions that went through, they would have
+made the measurement after the deploy a test of the examples, not of the
+tier; they stay the next step if German refusals still pass.
+
 **2026-09-23 — The model may only be invoked with the deployed guardrail
 version.** An IAM condition on `bedrock:GuardrailIdentifier`: a call that
 drops the guardrail fails instead of answering unguarded.
