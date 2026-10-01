@@ -12,10 +12,12 @@ here. What it cannot prove is that DynamoDB reads those strings the same way;
 that is what the measurement against the deployed table is for.
 """
 
+import ast
 import base64
 import json
 import logging
 import operator
+import re
 import subprocess
 import sys
 from collections.abc import Iterator, Mapping
@@ -27,18 +29,12 @@ import handler  # app/handler.py
 import pytest
 from handler import (
     ANSWER_TEMPERATURE,
-    BUDGET_SPENT_MESSAGE,
     KEY_HEADER,
     MAX_ANSWER_TOKENS,
     MAX_QUESTION_CHARACTERS,
     MAX_SOURCE_CHARACTERS,
-    NO_SOURCES_ANSWER,
-    NOT_CONFIGURED_MESSAGE,
-    NOT_IN_SOURCES_ANSWER,
-    QUESTIONS_SPENT_MESSAGE,
     SECONDS_PER_DAY,
     SECONDS_PER_HOUR,
-    WINDOW_CLOSED_MESSAGE,
     BadRequest,
     BudgetSpent,
     ConfigurationError,
@@ -73,6 +69,14 @@ ENVIRONMENT = {
     "PRICE_DATE": "2026-09-23",
 }
 SETTINGS = handler.load_settings(ENVIRONMENT)
+
+# The sentences of a request that names no language: the English ones.
+NO_SOURCES_ANSWER = handler.NO_SOURCES_ANSWERS["en"]
+NOT_IN_SOURCES_ANSWER = handler.NOT_IN_SOURCES_ANSWERS["en"]
+NOT_CONFIGURED_MESSAGE = handler.NOT_CONFIGURED_MESSAGES["en"]
+QUESTIONS_SPENT_MESSAGE = handler.QUESTIONS_SPENT_MESSAGES["en"]
+WINDOW_CLOSED_MESSAGE = handler.WINDOW_CLOSED_MESSAGES["en"]
+BUDGET_SPENT_MESSAGE = handler.BUDGET_SPENT_MESSAGES["en"]
 KEYS = {"quillmoor": "quillmoor-key-0001", "pellwick": "pellwick-key-0002"}
 
 
@@ -1370,10 +1374,16 @@ def test_which_half_ran_out_is_read_from_the_item_the_condition_refused() -> Non
         "questions_used": {"N": "10"},
         "question_limit": {"N": "10"},
     }
-    assert handler.spent_message(closed, now) == WINDOW_CLOSED_MESSAGE
-    assert handler.spent_message(spent, now) == QUESTIONS_SPENT_MESSAGE.format(limit=10)
-    assert handler.spent_message({}, now) == BUDGET_SPENT_MESSAGE
-    assert handler.spent_message({"questions_used": {"S": "many"}}, now) == BUDGET_SPENT_MESSAGE
+    assert handler.spent_message(closed, now) == handler.WINDOW_CLOSED_MESSAGES
+    assert handler.spent_message(spent, now) == {
+        language: text.format(limit=10)
+        for language, text in handler.QUESTIONS_SPENT_MESSAGES.items()
+    }
+    assert handler.spent_message({}, now) == handler.BUDGET_SPENT_MESSAGES
+    assert (
+        handler.spent_message({"questions_used": {"S": "many"}}, now)
+        == handler.BUDGET_SPENT_MESSAGES
+    )
 
 
 def test_the_spent_status_is_none_of_the_three_it_could_be_mistaken_for() -> None:
@@ -1645,9 +1655,9 @@ def test_a_passage_at_the_limit_is_not_cut() -> None:
 
 
 def test_system_prompt_holds_the_rules_the_response_relies_on() -> None:
-    assert NOT_IN_SOURCES_ANSWER in handler.SYSTEM_PROMPT
-    assert "[1]" in handler.SYSTEM_PROMPT
-    assert "only from the numbered sources" in handler.SYSTEM_PROMPT
+    assert NOT_IN_SOURCES_ANSWER in handler.system_prompt("en")
+    assert "[1]" in handler.system_prompt("en")
+    assert "only from the numbered sources" in handler.system_prompt("en")
 
 
 # --- Model ---------------------------------------------------------------
@@ -1659,7 +1669,7 @@ def test_model_gets_system_rules_message_token_limit_and_guardrail() -> None:
     handler.ask_model(bedrock, SETTINGS, content)
     (arguments,) = bedrock.calls
     assert arguments["modelId"] == ENVIRONMENT["MODEL_ID"]
-    assert arguments["system"] == [{"text": handler.SYSTEM_PROMPT}]
+    assert arguments["system"] == [{"text": handler.system_prompt("en")}]
     assert arguments["messages"] == [{"role": "user", "content": content}]
     assert arguments["inferenceConfig"] == {
         "maxTokens": MAX_ANSWER_TOKENS,
@@ -1982,12 +1992,12 @@ def test_a_masked_answer_says_so_and_a_blocked_one_is_the_guardrail_message_alon
     masked = bedrock_response([{"text": "Call {PHONE} [1]."}], "guardrail_intervened")
     assert (
         handler.extract_answer(masked, "masked")
-        == "Call {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["masked"]
+        == "Call {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["en"]["masked"]
     )
     blocked = bedrock_response([{"text": "Andur does not advise on this."}], "guardrail_intervened")
     assert handler.extract_answer(blocked, "blocked") == "Andur does not advise on this."
     assert handler.extract_answer(blocked, "intervened").endswith(
-        handler.STOP_NOTES["guardrail_intervened"]
+        handler.STOP_NOTES["en"]["guardrail_intervened"]
     )
 
 
@@ -2106,7 +2116,8 @@ def test_a_tax_question_comes_back_as_the_guardrail_message_and_is_still_a_200(
     }
     status, body = call(event())
     assert status == 200
-    assert body["answer"] == "Andur does not advise on this."
+    # The handler's sentence, not the one AWS sent back.
+    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS["en"]
     assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Tax advice"]}
     # One topic unit at 0.15 per thousand, nothing else: no excerpt was masked.
     assert body["cost_usd"] == 0.00015
@@ -2285,7 +2296,10 @@ def test_the_unmasked_answer_in_the_trace_reaches_neither_body_nor_log(
     )
     status, body = call(event())
     assert status == 200
-    assert body["answer"] == "Call {NAME} on {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["masked"]
+    assert (
+        body["answer"]
+        == "Call {NAME} on {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["en"]["masked"]
+    )
     for text in (json.dumps(body), caplog.text):
         assert "Ada Quill" not in text and "7946" not in text
 
@@ -2593,3 +2607,412 @@ def test_every_log_line_is_single_line_json(
     for message in messages:
         assert "\n" not in message
         json.loads(message)
+
+
+# --- Languages: Andur speaks the visitor's -------------------------------
+
+#: A request that names no language, English, German, and one Andur does not speak.
+ASKED_IN = [(None, "en"), ("en", "en"), ("de", "de"), ("fr", "en")]
+
+SENTENCE_TABLES = {
+    name: getattr(handler, name)
+    for name in (
+        "NO_SOURCES_ANSWERS",
+        "NOT_IN_SOURCES_ANSWERS",
+        "NOT_CONFIGURED_MESSAGES",
+        "UNEXPECTED_FAILURE_MESSAGES",
+        "QUESTIONS_SPENT_MESSAGES",
+        "WINDOW_CLOSED_MESSAGES",
+        "BUDGET_SPENT_MESSAGES",
+        "QUESTION_REFUSED_ANSWERS",
+        "ANSWER_WITHHELD_ANSWERS",
+    )
+}
+
+
+def in_(language: str | None, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A question body that names ``language``, or none; ``body`` changes its fields, and a
+    field set to None goes in as JSON null."""
+    fields = {"question": "Wie exportiere ich Projektdaten?", "workspace": "quillmoor"}
+    fields.update(body or {})
+    if language is not None:
+        fields["language"] = language
+    return fields
+
+
+def placeholders(text: str) -> set[str]:
+    return set(re.findall(r"\{(\w+)\}", text))
+
+
+@pytest.mark.parametrize("name", sorted(SENTENCE_TABLES))
+def test_every_sentence_is_in_both_languages_with_the_same_placeholders(name: str) -> None:
+    table = SENTENCE_TABLES[name]
+    assert set(table) == set(handler.LANGUAGES) == {"en", "de"}
+    assert table["de"] != table["en"]
+    assert placeholders(table["de"]) == placeholders(table["en"])
+
+
+@pytest.mark.parametrize("name", ["STOP_NOTES", "GUARDRAIL_NOTES"])
+def test_every_note_is_in_both_languages(name: str) -> None:
+    notes = getattr(handler, name)
+    assert set(notes) == {"en", "de"}
+    assert set(notes["de"]) == set(notes["en"])
+    for reason, english in notes["en"].items():
+        # A blocked answer carries no note, in either language.
+        assert (notes["de"][reason] is None) == (english is None)
+        if english is not None:
+            assert notes["de"][reason] != english
+
+
+def test_every_error_read_after_the_body_has_a_german_sentence() -> None:
+    """The German sentence is the second argument. Only the two checks that run before the
+    body is read, when the language is not known yet, have none."""
+    tree = ast.parse((REPOSITORY_ROOT / "app" / "handler.py").read_text(encoding="utf-8"))
+    public = {
+        "BadRequest",
+        "Unauthorized",
+        "Forbidden",
+        "BudgetSpent",
+        "RetrievalError",
+        "LLMError",
+    }
+    before_the_body = {"require_post", "read_body"}
+    raised = 0
+    for function in [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]:
+        for node in ast.walk(function):
+            if not (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)):
+                continue
+            name = getattr(node.exc.func, "id", None)
+            if name in public:
+                raised += 1
+                expected = 1 if function.name in before_the_body else 2
+                assert len(node.exc.args) == expected, f"{function.name} raises {name}"
+    assert raised >= 15
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        ("de", "de"),
+        ("en", "en"),
+        (" DE ", "de"),
+        ("fr", "en"),
+        ("de-DE", "en"),
+        ("", "en"),
+        (None, "en"),
+        (7, "en"),
+        (["de"], "en"),
+    ],
+)
+def test_the_language_is_one_of_ours_or_english(given: Any, expected: str) -> None:
+    assert handler.requested_language({"language": given}) == expected
+    assert handler.requested_language({}) == "en"
+
+
+# --- The handler's own sentences, by the language asked ---
+
+
+@pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
+def test_no_passage_found_is_said_in_the_language_asked(
+    aws: dict[str, Any], asked: str | None, spoken: str
+) -> None:
+    aws["bedrock-agent-runtime"].results = []
+    status, body = call(event(in_(asked)))
+    assert status == 200
+    assert body["answer"] == handler.NO_SOURCES_ANSWERS[spoken]
+
+
+def test_the_model_is_told_to_say_not_in_the_sources_in_the_language_asked(
+    aws: dict[str, Any],
+) -> None:
+    for asked, spoken, other in [(None, "en", "de"), ("en", "en", "de"), ("de", "de", "en")]:
+        call(event(in_(asked)))
+        prompt = aws["bedrock-runtime"].calls[-1]["system"][0]["text"]
+        assert prompt == handler.system_prompt(spoken)
+        assert handler.NOT_IN_SOURCES_ANSWERS[spoken] in prompt
+        assert handler.NOT_IN_SOURCES_ANSWERS[other] not in prompt
+        assert "the language of the question" in prompt
+
+
+@pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
+def test_a_notice_on_an_unfinished_answer_is_in_the_language_asked(
+    aws: dict[str, Any], asked: str | None, spoken: str
+) -> None:
+    for stop_reason in handler.STOP_NOTES["en"]:
+        aws["bedrock-runtime"].response = bedrock_response(
+            [{"text": "Start [1]"}], stop_reason=stop_reason
+        )
+        _, body = call(event(in_(asked)))
+        assert body["answer"] == f"Start [1]\n\n{handler.STOP_NOTES[spoken][stop_reason]}"
+
+
+@pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
+def test_a_masked_answer_says_so_in_the_language_asked(
+    aws: dict[str, Any], asked: str | None, spoken: str
+) -> None:
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Call {NAME} on {PHONE} [1]."}],
+        "guardrail_intervened",
+        guardrail_trace(output_assessment=PHONE_MASKED),
+    )
+    _, body = call(event(in_(asked)))
+    assert body["guardrail"]["action"] == "masked"
+    assert body["answer"] == (
+        "Call {NAME} on {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES[spoken]["masked"]
+    )
+
+
+# --- What the guardrail blocks: the handler's sentence, not AWS's ---
+
+AWS_SENTENCE = "Sorry, the model cannot answer this question."
+
+#: The output assessment of an answer that strays into a denied topic.
+ADVICE_ANSWER_BLOCKED = {
+    "topicPolicy": {
+        "topics": [{"name": "Tax advice", "type": "DENY", "action": "BLOCKED", "detected": True}]
+    },
+    "invocationMetrics": {"guardrailProcessingLatency": 90, "usage": guardrail_usage(1, 0, 0)},
+}
+
+
+def blocked_by(trace: dict[str, Any], stop_reason: str = "guardrail_intervened") -> dict[str, Any]:
+    """What Converse returns when the guardrail replaced the text with AWS's own sentence."""
+    return bedrock_response([{"text": AWS_SENTENCE}], stop_reason, trace)
+
+
+@pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
+def test_a_refused_question_is_told_in_the_language_asked(
+    aws: dict[str, Any], asked: str | None, spoken: str
+) -> None:
+    aws["bedrock-runtime"].response = blocked_by(
+        guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED, output_assessment={})
+    )
+    status, body = call(event(in_(asked)))
+    assert status == 200
+    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS[spoken]
+    assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Tax advice"]}
+    assert body["sources"] == []
+
+
+@pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
+def test_a_withheld_answer_is_told_in_the_language_asked(
+    aws: dict[str, Any], asked: str | None, spoken: str
+) -> None:
+    aws["bedrock-runtime"].response = blocked_by(guardrail_trace(output_assessment=UNGROUNDED))
+    status, body = call(event(in_(asked)))
+    assert status == 200
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS[spoken]
+    assert body["guardrail"] == {"action": "blocked", "policies": ["grounding"]}
+    assert len(body["sources"]) == 2
+
+
+def test_an_answer_that_strays_into_a_denied_topic_is_withheld_not_refused(
+    aws: dict[str, Any],
+) -> None:
+    """The question passed the topic filter; the model's answer did not. The input assessment
+    is what tells the two apart."""
+    aws["bedrock-runtime"].response = blocked_by(
+        guardrail_trace(output_assessment=ADVICE_ANSWER_BLOCKED)
+    )
+    _, body = call(event(in_("de")))
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["de"]
+    assert body["guardrail"]["policies"] == ["topic:Tax advice"]
+
+
+def test_a_blocked_answer_never_carries_the_sentence_aws_sent_back(aws: dict[str, Any]) -> None:
+    for trace in (
+        guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED, output_assessment={}),
+        guardrail_trace(output_assessment=UNGROUNDED),
+    ):
+        aws["bedrock-runtime"].response = blocked_by(trace)
+        for asked in (None, "en", "de"):
+            _, body = call(event(in_(asked)))
+            assert AWS_SENTENCE not in json.dumps(body, ensure_ascii=False)
+
+
+def test_the_guardrail_has_blocked_only_when_aws_stopped_and_the_trace_says_blocked(
+    aws: dict[str, Any],
+) -> None:
+    """Both signs together. A trace that says BLOCKED on an answer Bedrock did not stop is the
+    model's own text, and an intervention the trace does not explain keeps AWS's text with a
+    note: the handler does not guess which of its two sentences would be true."""
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Export it [1]."}], "end_turn", guardrail_trace(output_assessment=UNGROUNDED)
+    )
+    _, body = call(event(in_("de")))
+    assert body["answer"] == "Export it [1]."
+
+    aws["bedrock-runtime"].response = blocked_by({})
+    _, body = call(event(in_("de")))
+    assert body["guardrail"]["action"] == "intervened"
+    assert body["answer"] == f"{AWS_SENTENCE}\n\n{handler.STOP_NOTES['de']['guardrail_intervened']}"
+
+
+def test_a_blocked_answer_needs_no_text_from_aws(aws: dict[str, Any]) -> None:
+    """The sentence is the handler's own, so a response whose text came back empty is no 502."""
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": ""}], "guardrail_intervened", guardrail_trace(output_assessment=UNGROUNDED)
+    )
+    status, body = call(event(in_("de")))
+    assert status == 200
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["de"]
+
+
+# --- Errors, by the language asked ---
+
+GERMAN_ERRORS = [
+    (
+        "no workspace",
+        event(in_("de", {"workspace": None})),
+        400,
+        'Die Anfrage enthält kein "workspace".',
+    ),
+    (
+        "workspace not allowed",
+        event(in_("de", {"workspace": "Quill Moor"})),
+        400,
+        "Der Name eines Arbeitsbereichs besteht aus Kleinbuchstaben, Ziffern und einzelnen "
+        "Bindestrichen.",
+    ),
+    (
+        "workspace too long",
+        event(in_("de", {"workspace": "a" * 65})),
+        400,
+        "Der Name eines Arbeitsbereichs hat höchstens 64 Zeichen.",
+    ),
+    (
+        "no key",
+        event(in_("de"), key=None),
+        401,
+        "Ein Schlüssel ist nötig: Senden Sie ihn im Header X-Andur-Key.",
+    ),
+    ("wrong key", event(in_("de"), key="wrong-key"), 401, "Der Schlüssel ist ungültig."),
+    (
+        "foreign workspace",
+        event(in_("de", {"workspace": "pellwick"})),
+        403,
+        "Dieser Schlüssel öffnet den Arbeitsbereich pellwick nicht.",
+    ),
+    (
+        "no question",
+        event(in_("de", {"question": None})),
+        400,
+        'Die Anfrage enthält keinen "question"-Text.',
+    ),
+    ("empty question", event(in_("de", {"question": "  "})), 400, "Die Frage ist leer."),
+    (
+        "question too long",
+        event(in_("de", {"question": "x" * (MAX_QUESTION_CHARACTERS + 1)})),
+        400,
+        "Die Frage ist länger als 1000 Zeichen.",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("request_event", "status", "german"),
+    [case[1:] for case in GERMAN_ERRORS],
+    ids=[case[0] for case in GERMAN_ERRORS],
+)
+def test_a_refusal_is_in_german_when_the_request_asks_for_german(
+    aws: dict[str, Any], request_event: dict[str, Any], status: int, german: str
+) -> None:
+    assert call(request_event) == (status, {"error": german})
+
+    # The same request in English, in no language or in one Andur does not speak is English.
+    body = json.loads(request_event["body"])
+    for asked in (None, "en", "fr"):
+        body.pop("language", None)
+        if asked:
+            body["language"] = asked
+        got_status, got = call({**request_event, "body": json.dumps(body)})
+        assert got_status == status
+        assert got["error"] != german
+        assert got["error"].isascii()
+
+
+def test_a_spent_budget_says_so_in_german(aws: dict[str, Any]) -> None:
+    for _ in range(10):
+        assert call(event(in_("de")))[0] == 200
+    assert call(event(in_("de"))) == (
+        402,
+        {"error": "Die 10 Fragen dieses Schlüssels sind aufgebraucht; es braucht einen neuen."},
+    )
+    assert call(event(in_("en")))[1] == {"error": QUESTIONS_SPENT_MESSAGE.format(limit=10)}
+
+
+def test_a_closed_window_and_a_lost_race_say_so_in_german(
+    aws: dict[str, Any], budget_clock: "FakeWallClock"
+) -> None:
+    assert call(event(in_("de")))[0] == 200
+    budget_clock.advance(48 * SECONDS_PER_HOUR)
+    assert call(event(in_("de"))) == (
+        402,
+        {
+            "error": "Der Zeitraum dieses Schlüssels ist abgelaufen; "
+            "es braucht einen neuen Schlüssel."
+        },
+    )
+    assert call(event(in_("en")))[1] == {"error": WINDOW_CLOSED_MESSAGE}
+
+    aws["dynamodb"].error = conditional_check_failed(None)
+    assert call(event(in_("de"))) == (
+        402,
+        {
+            "error": "Das Budget dieses Schlüssels ist aufgebraucht; "
+            "es braucht einen neuen Schlüssel."
+        },
+    )
+    assert call(event(in_("fr")))[1] == {"error": BUDGET_SPENT_MESSAGE}
+
+
+def test_a_failed_search_and_a_failed_model_are_told_in_german(aws: dict[str, Any]) -> None:
+    aws["bedrock-agent-runtime"].error = client_error("AccessDeniedException", operation="Retrieve")
+    status, body = call(event(in_("de")))
+    assert status == 502
+    assert body["error"].startswith("Die Wissensbasis konnte nicht durchsucht werden: ")
+    assert call(event(in_("en")))[1]["error"].startswith("The knowledge base could not be searched")
+
+    aws["bedrock-agent-runtime"].error = None
+    aws["bedrock-runtime"].error = client_error("AccessDeniedException")
+    status, body = call(event(in_("de")))
+    assert status == 502
+    assert body["error"].startswith(f"Das Modell {ENVIRONMENT['MODEL_ID']} konnte nicht antworten")
+    assert "womöglich nicht freigegeben" in body["error"]
+    assert "may not be open to this function" in call(event(in_("en")))[1]["error"]
+
+    aws["bedrock-runtime"].error = None
+    aws["bedrock-runtime"].response = bedrock_response([{"text": " "}])
+    status, body = call(event(in_("de")))
+    assert status == 502
+    assert body["error"] == "Das Modell hat keinen Text geliefert (stopReason end_turn)."
+
+
+def test_a_crash_is_told_in_german(aws: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(*_: Any) -> Any:
+        raise ZeroDivisionError("a bug")
+
+    monkeypatch.setattr(handler, "answer_question", broken)
+    assert call(event(in_("de"))) == (500, {"error": handler.UNEXPECTED_FAILURE_MESSAGES["de"]})
+    assert call(event(in_("en"))) == (500, {"error": handler.UNEXPECTED_FAILURE_MESSAGES["en"]})
+
+
+def test_a_broken_configuration_is_told_in_german(
+    aws: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NUMBER_OF_RESULTS", "zero")
+    assert call(event(in_("de"))) == (500, {"error": handler.NOT_CONFIGURED_MESSAGES["de"]})
+    assert call(event(in_("en"))) == (500, {"error": NOT_CONFIGURED_MESSAGE})
+
+
+def test_what_is_wrong_before_the_body_is_read_is_told_in_english(aws: dict[str, Any]) -> None:
+    """The method and the body's shape are checked before the language can be known. The page
+    never sends either wrong; a client that does reads English."""
+    assert call(event(in_("de"), method="GET")) == (
+        405,
+        {"error": "Send the question with POST, not GET."},
+    )
+    for body in ("{not json", json.dumps(["de"])):
+        status, got = call(event(body))
+        assert status == 400
+        assert got["error"].isascii()

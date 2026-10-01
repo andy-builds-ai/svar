@@ -74,6 +74,31 @@ h3 {
   margin: .4rem 0 0;
 }
 
+/* --- Language switch --- */
+
+.language {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: .6rem;
+}
+
+.language-button {
+  padding: .2rem .7rem;
+  font-size: .8rem;
+  letter-spacing: .05em;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+}
+
+.language-button:first-child { border-radius: 4px 0 0 4px; }
+.language-button:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
+
+.language-button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* --- Workspace and key --- */
 
 .fields {

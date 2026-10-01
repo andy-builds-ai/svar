@@ -59,9 +59,15 @@ def ask_url(web_url: str) -> str:
     return web_url.rstrip("/") + ASK_PATH
 
 
-def build_request(url: str, key: str, question: str, workspace: str) -> urllib.request.Request:
-    """The POST the way in expects: JSON, the key header, and the body's hash."""
-    body = json.dumps({"question": question, "workspace": workspace}).encode("utf-8")
+def build_request(
+    url: str, key: str, question: str, workspace: str, language: str | None = None
+) -> urllib.request.Request:
+    """The POST the way in expects: JSON, the key header, and the body's hash. The language
+    goes in only when given; without it Andur answers in English."""
+    fields = {"question": question, "workspace": workspace}
+    if language:
+        fields["language"] = language
+    body = json.dumps(fields).encode("utf-8")
     return urllib.request.Request(
         url,
         data=body,
@@ -126,6 +132,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("question")
     parser.add_argument("--workspace", required=True, help="the workspace to ask in")
+    parser.add_argument(
+        "--language",
+        choices=["de", "en"],
+        help="the language Andur's own sentences come in; default: the function's, English",
+    )
     parser.add_argument("--json", action="store_true", help="print the raw JSON response")
     parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
     parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
@@ -150,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
             client("ssm", args.region), settings["ApiKeyParameterPath"], args.workspace
         )
         url = ask_url(settings[WEB_URL_OUTPUT])
-        status, body = send(build_request(url, key, args.question, args.workspace))
+        status, body = send(build_request(url, key, args.question, args.workspace, args.language))
     except AwsProblem as problem:
         print(f"error: {problem}", file=sys.stderr)
         return 2

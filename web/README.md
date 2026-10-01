@@ -1,7 +1,7 @@
 # web — the page
 
-Four files and no build step: `index.html`, `app.js`, `markdown.js`,
-`style.css`. No framework, no bundler, no npm package, nothing loaded from
+Five files and no build step: `index.html`, `app.js`, `language.js`,
+`markdown.js`, `style.css`. No framework, no bundler, no npm package, nothing loaded from
 another server — not a font, not a script, not a pixel. What is in this
 folder is what the browser gets. `cdk deploy` copies it into the site bucket and clears the
 CloudFront caches, so a change to a file here is live with the next deploy.
@@ -37,6 +37,39 @@ function:
   A signed request to a Lambda function URL may not have an unsigned payload.
   `crypto.subtle.digest` computes it; it is built into the browser and needs
   an https connection, which the page always has.
+
+## Two languages
+
+Andur speaks the visitor's language: German and English. The page starts in
+German when the browser's language (`navigator.language`) begins with `de`
+and in English otherwise. A **DE | EN** switch in the corner changes it at
+once, and the choice is kept in the browser under `andur.language`, like the
+workspace, so it wins over the browser's language from then on. Anything else
+in storage counts as no choice.
+
+Everything the page says itself changes with it: `<html lang>`, the title,
+labels, placeholders, the button (*Ask* / *Asking…*, *Fragen* / *Frage
+läuft…*), every message, the sentence for each status without an answer from
+the function (`problemSentence`), the layers by name (human, agent, inbox
+become Mensch, Maschine, Eingang), the note of each source and the cost line,
+which writes its decimal with a comma in German. A message the page wrote
+itself, and the labels of an answer already on screen, are drawn again when
+the switch is used.
+
+What stays as it came: the answer and the `error` sentence of the function
+are in the language the question was asked in. The page sends its language
+in the request body (`"language": "de"` or `"en"`) with every question, and
+the function says its own sentences in it ([app/README.md](../app/README.md),
+*Language*). So after a switch the answer on screen keeps its language and
+the next one comes in the new one. The model's answer follows the language of
+the question, not the page.
+
+Every sentence is in `language.js`, once in each language, under the same
+key; `index.html` is empty where text goes (`data-i18n`, `data-i18n-placeholder`,
+`data-i18n-label`) and `app.js` holds no sentence. The file has no DOM code, so
+the tests run it in Node: both tables have the same keys and placeholders,
+every key asked for exists and no key is left unused. A new text is a key in
+both tables. German addresses the reader as *Sie*.
 
 ## What it does
 
@@ -83,16 +116,17 @@ containing `<script>` shows those eight characters.
 
 | What arrives | What the page says |
 |---|---|
-| Any status with a JSON `error` | That sentence, unchanged. It comes from the function and says it better than the page could. |
-| 402 | The sentence, plus a line that a new key is what helps. |
+| Any status with a JSON `error` | That sentence, unchanged. It comes from the function, in the language the question was asked in, and says it better than the page could. |
+| 402 | The sentence, plus a line (in the page's language) that a new key is what helps. |
 | 429 without a sentence | Andur is busy — five questions run at a time, the rest are turned away. |
 | 403 without a sentence | The request was refused on the way in. Not a wrong key — that is a 401 with a sentence. |
 | 504 | The answer took longer than CloudFront waits (120 seconds). The function may still be running it, and the question is already counted. |
 | No response at all | The connection failed. |
 | Nothing within 125 seconds | The page stopped waiting. The question may still be running, and asking again costs another one. |
 
-The three statuses without a sentence never passed through the function, so
-there is no sentence to pass on. Their bodies are not the function's either:
+The sentences in this table are the English ones; `language.js` has them in
+German too. The three statuses without a sentence never passed through the
+function, so there is no sentence to pass on. Their bodies are not the function's either:
 a 403 comes back as Lambda's `{"message": "The request signature we
 calculated does not match ..."}` when a request reaches the function URL
 unsigned or wrongly signed (measured 17.09.2026), and CloudFront's own error

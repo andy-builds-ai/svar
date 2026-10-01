@@ -240,6 +240,57 @@ hold it up, and a WAF on the distribution is the answer if that happens.
 a Bedrock failure is logged by its code only.** A service message quotes
 what it choked on, and for converse that is the prompt.
 
+**2026-10-01 — Andur speaks the visitor's language, not the company's.** Two
+languages, German and English. The page starts in German when the browser's
+language begins with `de`, offers a DE/EN switch and sends its language in the
+body of every question; the function says every sentence of its own in it. A
+language per workspace would have needed a list of customers outside the
+repository, and `WORKSPACES` is inside it. Which language a request names
+decides nothing about which documents are read, and nothing is checked
+against it: a missing or unknown one is English, not an error, so a client
+written before the field existed keeps working unchanged.
+
+**2026-10-01 — The answer follows the question, the fixed sentences follow
+the request.** The prompt still says "answer in the language of the question",
+as before: an English question about English documents is answered in
+English, on the German page too. What the prompt fixes word for word is the
+sentence for "the sources do not answer", and that one comes in the language of
+the request, because the evaluation recognises it by its exact text
+(`scripts/evaluate.py` knows both). The price: a German page and an English
+question can give an English answer and a German "not in the sources". Tying
+the answer to the page language as well would have removed that, and would
+have taken away the ability to ask an English document in English from a
+German browser.
+
+**2026-10-01 — A block by the guardrail is told in the handler's words.**
+Bedrock replaces a blocked text with the one English sentence set on the
+guardrail, whatever the language of the question; that was the one sentence a
+German visitor read in English on a borderline question. The
+handler now swaps it for its own sentence when two things are in the same
+response: Bedrock stopped with `guardrail_intervened`, and the trace has a
+policy with the action `BLOCKED`. A stop without that, or a `BLOCKED` on an
+answer that was not stopped, is left alone rather than guessed at. The
+guardrail's English sentences stay in the stack as the fallback, and a test
+keeps them equal to the handler's English ones. Two sentences are not
+three: only the topic filter reads the question, so a topic blocked in the
+input assessment means "refused", every other block means "withheld".
+
+**2026-10-01 — What is found before the body is read is English.** The
+method and the shape of the body are checked first, and the language is in the
+body. Reading the language from the `Accept-Language` header instead would
+have given a second source that can disagree with the switch on the page, for
+errors the page cannot cause. It never sends a wrong method or a body that is
+not JSON; whoever does is a script, and `scripts.ask` reads English.
+
+**2026-10-01 — The page keeps every sentence once.** `web/language.js` holds
+the English and the German text as two tables with the same keys; `index.html`
+is empty where text goes and `app.js` has no sentence of its own. Under Node
+the file exports its pure functions, as `markdown.js` does, so the tests run
+them: both tables have the same keys and placeholders, every key that is asked
+for exists and every one that exists is asked for. German uses "Sie" on the
+page and in the function's sentences, because the readers are the staff and
+customers of a company.
+
 ## The way in
 
 **2026-09-18 — One CloudFront distribution for the page and `/ask`.** The

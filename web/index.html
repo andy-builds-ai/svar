@@ -10,66 +10,67 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<!-- Every word of the page is in language.js, in English and in German. The
+     elements below are empty on purpose: app.js fills them in the visitor's
+     language (data-i18n is the text, -placeholder the placeholder, -label the
+     accessible name), so no sentence is kept in two places. -->
 <main>
 
 <header>
-  <h1>Ask Andur</h1>
-  <p class="lead">
-    A demo with two <strong>fictional</strong> companies. Each keeps its handbooks, notes and
-    drafts in a vault of its own, and Andur answers from one vault at a time. Every answer
-    comes with the passages it was built from, and every passage says which layer it came
-    from: written by a person, produced by a machine, or merely arrived and not yet sorted.
-  </p>
+  <div class="language" role="group" data-i18n-label="language_label">
+    <button type="button" class="language-button" data-language="de" lang="de">DE</button>
+    <button type="button" class="language-button" data-language="en" lang="en">EN</button>
+  </div>
+  <h1 data-i18n="heading"></h1>
+  <p class="lead"><span data-i18n="lead_before"></span><strong data-i18n="lead_strong"></strong><span data-i18n="lead_after"></span></p>
 </header>
 
 <section class="panel" aria-labelledby="access-heading">
-  <h2 id="access-heading">Workspace and key</h2>
-  <p class="note">
-    A key opens one workspace and carries an allowance: ten questions, and 48 hours from the
-    first of them. It stays in this browser and is never part of the address.
-  </p>
+  <h2 id="access-heading" data-i18n="access_heading"></h2>
+  <p class="note" data-i18n="access_note"></p>
   <div class="fields">
     <p class="field">
-      <label for="workspace">Workspace</label>
+      <label for="workspace" data-i18n="workspace_label"></label>
       <input id="workspace" name="workspace" type="text" autocomplete="off"
-             spellcheck="false" placeholder="quillmoor">
+             spellcheck="false" data-i18n-placeholder="workspace_placeholder">
     </p>
     <p class="field">
-      <label for="key">Key</label>
+      <label for="key" data-i18n="key_label"></label>
       <input id="key" name="key" type="password" autocomplete="off"
-             spellcheck="false" placeholder="paste the workspace key">
+             spellcheck="false" data-i18n-placeholder="key_placeholder">
     </p>
     <p class="field field--button">
-      <button id="forget" type="button">Forget key</button>
+      <button id="forget" type="button" data-i18n="forget_button"></button>
     </p>
   </div>
 </section>
 
 <form id="ask-form" class="panel" autocomplete="off">
-  <h2><label for="question">Question</label></h2>
+  <h2><label for="question" data-i18n="question_heading"></label></h2>
   <textarea id="question" name="question" rows="3" maxlength="1000"
-            placeholder="How do I export project data?"></textarea>
+            data-i18n-placeholder="question_placeholder"></textarea>
   <div class="actions">
     <span id="counter" class="note">0 / 1000</span>
-    <button id="ask" type="submit">Ask</button>
+    <button id="ask" type="submit"></button>
   </div>
-  <p class="note">Enter asks. Shift + Enter starts a new line.</p>
+  <p class="note" data-i18n="enter_hint"></p>
 </form>
 
 <p id="message" class="message" hidden></p>
 
 <section id="result" class="panel" hidden aria-live="polite">
-  <h2>Answer</h2>
+  <h2 data-i18n="answer_heading"></h2>
   <div id="answer" class="answer"></div>
   <p id="layers" class="layers"></p>
-  <h3>Sources</h3>
-  <p id="no-sources" class="note" hidden>None — no passage in this workspace matched.</p>
+  <h3 data-i18n="sources_heading"></h3>
+  <p id="no-sources" class="note" data-i18n="no_sources" hidden></p>
   <ol id="sources" class="sources"></ol>
   <p id="cost" class="note cost"></p>
 </section>
 
 </main>
 <script src="markdown.js"></script>
+<script src="language.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

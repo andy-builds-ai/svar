@@ -151,8 +151,10 @@ def test_a_blocked_answer_is_never_right_even_with_the_fact() -> None:
 @pytest.mark.parametrize(
     ("answer", "action", "correct"),
     [
-        (handler.NOT_IN_SOURCES_ANSWER, "none", True),
-        (handler.NO_SOURCES_ANSWER, "none", True),
+        (handler.NOT_IN_SOURCES_ANSWERS["en"], "none", True),
+        (handler.NO_SOURCES_ANSWERS["en"], "none", True),
+        (handler.NOT_IN_SOURCES_ANSWERS["de"], "none", True),
+        (handler.NO_SOURCES_ANSWERS["de"], "none", True),
         ("Andur does not give legal advice.", "blocked", True),
         ("You may withhold payment.", "none", False),
         ("A name is masked here.", "masked", False),

@@ -47,6 +47,11 @@ this function. `workspace` must be the workspace the key belongs to. A
 question is 1 to 1,000 characters. On macOS use `shasum -a 256` in place of
 `sha256sum`.
 
+The body may also carry `"language": "de"` or `"language": "en"`: the
+language of the sentences Andur says itself, see *Language* below. Leave it
+out and they are English; the page sends it with every question, and
+`python -m scripts.ask` with `--language`.
+
 Two headers are not the function's idea but the way in's:
 
 - **`X-Andur-Key`** carries the key. Not `Authorization`: CloudFront signs
@@ -282,20 +287,54 @@ An answer from us-east-1, 23.09.2026, before the move to eu-west-1:
 
 | Field | Meaning |
 |---|---|
-| `answer` | The model's answer. It cites sources as `[n]`; `[2][3]`, `[2, 3]`, `[2; 3]` and ranges such as `[1-3]` count too. The prompt tells the model to answer exactly *The sources do not answer this question.* when they do not. |
+| `answer` | The model's answer. It cites sources as `[n]`; `[2][3]`, `[2, 3]`, `[2; 3]` and ranges such as `[1-3]` count too. The prompt tells the model to answer exactly *The sources do not answer this question.* (in German: *Die Quellen beantworten diese Frage nicht.*) when they do not. |
 | `sources` | Every retrieved passage, numbered as the model saw them. `file` is the section file in the documents bucket; `words` its length; `cited` whether the answer cites it; `excerpt` its opening, cut at a word boundary at about 300 characters, with personal details masked by the excerpt guardrail — `null` when that guardrail could not be asked. Empty when the guardrail refused the question. |
 | `layers` | The layers of the **cited** sources, most trusted first: `human`, `agent`, `inbox`. An answer with `inbox` here rests partly on documents nobody has confirmed. |
 | `model` | The model that answered; `null` when no passage matched and no model was asked. |
 | `stop_reason` | Bedrock's stop reason. `max_tokens` means the answer was cut off, `content_filtered` that the model's own filter stopped it, `guardrail_intervened` that the guardrail blocked or masked something — `guardrail` says which. |
 | `usage` | Tokens in and out of the model call. |
-| `guardrail` | What the guardrail did: `action` is `none`, `masked` (personal details replaced by their type, such as `{PHONE}`, and a note at the end of the answer), `blocked` (the answer is the guardrail's own message) or `intervened` (Bedrock says it stepped in, the trace does not say how). `policies` names what acted: `topic:<name>`, `pii:<type>`, `grounding`, `relevance`. |
+| `guardrail` | What the guardrail did: `action` is `none`, `masked` (personal details replaced by their type, such as `{PHONE}`, and a note at the end of the answer), `blocked` (the answer is a sentence of Andur's, which replaced the guardrail's own message) or `intervened` (Bedrock says it stepped in, the trace does not say how). `policies` names what acted: `topic:<name>`, `pii:<type>`, `grounding`, `relevance`. |
 | `cost_usd` | What this answer cost: model tokens and guardrail text units, each times its price, rounded to six places. `null` when the guardrail reported no units, because a cost without them would be too low. Retrieval, embedding and Lambda are not in it — together under a hundredth of a cent. |
 | `price_date` | The day the prices behind `cost_usd` were read off the AWS pricing page. A price changes at AWS without a deploy here; the date says how old the number is. |
 | `latency_ms` | Time inside the function, from request to response. |
 
 No passage in the workspace means no model call: the answer is *No sources in
-this workspace match the question.*, with empty `sources`, zero tokens and a
-`cost_usd` of 0.
+this workspace match the question.* (*Keine Quelle in diesem Arbeitsbereich
+passt zur Frage.*), with empty `sources`, zero tokens and a `cost_usd` of 0.
+
+## Language
+
+Andur speaks the visitor's language, not the company's, and knows two:
+German and English. The request names it in the body field `language`
+(`"de"` or `"en"`, case and surrounding spaces ignored). A missing field, a
+field that is not text and any other value mean English; there is no error
+for them. The page sends the language it is set to, which is the browser's
+until the visitor uses the DE/EN switch ([web/README.md](../web/README.md)).
+
+Every sentence the function says itself comes in both languages, from the
+tables at the top of `app/handler.py`:
+
+- the answer when no passage matched, and the sentence the prompt tells the
+  model to give when the sources do not answer;
+- the notes at the end of an answer the model did not finish
+  (`STOP_NOTES`) or whose personal details were masked (`GUARDRAIL_NOTES`);
+- the sentence for a question the guardrail refused and for an answer it
+  withheld (below);
+- the `error` of every status in *Errors*: the 400, 401, 402, 403 and 502
+  sentences, the fixed sentence of a 500, and the one for a crash.
+
+What stays as it is: the model's answer is in the language of the
+**question**, as before, so an English question on the German page gets an
+English answer, and the sentence for "not in the sources" comes in the
+language of the **request**. The part of a 502 sentence after the colon is
+AWS's own wording and stays English. And the log is English, whatever the
+caller asked in: `error` in a `refused` or `failed` line is the English
+sentence.
+
+Two errors are always English: a method other than `POST` (405) and a body
+that is not JSON or not a JSON object (400). Both are found before the body
+has been read, so the language is not known yet, and the page never causes
+either. A client that does reads English.
 
 ## The guardrail
 
@@ -348,6 +387,39 @@ function in the same step.
 What the trace says goes to the log, never what it matched: a masked phone
 number is logged as `pii:PHONE`, not as the number, and the trace's copy of
 the unmasked answer is not read at all.
+
+### What a block says, in the visitor's language
+
+When the guardrail blocks, Bedrock puts its own message in place of the text,
+and that message is one fixed English sentence set on the guardrail
+(`BLOCKED_INPUT_MESSAGE` and `BLOCKED_OUTPUT_MESSAGE` in the stack). The
+handler replaces it with its own sentence in the language of the request, and
+the stack's sentences stay as the fallback: they are what a caller reads when
+the handler cannot tell what happened. It tells by two things in the same
+response, both needed:
+
+1. `stopReason` is `guardrail_intervened`, and
+2. the trace holds a policy with the action `BLOCKED` — a topic in either
+   assessment, or the grounding or relevance check on the answer
+   (`read_guardrail`). A policy that only *masked* something is `ANONYMIZED`
+   and does not count.
+
+Then `question_refused` — a topic `BLOCKED` in the **input** assessment, the
+only place the question is read — says which sentence: the question was
+refused, or the answer was withheld. A refused question never reaches the
+model, so there is no output assessment next to it. A stop reason without a
+blocking policy in the trace (`intervened`) keeps Bedrock's text and gets the
+note of `STOP_NOTES`, and a `BLOCKED` in the trace on a response Bedrock did
+not stop is the model's own text: neither is guessed at.
+
+What is measured and what is read off the shape: on the deployed function a
+refused question came back with one topic unit and no tokens, and a withheld
+one with no model tokens and `grounding` and `relevance` in
+`guardrail_policies` ([docs/costs.md](../docs/costs.md); the log of
+30.09.2026). Nobody has read the raw trace of a *German* question, and the
+test traces in `tests/test_handler.py` are hand-built in Bedrock's shape. The
+condition does not look at the language of the question, only at the trace
+and the stop reason.
 
 ### The excerpts
 
@@ -410,6 +482,8 @@ good as they are.
 ## Errors
 
 Every error is a JSON body `{"error": "<one sentence>"}`, never a traceback.
+The sentence is in the language of the request (*Language* above); the tables
+below describe the English one.
 
 | Status | When |
 |---|---|
@@ -419,7 +493,7 @@ Every error is a JSON body `{"error": "<one sentence>"}`, never a traceback.
 | 403 | A valid key, but for another workspace. |
 | 405 | Any method other than `POST`. The response carries `Allow: POST`. |
 | 429 | More requests at once than the function may run (5). Lambda refuses them before any code runs, so the body is Lambda's own: `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
-| 500 | The function is set up wrong (an environment variable, unreadable keys), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.*; the cause is in the log. |
+| 500 | The function is set up wrong (an environment variable, unreadable keys), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.* (*Der Dienst ist nicht eingerichtet.*); the cause is in the log. |
 | 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer. The sentence names the cause. |
 
 Two more can arrive that the function never saw. Neither body is

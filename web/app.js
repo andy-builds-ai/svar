@@ -17,6 +17,10 @@
  * into a text node, so a document that contains angle brackets stays text.
  * The answer's bold and lists are elements this page builds itself
  * (markdown.js); the words inside them are text nodes all the same.
+ *
+ * Every word the page says itself comes from language.js, in the visitor's
+ * language: this file holds no sentence of its own. It sends the language with
+ * every question, so the function answers in it too.
  */
 
 "use strict";
@@ -30,13 +34,14 @@ const MAX_QUESTION_CHARACTERS = 1000;
  * waiting for the function after 120 seconds and sends a 504, so in every
  * ordinary case that answer arrives first and says more than this page could.
  * This is for the case underneath it: a connection that neither answers nor
- * fails, where without a limit the button would say "Asking…" forever. */
+ * fails, where without a limit the button would show its asking label forever. */
 const REQUEST_TIMEOUT_MS = 125000;
 
 /* What the page remembers between visits. The key lives here and nowhere
  * else: not in the address, not in a log line, not in this file. */
 const STORED_KEY = "andur.key";
 const STORED_WORKSPACE = "andur.workspace";
+const STORED_LANGUAGE = "andur.language";
 
 const element = (id) => document.getElementById(id);
 
@@ -81,22 +86,75 @@ function forget(name) {
   }
 }
 
+// --- The language ----------------------------------------------------------
+// The language is the visitor's: the one kept in this browser, else the
+// browser's own. The switch changes it at once, and it is kept like the
+// workspace.
+
+let language = startLanguage(recall(STORED_LANGUAGE), window.navigator.language);
+
+function t(key, values) {
+  return translate(language, key, values);
+}
+
+/* What is on screen that was built from a language: the message, the answer's
+ * labels. Both are drawn again when the language changes. */
+let currentMessage = null;
+let currentAnswer = null;
+
+function applyLanguage() {
+  document.documentElement.lang = language;
+  document.title = t("title");
+  for (const node of document.querySelectorAll("[data-i18n]")) {
+    node.textContent = t(node.dataset.i18n);
+  }
+  for (const node of document.querySelectorAll("[data-i18n-placeholder]")) {
+    node.placeholder = t(node.dataset.i18nPlaceholder);
+  }
+  for (const node of document.querySelectorAll("[data-i18n-label]")) {
+    node.setAttribute("aria-label", t(node.dataset.i18nLabel));
+  }
+  for (const button of document.querySelectorAll("[data-language]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.language === language));
+  }
+  working(asking);
+  if (currentMessage) {
+    say(currentMessage.text, currentMessage.kind);
+  }
+  if (currentAnswer) {
+    show(currentAnswer);
+  }
+}
+
+function chooseLanguage(chosen) {
+  if (chosen === language) {
+    return;
+  }
+  language = chosen;
+  remember(STORED_LANGUAGE, language);
+  applyLanguage();
+}
+
 // --- Saying something ------------------------------------------------------
 
+/* `text` is a sentence, or a function that makes it, so that a message the page
+ * wrote itself is written again in the new language when the switch is used. */
 function say(text, kind) {
-  message.textContent = text;
+  currentMessage = { text: text, kind: kind };
+  message.textContent = typeof text === "function" ? text() : text;
   message.className = kind ? "message message--" + kind : "message";
   message.hidden = false;
 }
 
 function clearMessage() {
+  currentMessage = null;
   message.hidden = true;
   message.textContent = "";
 }
 
 function working(busy) {
   askButton.disabled = busy;
-  askButton.textContent = busy ? "Asking…" : "Ask";
+  askButton.textContent = t(busy ? "asking_button" : "ask_button");
 }
 
 // --- The request -----------------------------------------------------------
@@ -110,7 +168,7 @@ async function bodyHash(text) {
 }
 
 async function ask(workspace, key, question) {
-  const body = JSON.stringify({ question: question, workspace: workspace });
+  const body = JSON.stringify({ question: question, workspace: workspace, language: language });
   const headers = {
     "Content-Type": "application/json",
     [KEY_HEADER]: key,
@@ -147,34 +205,6 @@ async function ask(workspace, key, question) {
   return { status: response.status, payload: payload };
 }
 
-// --- What an unhappy answer means ------------------------------------------
-
-function problemSentence(status, payload) {
-  // The function's own refusals carry one sentence and say it better than
-  // this page could.
-  if (payload && typeof payload.error === "string" && payload.error) {
-    if (status === 402) {
-      return payload.error + " Ask whoever sent you this link for a new one.";
-    }
-    return payload.error;
-  }
-  // Everything below never passed through the function, so there is no
-  // sentence to pass on.
-  if (status === 429) {
-    return "Andur is busy: it answers a few questions at a time, and the others "
-      + "are turned away. Try again in a moment.";
-  }
-  if (status === 403) {
-    return "The request was refused before it reached Andur (403). That is a problem "
-      + "with the way in, not with the key — a wrong key is answered with 401.";
-  }
-  if (status === 504) {
-    return "The answer took longer than this page waits (504). The question may still "
-      + "be running; asking again costs another question of the key's allowance.";
-  }
-  return "The service answered with status " + status + " and nothing this page can read.";
-}
-
 // --- Showing the answer ----------------------------------------------------
 
 function sourceEntry(source) {
@@ -184,7 +214,7 @@ function sourceEntry(source) {
 
   const layer = document.createElement("span");
   layer.className = "layer layer--" + String(source.layer).replace(/[^a-z]/g, "");
-  layer.textContent = source.layer;
+  layer.textContent = layerName(language, source.layer);
   item.appendChild(layer);
 
   const file = document.createElement("span");
@@ -194,7 +224,7 @@ function sourceEntry(source) {
 
   const about = document.createElement("span");
   about.className = "note";
-  about.textContent = source.words + " words · " + (source.cited ? "cited" : "not cited");
+  about.textContent = sourceNote(language, source);
   item.appendChild(about);
 
   const excerpt = document.createElement("p");
@@ -206,12 +236,11 @@ function sourceEntry(source) {
 }
 
 function show(answer) {
+  currentAnswer = answer;
   renderAnswer(answerText, answer.answer);
 
   const layers = Array.isArray(answer.layers) ? answer.layers : [];
-  layersText.textContent = layers.length
-    ? "Rests on: " + layers.join(", ")
-    : "Rests on: nothing the answer cites.";
+  layersText.textContent = layersLine(language, layers);
 
   sourceList.replaceChildren();
   const sources = Array.isArray(answer.sources) ? answer.sources : [];
@@ -220,14 +249,7 @@ function show(answer) {
   }
   noSources.hidden = sources.length > 0;
 
-  const usage = answer.usage || { input_tokens: 0, output_tokens: 0 };
-  costText.textContent =
-    (answer.model || "no model call")
-    + " · " + usage.input_tokens + " tokens in, " + usage.output_tokens + " out"
-    + (typeof answer.cost_usd === "number"
-      ? " · " + answer.cost_usd.toFixed(6) + " USD at the prices of " + answer.price_date
-      : "")
-    + " · " + answer.latency_ms + " ms in the function";
+  costText.textContent = costLine(language, answer);
 
   result.hidden = false;
 }
@@ -252,20 +274,19 @@ async function submit(event) {
   const question = questionField.value.trim();
 
   if (!workspace || !key) {
-    say("Fill in the workspace and its key first.", "warn");
+    say(() => t("need_workspace_and_key"), "warn");
     return;
   }
   if (!question) {
-    say("Type a question.", "warn");
+    say(() => t("need_question"), "warn");
     return;
   }
   if (question.length > MAX_QUESTION_CHARACTERS) {
-    say("A question is at most " + MAX_QUESTION_CHARACTERS + " characters.", "warn");
+    say(() => t("question_too_long", { max: MAX_QUESTION_CHARACTERS }), "warn");
     return;
   }
   if (!window.crypto || !window.crypto.subtle) {
-    say("This page needs an https connection: without one the browser withholds the "
-      + "hashing a signed request needs.", "warn");
+    say(() => t("need_https"), "warn");
     return;
   }
 
@@ -274,6 +295,7 @@ async function submit(event) {
 
   clearMessage();
   result.hidden = true;
+  currentAnswer = null;
   asking = true;
   working(true);
   try {
@@ -281,19 +303,17 @@ async function submit(event) {
     if (status === 200 && payload && typeof payload.answer === "string") {
       show(payload);
     } else {
-      say(problemSentence(status, payload), "error");
+      say(() => problemSentence(language, status, payload), "error");
     }
   } catch (problem) {
     // A dropped connection, an offline browser, a request the browser refused
     // to make, or the wait above running out. The exception text is the
     // browser's, never the key's.
     if (problem && problem.name === "AbortError") {
-      say("Nothing came back within " + Math.round(REQUEST_TIMEOUT_MS / 1000) + " seconds, so "
-        + "the page stopped waiting. The question may still be running; asking again costs "
-        + "another question of the key's allowance.", "error");
+      say(() => t("problem_timed_out", { seconds: Math.round(REQUEST_TIMEOUT_MS / 1000) }),
+        "error");
     } else {
-      say("The question did not get through: the connection failed. Check the network "
-        + "and ask again.", "error");
+      say(() => t("problem_connection"), "error");
     }
   } finally {
     asking = false;
@@ -327,7 +347,13 @@ element("forget").addEventListener("click", () => {
   forget(STORED_KEY);
   keyField.value = "";
   keyField.focus();
-  say("The key is gone from this browser. The workspace is kept.", "warn");
+  say(() => t("key_forgotten"), "warn");
 });
 
+for (const button of document.querySelectorAll("[data-language]")) {
+  button.addEventListener("click", () => chooseLanguage(button.dataset.language));
+}
+
 element("ask-form").addEventListener("submit", submit);
+
+applyLanguage();

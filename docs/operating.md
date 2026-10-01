@@ -126,7 +126,8 @@ python -m scripts.ask "How do I export project data?" --workspace pellwick
 The first prints Quillmoor's answer, the layers it rests on, every source
 with its layer and whether the answer cites it, then tokens and latency. The
 second answers *The sources do not answer this question.* from Pellwick's
-documents. The script fetches the workspace key from Parameter Store itself;
+documents; with `--language de` the sentence is *Die Quellen beantworten diese
+Frage nicht.* The script fetches the workspace key from Parameter Store itself;
 the key never appears on screen. Request format, answer fields, status codes
 and how to get a key for curl or the page: [app/README.md](../app/README.md).
 
@@ -135,7 +136,9 @@ and how to get a key for curl or the page: [app/README.md](../app/README.md).
 Open the stack output `WebUrl`. The page asks once for a workspace and its
 key, keeps both in the browser, and shows the answer with its sources, the
 layers it rests on and what it cost. **Forget key** removes the key again.
-The key is never part of the address. What the page does with each status,
+The key is never part of the address. The page is in German or English: the
+browser's language decides at first, the DE | EN switch in the corner after
+that. What the page does with each status,
 and why it has no configuration file: [web/README.md](../web/README.md).
 
 ### With curl

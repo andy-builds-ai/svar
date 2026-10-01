@@ -79,6 +79,34 @@ def test_request_is_a_json_post_with_the_key_in_its_own_header() -> None:
     assert json.loads(request.data) == {"question": "How?", "workspace": "quillmoor"}
 
 
+def test_the_language_goes_in_the_body_only_when_given() -> None:
+    """Without it Andur answers in English; the script never guesses a language."""
+    german = ask.build_request(ASK_URL, KEY, "Wie?", "quillmoor", "de")
+    assert isinstance(german.data, bytes)
+    assert json.loads(german.data) == {
+        "question": "Wie?",
+        "workspace": "quillmoor",
+        "language": "de",
+    }
+    # The hash is of the body that is sent, the language included.
+    assert (
+        german.get_header(ask.BODY_HASH_HEADER.capitalize())
+        == hashlib.sha256(german.data).hexdigest()
+    )
+
+    for none in (None, ""):
+        plain = ask.build_request(ASK_URL, KEY, "How?", "quillmoor", none)
+        assert isinstance(plain.data, bytes)
+        assert "language" not in json.loads(plain.data)
+
+
+def test_the_language_option_takes_german_or_english_and_nothing_else() -> None:
+    assert ask.parse_args(["Wie?", "--workspace", "quillmoor"]).language is None
+    assert ask.parse_args(["Wie?", "--workspace", "quillmoor", "--language", "de"]).language == "de"
+    with pytest.raises(SystemExit):
+        ask.parse_args(["Wie?", "--workspace", "quillmoor", "--language", "fr"])
+
+
 def test_the_body_hash_header_is_the_hash_of_the_body_that_is_sent() -> None:
     """CloudFront signs the request, and a signed call to a function URL needs the hash."""
     request = ask.build_request(ASK_URL, KEY, "How?", "quillmoor")

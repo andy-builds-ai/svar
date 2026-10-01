@@ -102,10 +102,12 @@ def document_of(file_name: str) -> str:
 
 
 def declined(body: Mapping[str, Any], handler: Any) -> bool:
-    """True when Andur gave no answer: the guardrail blocked, or no source carried one."""
+    """True when Andur gave no answer: the guardrail blocked, or no source carried one, in
+    either language."""
     if body["guardrail"]["action"] == "blocked":
         return True
-    return body["answer"].strip() in {handler.NOT_IN_SOURCES_ANSWER, handler.NO_SOURCES_ANSWER}
+    sentences = {*handler.NOT_IN_SOURCES_ANSWERS.values(), *handler.NO_SOURCES_ANSWERS.values()}
+    return body["answer"].strip() in sentences
 
 
 def score(question: Mapping[str, Any], body: Mapping[str, Any], handler: Any) -> dict[str, bool]:

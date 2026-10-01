@@ -1209,6 +1209,16 @@ def test_topics_stay_inside_what_bedrock_accepts() -> None:
     assert 1 <= len(BLOCKED_OUTPUT_MESSAGE) <= 500
 
 
+def test_the_handler_says_in_english_what_the_guardrail_says_and_in_german_the_same() -> None:
+    """The handler replaces the guardrail's English message with its own sentence in the
+    language of the request. The stack's message stays as the fallback, and the two must not
+    drift apart: a visitor who asks in English reads the same words either way."""
+    assert handler.QUESTION_REFUSED_ANSWERS["en"] == BLOCKED_INPUT_MESSAGE
+    assert handler.ANSWER_WITHHELD_ANSWERS["en"] == BLOCKED_OUTPUT_MESSAGE
+    assert 1 <= len(handler.QUESTION_REFUSED_ANSWERS["de"]) <= 500
+    assert 1 <= len(handler.ANSWER_WITHHELD_ANSWERS["de"]) <= 500
+
+
 def test_personal_details_are_masked_in_the_answer_only(
     stack: AndurStack, template: Template
 ) -> None:

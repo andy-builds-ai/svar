@@ -194,6 +194,11 @@ confirmed.
 `--json` prints the function's response unchanged; its fields are described
 in [app/README.md](../app/README.md).
 
+`--language de` (or `en`) puts `"language"` into the request, as the page
+does, so the function's own sentences — "not in the sources", a refusal by the
+guardrail, an error — come back in German. Without it the request carries no
+language and they are English.
+
 | Exit code | Meaning |
 |---|---|
 | 0 | Answered. |
@@ -218,7 +223,7 @@ script refuses any other.
 
 A question is **right** when the answer contains every expected fact, each
 standing on its own ("12" is not found in "120"), or, for the other eight,
-when Andur declines. **Cites the document** means a
+when Andur declines, in German or English. **Cites the document** means a
 cited source comes from one of the documents that carry the answer; five
 facts stand in more than one, and the question lists them all. A model call
 that AWS documents as not run (throttled, unavailable, model not ready) is
