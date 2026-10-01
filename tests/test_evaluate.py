@@ -9,7 +9,7 @@ import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py
 import pytest
 
 from infra.answer_models import ANSWER_MODELS, AnswerModel
-from infra.stacks.andur_stack import ANSWER_FUNCTION_NAME, WORKSPACES
+from infra.stacks.andur_stack import ANSWER_FUNCTION_NAME
 from scripts import evaluate
 
 KNOWLEDGE = Path(__file__).resolve().parents[1] / "knowledge"
@@ -23,13 +23,13 @@ def questions() -> list[dict[str, Any]]:
 def test_the_question_set_covers_every_demo_workspace_and_every_kind(
     questions: list[dict[str, Any]],
 ) -> None:
-    """The demo workspaces are the folders in knowledge/, not `WORKSPACES`: a customer's
-    workspace gets a key there, but its documents and questions stay out of the repository."""
+    """The demo workspaces are the folders in knowledge/. A customer's workspace exists only
+    in AWS (scripts/workspace.py); its documents and questions stay out of the repository."""
     demo_workspaces = {path.name for path in KNOWLEDGE.iterdir() if path.is_dir()}
     assert len(questions) == 30
     assert len({q["id"] for q in questions}) == len(questions)
     assert {q["workspace"] for q in questions} == demo_workspaces
-    assert demo_workspaces <= set(WORKSPACES)
+    assert all(handler.WORKSPACE_NAME.match(name) for name in demo_workspaces)
     assert {q["kind"] for q in questions} == set(evaluate.KINDS)
 
 

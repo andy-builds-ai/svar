@@ -75,6 +75,9 @@ chunk means the answer can carry the distinction through to the reader.
 
 ## Adding a workspace
 
-There is nothing to deploy. Upload under a new `workspaces/<name>/` prefix,
-sync, and query with `workspace = <name>`. The vector index, the knowledge
-base and the role stay as they are.
+There is nothing to deploy. Give the workspace its key with
+`python -m scripts.workspace add <name>`, upload under a new
+`workspaces/<name>/` prefix, sync, and query with `workspace = <name>`. The
+vector index, the knowledge base and the role stay as they are.
+`python -m scripts.workspace remove <name> --yes` takes all of it away again
+([scripts/README.md](../scripts/README.md#workspace--adding-and-removing-a-workspace)).

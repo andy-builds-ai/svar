@@ -1,6 +1,6 @@
 # scripts — operating the knowledge base
 
-Four commands, all run from the repository root:
+Five commands, all run from the repository root:
 
 | Command | Does |
 |---|---|
@@ -8,6 +8,7 @@ Four commands, all run from the repository root:
 | `python -m scripts.retrieve` | Asks the knowledge base a question inside one workspace and prints the hits. |
 | `python -m scripts.ask` | Asks the deployed answer function a question and prints the answer with its sources. |
 | `python -m scripts.evaluate` | Asks 30 fixed questions of each answer model the way the function does and prints hit rate, citations and cost. |
+| `python -m scripts.workspace` | Adds a workspace's key, or removes a workspace: key, budget items, documents and vectors. |
 
 ## What they need
 
@@ -17,8 +18,8 @@ Four commands, all run from the repository root:
 - A valid AWS login for the account the stack is deployed in. When it has
   run out, both scripts stop with a message that says so; sign in with
   `aws login` and rerun.
-- The deployed stack. Bucket, knowledge base id, data source id, web address
-  and key path are read from the outputs of `AndurStack` in `eu-west-1`. The
+- The deployed stack. Bucket, knowledge base id, data source id, web address,
+  key path and budget table are read from the outputs of `AndurStack` in `eu-west-1`. The
   region is pinned like in `infra/app.py`, so a shell profile pointing
   elsewhere does not matter. Each value can be passed by hand instead:
   `--bucket`, `--knowledge-base-id`, `--data-source-id`, `--url`, and
@@ -204,6 +205,73 @@ language and they are English.
 | 0 | Answered. |
 | 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 402 key budget used up, 403 key of another workspace, 400 bad question, 502 Bedrock failed). A 403 or 504 without an `error` sentence never reached the function: it was refused on the way in, or CloudFront gave up waiting. |
 | 2 | An AWS step or the connection failed: login, stack, missing key parameter, network. |
+
+## workspace — adding and removing a workspace
+
+```bash
+python -m scripts.workspace add kalvenstett                # create the key, print it once
+python -m scripts.workspace remove kalvenstett             # show what belongs to it
+python -m scripts.workspace remove kalvenstett --yes       # delete it
+```
+
+No customer is named in the repository and none needs a deploy. A workspace
+is what AWS holds under its name: the key `/andur/api-keys/<name>`, the budget
+item of that key, and the documents under `workspaces/<name>/`. The name
+follows the answer function's rule — lowercase letters, digits and single
+hyphens, at most 64 characters — and a name outside it is refused before any
+AWS call.
+
+**add** generates a key as strong as the stack's used to be (32 random bytes,
+43 URL-safe characters), stores it as a SecureString and prints it once. The
+key alone goes to stdout and every other line to stderr, so
+`> /dev/null` keeps it off the screen and `> key.txt` keeps nothing but the
+key. A key that exists is never replaced: `add` stops with exit code 2 and
+changes nothing. The one exception is its own key: when the answer to the
+store got lost and botocore sent it again, the second try finds the key the
+first one stored; `add` reads it, and if it is the key it generated, that is
+success. The new key works at once with the default budget; to set
+another before its first question, see
+[app/README.md](../app/README.md#setting-a-budget-for-one-key). Its documents
+go in with `python -m scripts.ingest --source <folder> --workspace <name>`.
+
+**remove** first finds everything that belongs to the name and prints it: the
+key (never its value), every budget item with the questions used, and every
+document object. The budget items are the one of the current key's hash and
+every item whose `workspace` is the name — the function writes it into each
+item it creates — so items of earlier keys are found too, and so are all of
+them when the key is gone already. Without `--yes` that is all; nothing is
+deleted. With `--yes` it deletes, in this order:
+
+1. **The budget items.** They go first because an item preset by hand has no
+   workspace until its first question and is found only by the key's hash: a
+   run that stops halfway can simply be repeated.
+2. **The key.** Warm instances of the function keep it for up to 5 minutes
+   ([app/README.md](../app/README.md#getting-a-key)).
+3. **The documents** under `workspaces/<name>/`, in batches of 1000. The
+   bucket is versioned: a deleted object leaves a delete marker, and its old
+   versions expire after 30 days.
+4. **The budget items written meanwhile**: a question with the deleted key,
+   still accepted from the function's memory, writes a new one.
+5. **An ingestion job** over the data source, which removes the vectors of
+   the deleted documents. It runs on every `--yes`, also when nothing else was
+   found, so a repeated run cleans up after one whose job failed.
+
+When it has deleted a key, it ends with "Not quite finished": for up to 5
+minutes a question can still write a new item. Run `remove <name> --yes`
+again after that to delete it.
+
+It never touches anything outside that one name. The prefix ends in a slash,
+so `kalv` never reaches `kalvenstett`; the listing is checked against it again
+before anything is deleted, and so is every budget item the scan returns; the
+parameter and the budget items are deleted by their exact name and hash. Bucket, table, key path and ids come from the stack
+outputs.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Done: the key was added; or `remove` listed, or deleted and the job completed. |
+| 1 | The name breaks the naming rule. Nothing was called. |
+| 2 | An AWS step failed, or `add` found a key there already. What was deleted before the failure is gone; rerun to finish. |
+| 3 | Everything was deleted, but the ingestion job failed; the vectors may still be there. Rerun `remove <name> --yes`. |
 
 ## evaluate — which model answers best
 

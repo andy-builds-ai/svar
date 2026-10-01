@@ -46,7 +46,6 @@ from infra.stacks.andur_stack import (
     DEFAULT_QUESTION_LIMIT,
     DEFAULT_WINDOW_HOURS,
     DENIED_TOPICS,
-    DEPLOY_PROPERTY,
     DISTANCE_METRIC,
     EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_ID,
@@ -73,7 +72,6 @@ from infra.stacks.andur_stack import (
     VECTOR_INDEX_NAME,
     WEB_FOLDER,
     WORKSPACE_PREFIX,
-    WORKSPACES,
     AndurStack,
     replacement_safe_name,
 )
@@ -440,7 +438,8 @@ def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
 ) -> None:
     """Known exceptions: both belong to functions CDK generates for a deploy.
 
-    One runs the key generator, the other copies web/ into the site bucket.
+    One answers the Delete of the retired key resources, the other copies
+    web/ into the site bucket.
     Each gets AWSLambdaBasicExecutionRole from its construct; this stack does
     not create either role and cannot narrow them without replacing the
     constructs. Every role the stack defines itself carries inline policies
@@ -503,8 +502,8 @@ def test_the_only_compute_that_runs_between_deploys_is_the_answer_function(
 ) -> None:
     """Four functions, and three of them only ever run during a deploy.
 
-    The answer function, the key generator with the CDK framework that runs
-    it, and CDK's file copier that puts web/ into the site bucket. Nothing
+    The answer function, the retired key function with the CDK framework that
+    runs it, and CDK's file copier that puts web/ into the site bucket. Nothing
     else runs, so nothing else can cost money while nobody asks.
     """
     template.resource_count_is("AWS::Lambda::Function", 4)
@@ -770,8 +769,6 @@ def test_the_function_url_needs_signed_requests(stack: AndurStack, template: Tem
     url = resource_of(stack, template, stack.function_url)
     assert url["Properties"]["AuthType"] == "AWS_IAM"
     assert "Cors" not in url["Properties"]
-    key_ids = {stack.get_logical_id(key.node.default_child) for key in stack.api_keys}
-    assert key_ids <= set(url["DependsOn"])
 
 
 def test_exactly_one_output_is_a_function_url(stack: AndurStack, template: Template) -> None:
@@ -1353,76 +1350,63 @@ def test_no_role_may_do_more_than_count_on_the_budget_table(template: Template) 
 # --- Workspace keys ------------------------------------------------------
 
 
-def test_one_key_per_workspace_is_generated_during_the_deploy(template: Template) -> None:
-    keys = template.find_resources("Custom::AndurApiKey")
-    names = sorted(key["Properties"]["ParameterName"] for key in keys.values())
-    assert names == sorted(f"{API_KEY_PARAMETER_PATH}/{workspace}" for workspace in WORKSPACES)
-    for key in keys.values():
-        assert set(key["Properties"]) == {
-            "ServiceToken",
-            "ServiceTimeout",
-            "ParameterName",
-            "ParameterPath",
-            DEPLOY_PROPERTY,
-        }
+#: The logical ids of the key function as deployed before 2026-10-01. The Delete of each
+#: removed key resource reaches the function under these ids; a new id would make a new
+#: function, and the old one, still able to delete keys, would answer that Delete.
+DEPLOYED_KEY_FUNCTION_IDS = {
+    "ApiKeyFunctionRoleC17A4D17": "AWS::IAM::Role",
+    "ApiKeyFunction7C99575B": "AWS::Lambda::Function",
+    "ApiKeyProviderframeworkonEvent9849A943": "AWS::Lambda::Function",
+}
 
 
-def test_every_deploy_asks_again_whether_a_key_is_there() -> None:
-    """The one written way to end a key rests on this.
-
-    CloudFormation calls a custom resource only when its properties or its
-    service token change, and both were constants: a deploy walked past the
-    key generator without calling it. So deleting a key in Parameter Store
-    and deploying — what the stack and the README both say to do — left the
-    workspace with no key at all, every question 401, until somebody edited
-    the stack. `DEPLOY_PROPERTY` is what makes the call happen.
-    """
-    first = Template.from_stack(AndurStack(cdk.App(context=deploy_context()), "First"))
-    second = Template.from_stack(AndurStack(cdk.App(context=deploy_context()), "Second"))
-    stamps = [
-        key["Properties"][DEPLOY_PROPERTY]
-        for template in (first, second)
-        for key in template.find_resources("Custom::AndurApiKey").values()
+def test_the_stack_creates_no_workspace_key(template: Template) -> None:
+    """Keys come from `python -m scripts.workspace add`; no customer is named in the code.
+    The one custom resource left is the copier that puts web/ into the site bucket."""
+    custom = [
+        resource["Type"]
+        for resource in template.to_json()["Resources"].values()
+        if resource["Type"].startswith("Custom::")
     ]
-    assert len(stamps) == 2 * len(WORKSPACES)
-    assert len(set(stamps)) == 2, "one value per synthesis, and a new one each time"
+    assert custom == ["Custom::CDKBucketDeployment"]
 
 
-def test_every_workspace_is_a_name_the_function_accepts() -> None:
-    """A name the function does not accept deploys cleanly and then answers 401.
+def test_the_key_function_is_updated_in_place_not_replaced(template: Template) -> None:
+    resources = template.to_json()["Resources"]
+    for logical_id, resource_type in DEPLOYED_KEY_FUNCTION_IDS.items():
+        assert resources[logical_id]["Type"] == resource_type, logical_id
 
-    The stack writes a parameter for every entry of `WORKSPACES` without
-    looking at it. `keys_by_workspace` in the handler drops an entry whose
-    last path part is not a valid workspace name — silently, because at that
-    point it is a stranger's parameter under the path, not a mistake. So
-    ``"Quillmoor"`` would deploy, store its key, and refuse every question
-    asked with it without a line anywhere saying why. The two ends have to
-    agree, and this is the only place they can be made to.
+
+def test_no_role_may_write_or_delete_a_key(template: Template) -> None:
+    """The deploy that drops the key resources runs their Delete with this stack's roles.
+
+    None of them can delete a parameter any more, so not even an old copy of the key
+    function could take a key with it. Reading keys stays with the answer function alone.
     """
-    for workspace in WORKSPACES:
-        assert handler.WORKSPACE_NAME.match(workspace), workspace
-        assert len(workspace) <= handler.MAX_WORKSPACE_CHARACTERS, workspace
-        assert handler.keys_by_workspace(
-            [{"Name": f"{API_KEY_PARAMETER_PATH}/{workspace}", "Value": "a-key"}],
-            API_KEY_PARAMETER_PATH,
-        ) == {workspace: "a-key"}
+    ssm_actions = sorted(
+        action
+        for _, statement in all_policy_statements(template)
+        for action in (
+            statement["Action"] if isinstance(statement["Action"], list) else [statement["Action"]]
+        )
+        if action.startswith("ssm:")
+    )
+    assert ssm_actions == ["ssm:GetParametersByPath"]
 
 
-def test_no_key_value_is_in_the_template(template: Template) -> None:
-    """CloudFormation cannot hold a SecureString; a plain parameter would put the key into
-    cdk.out."""
-    template.resource_count_is("AWS::SSM::Parameter", 0)
-    template.resource_count_is("AWS::SecretsManager::Secret", 0)
-
-
-def test_key_function_may_only_write_keys_under_the_path(
+def test_the_key_function_role_may_only_write_its_log(
     stack: AndurStack, template: Template
 ) -> None:
     policies = role_policies(stack, template, stack.node.find_child("ApiKeyFunctionRole"))
-    assert set(policies) == {"ManageApiKeys", "WriteLogs"}
-    (statement,) = policies["ManageApiKeys"]["Statement"]
-    assert sorted(statement["Action"]) == ["ssm:DeleteParameter", "ssm:PutParameter"]
-    assert joined_last_part(statement["Resource"]) == f":parameter{API_KEY_PARAMETER_PATH}/*"
+    assert set(policies) == {"WriteLogs"}
+
+
+def test_the_key_function_runs_the_handler_that_deletes_nothing(
+    stack: AndurStack, template: Template
+) -> None:
+    function = resource_of(stack, template, stack.node.find_child("ApiKeyFunction"))
+    assert function["Properties"]["Handler"] == "handler.on_event"
+    assert "deletes nothing" in function["Properties"]["Description"]
 
 
 # --- Logs ----------------------------------------------------------------

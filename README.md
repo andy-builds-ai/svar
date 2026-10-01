@@ -44,7 +44,7 @@ USD, 3425 ms in the function):
   on the page with Nova Pro, the first after a deploy included
   (`latency_ms`); a median of 1.8 seconds from retrieval to cost line for
   the 22 answerable questions, measured from a laptop in Germany.
-- **Tests:** 654, all passing, without AWS — 43 seconds on a local laptop on
+- **Tests:** 689, all passing, without AWS — 43 seconds on a local laptop on
   01.10.2026.
 - **Documents:** 37 Markdown documents of two fictional companies, uploaded
   as 147 sections so that a hit is a passage, not a page.
@@ -89,10 +89,11 @@ and answers stay in the EU.
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                  # 654 tests, no AWS needed
+pytest -q                                  # 689 tests, no AWS needed
 
 cdk bootstrap aws://<account>/eu-west-1    # once per account and region
 cdk deploy                                 # builds everything
+python -m scripts.workspace add quillmoor > /dev/null   # stores the workspace's key
 python -m scripts.ingest                   # uploads the demo corpus and syncs
 python -m scripts.ask "How do I export project data?" --workspace quillmoor
 cdk destroy                                # removes it; the documents bucket stays

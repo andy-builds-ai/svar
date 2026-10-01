@@ -47,8 +47,8 @@ def read_key(ssm: Any, key_path: str, workspace: str) -> str:
     except AwsProblem as problem:
         if error_code(problem.__cause__) == "ParameterNotFound":
             raise AwsProblem(
-                f"There is no key {name}. Is {workspace!r} listed in WORKSPACES in the stack, "
-                "and has it been deployed since?"
+                f"There is no key {name}. Is {workspace!r} spelled right? A new workspace "
+                f"gets its key with `python -m scripts.workspace add {workspace}`."
             ) from problem.__cause__
         raise
     return response["Parameter"]["Value"]

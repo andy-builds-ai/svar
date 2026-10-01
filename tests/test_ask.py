@@ -128,7 +128,7 @@ def test_key_is_read_decrypted_from_the_workspace_parameter() -> None:
 
 
 def test_missing_key_parameter_says_what_to_check() -> None:
-    with pytest.raises(AwsProblem, match="WORKSPACES"):
+    with pytest.raises(AwsProblem, match="scripts.workspace add nobody"):
         ask.read_key(FakeSSM(FakeClientError("ParameterNotFound")), "/andur/api-keys", "nobody")
 
 

@@ -66,10 +66,12 @@ Two headers are not the function's idea but the way in's:
 
 ## Getting a key
 
-Each workspace has one key, generated inside AWS during `cdk deploy` and
-stored as a SecureString parameter `/andur/api-keys/<workspace>`. It is not in
-the repository, the template or any log. To copy it to the clipboard without
-it showing up on screen:
+Each workspace has one key, stored as a SecureString parameter
+`/andur/api-keys/<workspace>`. `python -m scripts.workspace add <workspace>`
+generates it, stores it and prints it once
+([scripts/README.md](../scripts/README.md#workspace--adding-and-removing-a-workspace)).
+It is not in the repository, the template or any log. To copy it to the
+clipboard later without it showing up on screen:
 
 ```bash
 printf '%s' "$(aws ssm get-parameter --region eu-west-1 --name /andur/api-keys/quillmoor \
@@ -82,13 +84,15 @@ In Git Bash on Windows, put `MSYS_NO_PATHCONV=1` in front of any command with
 `/andur/api-keys/...`: otherwise Git Bash turns the parameter name into a
 Windows path and AWS rejects it.
 
-A deploy keeps existing keys. To replace one, delete the parameter and deploy
-again: every deploy calls the key generator once per workspace, so a
-parameter that is not there is created, and one that is there is left alone.
-(What makes the call happen is `DEPLOY_PROPERTY` in the stack — a custom
-resource whose properties never change is never called at all, and this way
-of ending a key would have left the workspace with no key rather than a new
-one.) The function keeps the keys it has read for 5 minutes
+No deploy touches a key. To replace one, delete the parameter and add it
+again; `add` refuses to overwrite a key that is there:
+
+```bash
+MSYS_NO_PATHCONV=1 aws ssm delete-parameter --region eu-west-1 --name /andur/api-keys/quillmoor
+python -m scripts.workspace add quillmoor
+```
+
+The function keeps the keys it has read for 5 minutes
 (`KEY_CACHE_SECONDS`), so **a deleted or replaced key keeps working for up to
 5 minutes** — and longer if Parameter Store cannot be *read* at the moment the
 5 minutes are up, because expired keys that cannot be replaced go on deciding
@@ -248,7 +252,7 @@ The simplest way to give a used key a fresh start is to reset it with
 new key.
 
 **A replaced key has a fresh budget by itself.** Deleting the parameter and
-deploying again gives the workspace a new key, and a new key has a different
+adding it again gives the workspace a new key, and a new key has a different
 hash and therefore no item — the old item stays behind and expires on its
 own. That also means the reverse: a key stays spent only as long as its item
 exists. After `KEEP_DAYS` (365 by default, counted from the first question)

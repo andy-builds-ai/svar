@@ -33,15 +33,14 @@ cdk synth    # builds the template, no AWS call
 cdk diff     # compares it with the deployed stack; needs an AWS login, changes nothing
 ```
 
-`cdk diff` on unchanged code still lists `SynthesisedAt` on the two
-`Custom::AndurApiKey` resources; that is the time of the synth.
-
 ## Limits
 
 - **Only the operator deploys.** Never run `cdk deploy` or `cdk destroy`.
 - `python -m scripts.evaluate` calls real models on AWS and costs real money.
-  Run it only when asked. `ingest`, `retrieve` and `ask` also talk to the
-  deployed stack; see `scripts/README.md`.
+  Run it only when asked. `ingest`, `retrieve`, `ask` and `workspace` also
+  talk to the deployed stack; see `scripts/README.md`. `workspace remove --yes`
+  deletes a workspace's key, budget and documents: never without the
+  operator's word.
 - **Region is `eu-west-1`,** pinned in `infra/app.py`. Use EU inference
   profiles, never a global one.
 - **Model IDs and prices live only in `infra/answer_models.py`.** Add a model

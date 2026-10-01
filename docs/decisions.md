@@ -123,6 +123,52 @@ and stores each key instead.
 changes with every synthesis makes CloudFormation call them each time, so
 deleting a key's parameter and deploying gives a new key instead of none.
 
+**2026-10-01 — Keys come from a command, not from the deploy; the two entries
+above are replaced.** The stack created one key per name in `WORKSPACES`, so
+every customer stood by name in the public repository, every new one needed a
+code change and a deploy, and a stack deployed into a customer's own account
+brought the demo keys along. Now `python -m scripts.workspace add <name>`
+generates the key on the operator's machine and stores it as a SecureString,
+and `remove <name> --yes` deletes key, budget items and documents and runs an
+ingestion job. The answer function never needed the list: it reads whatever
+lies under the key path. The price: the key is generated outside AWS, in the
+operator's terminal, and printed there once; and `cdk destroy` no longer takes
+the keys with it.
+
+The deploy that drops the key resources must not take the keys with it.
+Removing a custom resource makes CloudFormation send it a Delete, and the
+old key function answered a Delete by deleting the key. CloudFormation deletes
+removed resources only in the cleanup phase, after every update has succeeded
+("Monitor the progress of a stack update" in the CloudFormation user guide),
+so the same deploy first updates the key function — new code that deletes
+nothing, a role without any Parameter Store permission — and the Delete
+reaches that. A `Retain` deletion policy would have needed two deploys, since
+CloudFormation applies the policy of the template already deployed, and the
+first of them would have needed the customer names again. The function and
+its provider have no work left after that deploy, but they stay until no
+deployed stack holds a `Custom::AndurApiKey` any more, in any account and
+region. Removing them from the code removes them everywhere the code is
+deployed next, and on a stack that skipped this deploy the Delete would reach
+the old function, which may delete keys. One such stack exists: the old one in
+us-east-1, deliberately left at a version with key resources.
+
+**2026-10-01 — Removing a workspace shows before it deletes.** Without
+`--yes`, `remove` lists what it would delete and deletes nothing, because a
+typo must not take a customer away. Everything it deletes is found under that
+one name: the parameter `<path>/<name>`, the budget items — the one of the
+key's hash, and every item whose `workspace` is the name, which also finds
+those of earlier keys and those left when the key is gone already — and the
+objects under `workspaces/<name>/` — with the slash, so `kalv` never reaches
+`kalvenstett`. The listing and the scan are checked again before anything is
+deleted. The budget items go before the key, because an item preset by hand
+carries no workspace until its first question and is found only by the key's
+hash: a run that stops halfway can be repeated. After the key the items are
+looked for once more, because the function keeps a key for up to 5 minutes and
+a question in that time writes a new one; the script says so instead of
+reporting the workspace gone. Deleted documents leave a
+delete marker in the versioned bucket, and their old versions expire after
+30 days like every other's; within that time they can be restored.
+
 **2026-09-17 — Keys are read at most every 5 minutes, and again at once for
 an unknown key, no more than every 10 seconds.** A new key works at once, a
 deleted one stops within 5 minutes, and a flood of wrong keys is not a flood
@@ -245,10 +291,10 @@ languages, German and English. The page starts in German when the browser's
 language begins with `de`, offers a DE/EN switch and sends its language in the
 body of every question; the function says every sentence of its own in it. A
 language per workspace would have needed a list of customers outside the
-repository, and `WORKSPACES` is inside it. Which language a request names
-decides nothing about which documents are read, and nothing is checked
-against it: a missing or unknown one is English, not an error, so a client
-written before the field existed keeps working unchanged.
+repository, and that list (`WORKSPACES`) was still in the stack then. Which
+language a request names decides nothing about which documents are read, and
+nothing is checked against it: a missing or unknown one is English, not an
+error, so a client written before the field existed keeps working unchanged.
 
 **2026-10-01 — The answer follows the question, the fixed sentences follow
 the request.** The prompt still says "answer in the language of the question",

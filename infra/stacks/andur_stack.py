@@ -2,14 +2,12 @@
 
 import hashlib
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from aws_cdk import (
     Aws,
     CfnOutput,
-    CustomResource,
     Duration,
     RemovalPolicy,
     Stack,
@@ -159,11 +157,9 @@ PRICE_TOPIC_PER_1K_UNITS = "0.15"
 PRICE_PII_PER_1K_UNITS = "0.10"
 PRICE_GROUNDING_PER_1K_UNITS = "0.10"
 
-WORKSPACES = ("quillmoor", "pellwick")
-
+#: Where the workspace keys live: ``<path>/<workspace>``, one SecureString each.
+#: The stack creates none; `python -m scripts.workspace` adds and removes them.
 API_KEY_PARAMETER_PATH = "/andur/api-keys"
-
-DEPLOY_PROPERTY = "SynthesisedAt"
 
 
 BUDGET_TABLE_NAME = "andur-key-budgets"
@@ -221,11 +217,6 @@ CONTENT_SECURITY_POLICY = "; ".join(
 HSTS_MAX_AGE_DAYS = 730
 
 
-def synthesised_at() -> str:
-    """The moment of this synthesis, as a value for `DEPLOY_PROPERTY`."""
-    return datetime.now(UTC).isoformat()
-
-
 def replacement_safe_name(
     prefix: str, create_only_settings: list[Any], spelled_out: tuple[Any, ...] = ()
 ) -> str:
@@ -274,7 +265,7 @@ class AndurStack(Stack):
         )
         self.data_source = self._create_data_source(self.knowledge_base, self.documents_bucket)
 
-        self.api_keys = self._create_api_keys()
+        self.key_retirer = self._create_key_retirer()
         self.budget_table = self._create_budget_table()
         self.answer_log_group = self._create_log_group(
             "AnswerFunctionLogs", f"/aws/lambda/{ANSWER_FUNCTION_NAME}"
@@ -297,7 +288,7 @@ class AndurStack(Stack):
             self.guardrail_version,
             self.excerpt_guardrail_version,
         )
-        self.function_url = self._create_function_url(self.answer_function, self.api_keys)
+        self.function_url = self._create_function_url(self.answer_function)
 
         self.site_bucket = self._create_site_bucket()
         self.distribution = self._create_distribution(self.site_bucket, self.function_url)
@@ -518,31 +509,32 @@ class AndurStack(Stack):
 
     # --- Workspace keys --------------------------------------------------
 
-    def _create_api_keys(self) -> list[CustomResource]:
-        """One key per workspace, generated inside AWS while the stack deploys."""
+    def _create_key_retirer(self) -> cr.Provider:
+        """The function that answers the Delete of the key resources this stack used to have.
+
+        It deletes nothing (infra/api_keys/handler.py), and it has no permission on Parameter
+        Store either: the removed resources go in the deploy's cleanup phase, after this role
+        and this function are updated, so the Delete finds neither code nor a right to
+        delete a key. The construct ids are the old ones, so the deploy updates these
+        resources in place instead of replacing them.
+
+        Remove all of it only once no deployed stack holds a ``Custom::AndurApiKey`` any
+        more, in any account and region: a stack that skipped this deploy would send the
+        Delete to the old function, which may delete keys. The old stack in us-east-1 is
+        one, deliberately left at a version with key resources (docs/decisions.md).
+        """
         log_group = self._create_log_group("ApiKeyFunctionLogs")
         role = iam.Role(
             self,
             "ApiKeyFunctionRole",
-            description="Lets the Andur key function create and delete workspace keys.",
+            description="Lets the Andur key retirer write its log; nothing else.",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
-            inline_policies={
-                "ManageApiKeys": iam.PolicyDocument(
-                    statements=[
-                        iam.PolicyStatement(
-                            sid="PutAndDeleteWorkspaceKeys",
-                            actions=["ssm:PutParameter", "ssm:DeleteParameter"],
-                            resources=[f"{self.api_key_path_arn}/*"],
-                        )
-                    ]
-                ),
-                "WriteLogs": self._write_logs_policy(log_group),
-            },
+            inline_policies={"WriteLogs": self._write_logs_policy(log_group)},
         )
         function = lambda_.Function(
             self,
             "ApiKeyFunction",
-            description="Generates Andur workspace keys during cdk deploy.",
+            description="Answers the Delete of retired Andur key resources; deletes nothing.",
             runtime=LAMBDA_RUNTIME,
             architecture=lambda_.Architecture.ARM_64,
             code=lambda_.Code.from_asset(
@@ -553,28 +545,12 @@ class AndurStack(Stack):
             role=role,
             log_group=log_group,
         )
-        provider = cr.Provider(
+        return cr.Provider(
             self,
             "ApiKeyProvider",
             on_event_handler=function,
             log_group=self._create_log_group("ApiKeyProviderLogs"),
         )
-        stamp = synthesised_at()
-        return [
-            CustomResource(
-                self,
-                f"ApiKey-{workspace}",
-                service_token=provider.service_token,
-                resource_type="Custom::AndurApiKey",
-                properties={
-                    "ParameterName": f"{API_KEY_PARAMETER_PATH}/{workspace}",
-                    "ParameterPath": API_KEY_PARAMETER_PATH,
-                    DEPLOY_PROPERTY: stamp,
-                },
-                service_timeout=Duration.minutes(5),
-            )
-            for workspace in WORKSPACES
-        ]
 
     @property
     def api_key_path_arn(self) -> str:
@@ -845,14 +821,9 @@ class AndurStack(Stack):
             },
         )
 
-    def _create_function_url(
-        self, function: lambda_.Function, api_keys: list[CustomResource]
-    ) -> lambda_.FunctionUrl:
+    def _create_function_url(self, function: lambda_.Function) -> lambda_.FunctionUrl:
         """The function's own HTTPS address — reachable for CloudFront alone."""
-        url = function.add_function_url(auth_type=lambda_.FunctionUrlAuthType.AWS_IAM)
-        for api_key in api_keys:
-            url.node.add_dependency(api_key)
-        return url
+        return function.add_function_url(auth_type=lambda_.FunctionUrlAuthType.AWS_IAM)
 
     # --- The page --------------------------------------------------------
 

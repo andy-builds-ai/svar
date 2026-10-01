@@ -1,8 +1,8 @@
-"""Tests for the custom resource that creates workspace keys, against a fake Parameter Store."""
+"""Tests for the function that lets go of the retired key resources without deleting a key."""
 
+from pathlib import Path
 from typing import Any
 
-import handler as answer_handler  # app/handler.py, by its Lambda name (tests/conftest.py)
 import pytest
 
 from infra.api_keys import handler
@@ -11,178 +11,36 @@ PATH = "/andur/api-keys"
 PROPERTIES = {"ParameterName": f"{PATH}/quillmoor", "ParameterPath": PATH}
 
 
-class FakeSSM:
-    """Parameter Store with the two exceptions the handler catches."""
-
-    class exceptions:
-        class ParameterAlreadyExists(Exception):
-            pass
-
-        class ParameterNotFound(Exception):
-            pass
-
-    def __init__(self) -> None:
-        self.parameters: dict[str, dict[str, Any]] = {}
-        self.deleted: list[str] = []
-
-    def put_parameter(self, **kwargs: Any) -> None:
-        if kwargs["Name"] in self.parameters and not kwargs["Overwrite"]:
-            raise self.exceptions.ParameterAlreadyExists()
-        self.parameters[kwargs["Name"]] = kwargs
-
-    def delete_parameter(self, Name: str) -> None:
-        if Name not in self.parameters:
-            raise self.exceptions.ParameterNotFound()
-        del self.parameters[Name]
-        self.deleted.append(Name)
-
-
-def lifecycle(
-    request_type: str, physical_id: str | None = None, properties: dict[str, str] = PROPERTIES
-) -> dict[str, Any]:
-    event: dict[str, Any] = {"RequestType": request_type, "ResourceProperties": properties}
+def lifecycle(request_type: str, physical_id: str | None = None) -> dict[str, Any]:
+    """An event as the provider framework passes it on, properties as deployed until now."""
+    event: dict[str, Any] = {"RequestType": request_type, "ResourceProperties": PROPERTIES}
     if physical_id is not None:
         event["PhysicalResourceId"] = physical_id
     return event
 
 
-def test_new_keys_are_long_random_and_header_safe() -> None:
-    keys = {handler.new_key() for _ in range(20)}
-    assert len(keys) == 20
-    for key in keys:
-        assert len(key) == 43
-        assert all(character.isalnum() or character in "-_" for character in key)
-
-
-def test_create_stores_a_secure_string_and_names_the_resource_after_it() -> None:
-    ssm = FakeSSM()
-    result = handler.on_event(lifecycle("Create"), None, ssm)
+def test_a_delete_succeeds_and_keeps_its_id(capsys: pytest.CaptureFixture[str]) -> None:
+    """The Delete of every removed key resource comes here; CloudFormation must see success."""
+    result = handler.on_event(lifecycle("Delete", f"{PATH}/quillmoor"), None)
 
     assert result == {"PhysicalResourceId": f"{PATH}/quillmoor"}
-    stored = ssm.parameters[f"{PATH}/quillmoor"]
-    assert stored["Type"] == "SecureString"
-    assert stored["Tier"] == "Standard"
-    assert stored["Overwrite"] is False
-    assert len(stored["Value"]) == 43
+    assert f"kept {PATH}/quillmoor" in capsys.readouterr().out
 
 
-def test_the_description_names_the_header_the_function_reads() -> None:
-    """Whoever reads a key in the SSM console reads this line with it.
-
-    It said ``Authorization: Bearer <key>`` — the one header the key may not
-    travel in, because CloudFront replaces it with its own signature on the
-    way to the function. Following it earned a 401 and no hint why. No test
-    held the string, so nothing noticed.
-    """
-    ssm = FakeSSM()
-    handler.on_event(lifecycle("Create"), None, ssm)
-    description = ssm.parameters[f"{PATH}/quillmoor"]["Description"]
-
-    assert answer_handler.KEY_HEADER in description
-    assert "Authorization" not in description and "Bearer" not in description
+def test_a_delete_without_an_id_or_properties_still_succeeds() -> None:
+    assert handler.on_event({"RequestType": "Delete"}, None) == {"PhysicalResourceId": ""}
 
 
-def test_create_and_update_keep_an_existing_key() -> None:
-    ssm = FakeSSM()
-    handler.on_event(lifecycle("Create"), None, ssm)
-    first = ssm.parameters[f"{PATH}/quillmoor"]["Value"]
-
-    handler.on_event(lifecycle("Update", f"{PATH}/quillmoor"), None, ssm)
-    handler.on_event(lifecycle("Create"), None, ssm)
-    assert ssm.parameters[f"{PATH}/quillmoor"]["Value"] == first
+def test_the_function_cannot_reach_parameter_store_at_all() -> None:
+    """Not "chooses not to delete": it has no client to delete with. Its role has no SSM
+    permission either (tests/test_stack.py)."""
+    source = Path(handler.__file__).read_text(encoding="utf-8")
+    assert "boto3" not in source
+    assert "delete_parameter" not in source
 
 
-def test_update_creates_a_key_that_went_missing() -> None:
-    ssm = FakeSSM()
-    handler.on_event(lifecycle("Update", f"{PATH}/quillmoor"), None, ssm)
-    assert f"{PATH}/quillmoor" in ssm.parameters
-
-
-def test_delete_removes_the_key_and_tolerates_a_missing_one() -> None:
-    ssm = FakeSSM()
-    handler.on_event(lifecycle("Create"), None, ssm)
-
-    assert handler.on_event(lifecycle("Delete", f"{PATH}/quillmoor"), None, ssm) == {
-        "PhysicalResourceId": f"{PATH}/quillmoor"
-    }
-    assert ssm.deleted == [f"{PATH}/quillmoor"]
-    handler.on_event(lifecycle("Delete", f"{PATH}/quillmoor"), None, ssm)
-
-
-def test_delete_leaves_a_key_alone_that_this_resource_never_created() -> None:
-    """A Delete after a failed Create carries an id that is not the parameter name."""
-    ssm = FakeSSM()
-    handler.on_event(lifecycle("Create"), None, ssm)
-
-    result = handler.on_event(lifecycle("Delete", "request-id-of-a-failed-create"), None, ssm)
-    assert result == {"PhysicalResourceId": "request-id-of-a-failed-create"}
-    assert ssm.deleted == []
-
-
-@pytest.mark.parametrize(
-    "properties",
-    [
-        {"ParameterName": "/other/quillmoor", "ParameterPath": PATH},
-        {"ParameterName": 5, "ParameterPath": PATH},
-        {"ParameterPath": PATH},
-        None,
-    ],
-    ids=["outside-the-path", "not-a-string", "no-name", "no-properties"],
-)
-def test_delete_with_invalid_properties_succeeds_and_deletes_nothing(
-    properties: dict[str, Any] | None,
-) -> None:
-    """Create would have failed on the same properties, so there is no key — and a failing
-    Delete sticks a stack."""
-    ssm = FakeSSM()
-    handler.on_event(lifecycle("Create"), None, ssm)
-    event: dict[str, Any] = {"RequestType": "Delete", "PhysicalResourceId": f"{PATH}/quillmoor"}
-    if properties is not None:
-        event["ResourceProperties"] = properties
-
-    assert handler.on_event(event, None, ssm) == {"PhysicalResourceId": f"{PATH}/quillmoor"}
-    assert ssm.deleted == []
-
-
-def test_delete_survives_a_parameter_store_that_refuses(capsys: pytest.CaptureFixture[str]) -> None:
-    """Throttling or a denied permission may not leave the stack in DELETE_FAILED."""
-
-    class RefusingSSM(FakeSSM):
-        def delete_parameter(self, Name: str) -> None:
-            raise RuntimeError("ThrottlingException: Rate exceeded")
-
-    ssm = RefusingSSM()
-    handler.on_event(lifecycle("Create"), None, ssm)
-
-    assert handler.on_event(lifecycle("Delete", f"{PATH}/quillmoor"), None, ssm) == {
-        "PhysicalResourceId": f"{PATH}/quillmoor"
-    }
-    assert "ThrottlingException" in capsys.readouterr().out
-
-
-def test_delete_survives_a_client_that_cannot_even_be_built(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """`ssm_client()` imports boto3; without it a Delete must still report success."""
-
-    def no_client() -> Any:
-        raise ImportError("simulated: boto3 not installed")
-
-    monkeypatch.setattr(handler, "ssm_client", no_client)
-    event = lifecycle("Delete", f"{PATH}/quillmoor")
-
-    assert handler.on_event(event, None) == {"PhysicalResourceId": f"{PATH}/quillmoor"}
-    assert "boto3" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize(
-    "name",
-    ["/other/quillmoor", f"{PATH}/quill/moor", f"{PATH}X/quillmoor", PATH],
-)
-def test_a_parameter_outside_the_key_path_is_refused(name: str) -> None:
-    with pytest.raises(ValueError, match="not directly under"):
-        handler.on_event(
-            lifecycle("Create", properties={"ParameterName": name, "ParameterPath": PATH}),
-            None,
-            FakeSSM(),
-        )
+@pytest.mark.parametrize("request_type", ["Create", "Update"])
+def test_create_and_update_are_refused(request_type: str) -> None:
+    """The stack has no key resource left; a template that still sends one is a mistake."""
+    with pytest.raises(ValueError, match="scripts.workspace add"):
+        handler.on_event(lifecycle(request_type, f"{PATH}/quillmoor"), None)
