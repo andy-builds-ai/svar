@@ -146,7 +146,7 @@ def test_app_js_holds_none_of_the_old_english_sentences() -> None:
         "no model call",
         "tokens in",
         "ms in the function",
-        "Andur is busy",
+        "Svar is busy",
         "Forget key",
         "The key is gone",
         "https connection",

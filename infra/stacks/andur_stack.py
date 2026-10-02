@@ -135,13 +135,13 @@ GROUNDING_THRESHOLD = 0.7
 RELEVANCE_THRESHOLD = 0.7
 
 BLOCKED_INPUT_MESSAGE = (
-    "Andur answers questions about this company's documents. It does not give legal, tax or "
+    "Svar answers questions about this company's documents. It does not give legal, tax or "
     "medical advice, and it does not answer questions about people's private lives or public "
     "figures."
 )
 BLOCKED_OUTPUT_MESSAGE = (
-    "Andur withheld this answer: the documents do not carry it, or it strays into advice "
-    "Andur does not give."
+    "Svar withheld this answer: the documents do not carry it, or it strays into advice "
+    "Svar does not give."
 )
 
 EXCERPT_GUARDRAIL_NAME = "andur-excerpt-guardrail"

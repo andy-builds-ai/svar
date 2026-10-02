@@ -135,24 +135,24 @@ DAY_QUOTA_MESSAGES = {
 #: a caller reads when the handler cannot tell what the guardrail did.
 QUESTION_REFUSED_ANSWERS = {
     "en": (
-        "Andur answers questions about this company's documents. It does not give legal, tax "
+        "Svar answers questions about this company's documents. It does not give legal, tax "
         "or medical advice, and it does not answer questions about people's private lives or "
         "public figures."
     ),
     "de": (
-        "Andur beantwortet Fragen zu den Dokumenten dieses Betriebs. Andur gibt keine Rechts-, "
+        "Svar beantwortet Fragen zu den Dokumenten dieses Betriebs. Svar gibt keine Rechts-, "
         "Steuer- oder medizinische Beratung und beantwortet keine Fragen zum Privatleben von "
         "Personen oder zu Personen des öffentlichen Lebens."
     ),
 }
 ANSWER_WITHHELD_ANSWERS = {
     "en": (
-        "Andur withheld this answer: the documents do not carry it, or it strays into advice "
-        "Andur does not give."
+        "Svar withheld this answer: the documents do not carry it, or it strays into advice "
+        "Svar does not give."
     ),
     "de": (
-        "Andur hat diese Antwort zurückgehalten: Die Dokumente enthalten sie nicht, oder sie "
-        "geht in eine Beratung, die Andur nicht gibt."
+        "Svar hat diese Antwort zurückgehalten: Die Dokumente enthalten sie nicht, oder sie "
+        "geht in eine Beratung, die Svar nicht gibt."
     ),
 }
 

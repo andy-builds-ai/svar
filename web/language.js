@@ -29,13 +29,13 @@ const DEFAULT_LANGUAGE = "en";
  * against these two tables by the tests. */
 const TEXTS = {
   en: {
-    title: "Ask Andur",
-    heading: "Ask Andur",
-    lead_before: "A demo with two ",
+    title: "Ask Svar",
+    heading: "Ask Svar",
+    lead_before: "A demo with three ",
     lead_strong: "fictional",
     lead_after:
       " companies. Each keeps its handbooks, notes and drafts in a vault of its own, and "
-      + "Andur answers from one vault at a time. Every answer comes with the passages it was "
+      + "Svar answers from one vault at a time. Every answer comes with the passages it was "
       + "built from, and every passage says which layer it came from: written by a person, "
       + "produced by a machine, or merely arrived and not yet sorted.",
     language_label: "Language",
@@ -76,10 +76,10 @@ const TEXTS = {
     key_forgotten: "The key is gone from this browser. The workspace is kept.",
     ask_for_a_new_key: " Ask whoever sent you this link for a new one.",
     problem_busy:
-      "Andur is busy: it answers a few questions at a time, and the others are turned away. "
+      "Svar is busy: it answers a few questions at a time, and the others are turned away. "
       + "Try again in a moment.",
     problem_refused_early:
-      "The request was refused before it reached Andur (403). That is a problem with the way "
+      "The request was refused before it reached Svar (403). That is a problem with the way "
       + "in, not with the key — a wrong key is answered with 401.",
     problem_too_slow:
       "The answer took longer than this page waits (504). The question may still be running; "
@@ -94,13 +94,13 @@ const TEXTS = {
       + "again.",
   },
   de: {
-    title: "Andur fragen",
-    heading: "Andur fragen",
-    lead_before: "Eine Demo mit zwei ",
+    title: "Svar fragen",
+    heading: "Svar fragen",
+    lead_before: "Eine Demo mit drei ",
     lead_strong: "erfundenen",
     lead_after:
       " Betrieben. Jeder hält seine Handbücher, Notizen und Entwürfe in einer eigenen Ablage, "
-      + "und Andur antwortet immer aus einer Ablage. Jede Antwort kommt mit den Textstellen, "
+      + "und Svar antwortet immer aus einer Ablage. Jede Antwort kommt mit den Textstellen, "
       + "aus denen sie gebaut wurde, und jede Stelle sagt, aus welcher Schicht sie stammt: von "
       + "einem Menschen geschrieben, von einer Maschine erzeugt oder nur eingetroffen und noch "
       + "nicht sortiert.",
@@ -143,10 +143,10 @@ const TEXTS = {
     ask_for_a_new_key:
       " Bitten Sie den, der Ihnen diesen Link geschickt hat, um einen neuen Schlüssel.",
     problem_busy:
-      "Andur ist ausgelastet: Er beantwortet nur ein paar Fragen gleichzeitig, die übrigen "
+      "Svar ist ausgelastet: Er beantwortet nur ein paar Fragen gleichzeitig, die übrigen "
       + "werden abgewiesen. Versuchen Sie es gleich noch einmal.",
     problem_refused_early:
-      "Die Anfrage wurde abgewiesen, bevor sie Andur erreicht hat (403). Das liegt am Weg "
+      "Die Anfrage wurde abgewiesen, bevor sie Svar erreicht hat (403). Das liegt am Weg "
       + "hinein, nicht am Schlüssel — ein falscher Schlüssel wird mit 401 beantwortet.",
     problem_too_slow:
       "Die Antwort hat länger gedauert, als diese Seite wartet (504). Die Frage läuft "
