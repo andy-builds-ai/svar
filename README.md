@@ -44,7 +44,7 @@ USD, 3425 ms in the function):
   on the page with Nova Pro, the first after a deploy included
   (`latency_ms`); a median of 1.8 seconds from retrieval to cost line for
   the 22 answerable questions, measured from a laptop in Germany.
-- **Tests:** 844 passing and one skipped, without AWS — 43 seconds on a
+- **Tests:** 874 passing and one skipped, without AWS — 46 seconds on a
   local laptop on 02.10.2026. The skipped one compares German time with the
   time zone database, which that laptop does not have and CI does.
 - **Documents:** 37 Markdown documents of two fictional companies, uploaded
@@ -64,7 +64,7 @@ the answer and one that masks the excerpts of its sources. Every AWS call has
 a timeout, and their sum stays under the function's own; a model call AWS
 turns away is made once more while CloudFront still waits. Everything runs
 in Ireland, so the data stays in the EU. Why each of these, and every other
-decision, 70 in all, with dates: [docs/decisions.md](docs/decisions.md).
+decision, 71 in all, with dates: [docs/decisions.md](docs/decisions.md).
 
 ## Limits
 
@@ -74,6 +74,12 @@ decision, 70 in all, with dates: [docs/decisions.md](docs/decisions.md).
 - **Citations are the model's.** One of the four answered live questions
   carried no `[n]` at all, although the grounding check scored it 1.0. The
   prompt asks for citations; the model does not always give them.
+- **The topic filter is not exact.** Of 64 harmless questions about a
+  business's own documents it refused 2 — cancelling a maintenance contract,
+  a call-out charge — and all 45 it must refuse, three runs on 02.10.2026.
+  The same question can get a different verdict in another run. Every change
+  to the topics is measured first:
+  [scripts/README.md](scripts/README.md#topic_probe--what-the-denied-topics-refuse-before-a-deploy).
 - **The grounding threshold is a starting point.** 0.7 is the value AWS
   works its example with, not a tuned one. A correct answer scored 0.73, just
   above it. Every answer logs both scores, so the threshold can be moved on
@@ -93,7 +99,7 @@ and answers stay in the EU.
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                  # 845 tests, no AWS needed
+pytest -q                                  # 875 tests, no AWS needed
 
 cdk bootstrap aws://<account>/eu-west-1    # once per account and region
 cdk deploy                                 # builds everything

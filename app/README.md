@@ -487,7 +487,12 @@ Three policies, set in `infra/stacks/andur_stack.py`:
   profile: the EU one, `eu.guardrail.v1:0`, which from eu-west-1 routes the
   checks to six EU regions and no others (`GUARDRAIL_PROFILE_REGIONS`). The
   answer role may apply the guardrail through that profile in those six
-  regions only.
+  regions only. The four topics are `Legal action`, `Tax returns`,
+  `Medical advice` and `Private lives`, named and defined narrowly so that
+  a customer's questions about the business's own prices, contracts,
+  payment terms and warranty pass: under the names "Legal advice" and "Tax
+  advice", 21 of 64 harmless questions were refused. Every change to them is
+  measured first with `python -m scripts.topic_probe` (`scripts/README.md`).
 - **Masked personal details:** names, e-mail addresses, phone numbers and
   addresses in the answer are replaced by their type, such as `{EMAIL}`. The
   question is not checked, and neither are the passages: the model reads the
@@ -508,7 +513,7 @@ the topic filter reads. A query may be at most 1,000 characters, the same
 limit as a question; the grounding source at most 100,000, which is why a
 deployment may ask for at most 30 passages (`MAX_RESULTS`).
 
-"People outside the documents" is an approximation: the topic filter does
+"Private lives" is an approximation: the topic filter does
 not see the documents, so it cannot know who is in them. It refuses
 questions about public figures and private lives; an answer about somebody
 the passages do not mention is caught by the grounding check instead.

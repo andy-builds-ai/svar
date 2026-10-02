@@ -455,6 +455,29 @@ nothing extra, so a question costs what it did. Not done: German examples in
 made the measurement after the deploy a test of the examples, not of the
 tier; they stay the next step if German refusals still pass.
 
+**2026-10-02 — Every change to the denied topics is measured before the
+deploy, with `python -m scripts.topic_probe`.** After the Standard tier was
+deployed, 15 of 16 German refusals were refused, and 4 of 14 harmless German
+questions with them, among them "Wie lange habe ich Gewährleistung auf eine
+Reparatur?": a business whose customers cannot ask about its own warranty
+cannot use Andur. The probe builds the topics the way the stack does in a
+guardrail of its own, asks 109 fixed questions (`scripts/topic-questions.json`)
+three times each, and deletes the guardrail; the run before any deploy costs
+0.049 USD. The topics are now `Legal action`, `Tax returns`, `Medical
+advice` and `Private lives`. The names weighed most: with the old names and
+new definitions one run refused 9 of 64 harmless questions, with the new
+names and the same definitions 2. Definitions follow the user guide's best
+practices: a subject, no instruction, no exception, no example in the
+definition. Measured on 02.10.2026, three runs: all 45 refusals refused in
+every run, 2 of 64 harmless questions refused in every run (cancelling a
+maintenance contract, a call-out charge). Not reached: none refused. In 26
+runs every change that freed one of the two refused another harmless
+question or let a refusal through; a narrower legal topic did both. The
+verdicts are not fixed either: the same topics gave one question two verdicts
+in two runs, so a question counts as right only if it is right in every run.
+The probe reads the question only; whether the topics withhold a right answer
+about a contract or a warranty on the way out is not measured.
+
 **2026-09-23 — The model may only be invoked with the deployed guardrail
 version.** An IAM condition on `bedrock:GuardrailIdentifier`: a call that
 drops the guardrail fails instead of answering unguarded.

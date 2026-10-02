@@ -78,7 +78,7 @@ from infra.stacks.andur_stack import (
     AndurStack,
     replacement_safe_name,
 )
-from scripts import ask
+from scripts import ask, topic_probe
 
 #: The file `cdk deploy` reads its context from. The tests read the same file,
 #: so that what is synthesised here is what would be deployed.
@@ -1209,15 +1209,54 @@ def test_the_four_topics_are_refused_in_question_and_answer(
         "TopicsConfig"
     ]
     assert [topic["Name"] for topic in topics] == [
-        "Legal advice",
-        "Tax advice",
+        "Legal action",
+        "Tax returns",
         "Medical advice",
-        "People outside the documents",
+        "Private lives",
     ]
     for topic in topics:
         assert topic["Type"] == "DENY"
         assert (topic["InputEnabled"], topic["InputAction"]) == (True, "BLOCK")
         assert (topic["OutputEnabled"], topic["OutputAction"]) == (True, "BLOCK")
+
+
+def test_the_topic_probe_builds_the_topics_the_stack_deploys(
+    stack: AndurStack, template: Template
+) -> None:
+    """The probe measures what a deploy would ship: the same topics in the same order, the
+    same actions, tier and EU profile. Bedrock names the fields in camelCase, CloudFormation
+    in PascalCase, and CloudFormation calls the tier `TopicsTierConfig`."""
+    properties = resource_of(stack, template, stack.guardrail)["Properties"]
+    deployed = properties["TopicPolicyConfig"]
+    probe = topic_probe.probe_request()
+    assert [
+        {key[0].upper() + key[1:]: value for key, value in topic.items()}
+        for topic in probe["topicPolicyConfig"]["topicsConfig"]
+    ] == deployed["TopicsConfig"]
+    assert probe["topicPolicyConfig"]["tierConfig"] == {
+        "tierName": deployed["TopicsTierConfig"]["TierName"]
+    }
+    assert probe["crossRegionConfig"] == {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}
+    assert properties["CrossRegionConfig"] == {
+        "GuardrailProfileArn": profile_arn({"Ref": "AWS::Region"})
+    }
+    assert probe["blockedInputMessaging"] == properties["BlockedInputMessaging"]
+    assert probe["blockedOutputsMessaging"] == properties["BlockedOutputsMessaging"]
+    assert probe["name"] == "andur-topic-probe" != properties["Name"]
+
+
+def test_topic_definitions_follow_the_user_guides_best_practices() -> None:
+    """ "Best practices for creating denied topics" in the Bedrock user guide: a definition
+    describes a subject; it is no instruction ("Block all ...") and no negative or exception
+    ("All contents except ..."). A name is a noun phrase that does not describe the topic."""
+    instruction = re.compile(r"\b(block|deny|refuse|reject|do not answer)\b", re.IGNORECASE)
+    exception = re.compile(r"\b(except|unless|other than|apart from|not)\b", re.IGNORECASE)
+    for name, definition, examples in DENIED_TOPICS:
+        assert not instruction.search(definition), name
+        assert not exception.search(definition), name
+        assert len(name.split()) <= 3, name
+        assert not any(example in definition for example in examples), name
+    assert len({name for name, _, _ in DENIED_TOPICS}) == len(DENIED_TOPICS)
 
 
 def test_denied_topics_run_in_the_standard_tier_through_the_eu_profile(

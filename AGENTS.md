@@ -40,7 +40,9 @@ cdk diff     # compares it with the deployed stack; needs an AWS login, changes 
   Run it only when asked. `ingest`, `retrieve`, `ask` and `workspace` also
   talk to the deployed stack; see `scripts/README.md`. `workspace remove --yes`
   deletes a workspace's key, budget and documents: never without the
-  operator's word.
+  operator's word. `python -m scripts.topic_probe` creates and deletes a
+  guardrail named `andur-topic-probe` and costs about 0.05 USD a run; run it
+  only when asked, and after every change to `DENIED_TOPICS` ask for it.
 - **Region is `eu-west-1`,** pinned in `infra/app.py`. Use EU inference
   profiles, never a global one.
 - **Model IDs and prices live only in `infra/answer_models.py`.** Add a model

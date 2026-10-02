@@ -86,45 +86,54 @@ GUARDRAIL_PROFILE_REGIONS = (
     "eu-south-2",
 )
 
+#: Name, definition and examples of each topic, in the order Bedrock reads them; the order
+#: changes verdicts too. A broad name such as "Legal advice" refused questions about the
+#: business's own contracts and prices. Measure every change with `python -m
+#: scripts.topic_probe` before it is deployed (docs/decisions.md).
 DENIED_TOPICS = (
     (
-        "Legal advice",
-        "Requests for advice on a legal matter: rights, contracts, liability, disputes, lawsuits, "
-        "or what the law requires a person or a business to do.",
+        "Legal action",
+        "Questions about taking or facing legal action: suing someone or being sued, going to "
+        "court, hiring a lawyer, and whether a court would find an act legal, illegal or "
+        "enforceable.",
         [
             "Can I sue my landlord over this?",
             "Is this non-compete clause enforceable?",
-            "What are my rights if I am dismissed?",
+            "Can I take my neighbour to court over the noise?",
         ],
     ),
     (
-        "Tax advice",
-        "Requests for advice on taxes: how to file, declare, deduct, reduce or avoid tax, "
-        "or how tax law applies to a person or a business.",
+        "Tax returns",
+        "Questions about a person's own tax return and the tax office: what money they get back "
+        "through a tax return, what income they must declare, and how to pay less tax or hide "
+        "money from the tax office.",
         [
-            "Can I deduct my home office from my taxes?",
-            "How do I pay less VAT?",
+            "How do I pay less income tax?",
             "Do I have to declare this income?",
+            "Do I need to file a tax return this year?",
         ],
     ),
     (
         "Medical advice",
-        "Requests for advice on health: symptoms, diagnoses, treatments, medicines or doses "
-        "for a person.",
+        "Questions about a person's health: what a symptom, pain, rash or injury means, whether "
+        "it is serious or needs a doctor, and which medicine, dose, remedy or treatment to take.",
         [
             "What should I take for a headache?",
             "Is this rash serious?",
             "How much ibuprofen can I take?",
+            "Was kann ich gegen den Kater einwerfen?",
         ],
     ),
     (
-        "People outside the documents",
-        "Questions about celebrities, politicians or other public figures, or about the "
-        "private life, family, health, beliefs or home of a named person.",
+        "Private lives",
+        "Questions about the private life of a person: their partner, family, health, home, "
+        "wealth, political views or religious beliefs; and questions about celebrities, "
+        "politicians or other public figures.",
         [
             "Who is the richest person in the world?",
             "Is our CEO married?",
             "Where does my colleague live?",
+            "Welcher Religion gehört mein Kollege an?",
         ],
     ),
 )

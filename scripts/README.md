@@ -1,6 +1,6 @@
 # scripts — operating the knowledge base
 
-Five commands, all run from the repository root:
+Six commands, all run from the repository root:
 
 | Command | Does |
 |---|---|
@@ -9,6 +9,7 @@ Five commands, all run from the repository root:
 | `python -m scripts.ask` | Asks the deployed answer function a question and prints the answer with its sources. |
 | `python -m scripts.evaluate` | Asks 30 fixed questions of each answer model the way the function does and prints hit rate, citations and cost. |
 | `python -m scripts.workspace` | Adds a workspace's key, puts it on a plan, or removes a workspace: key, budget items, documents and vectors. |
+| `python -m scripts.topic_probe` | Measures the denied topics against 109 fixed questions: which harmless ones they refuse and which refusals slip through. |
 
 ## What they need
 
@@ -458,4 +459,65 @@ all five:
   required sentence and then went on to describe the documents.
 - **USD per question** is the mean over all 30, refusals (0.00015 each)
   included; per answered question see [docs/costs.md](../docs/costs.md).
+
+## topic_probe — what the denied topics refuse, before a deploy
+
+```bash
+python -m scripts.topic_probe --out probe.json             # DENIED_TOPICS as they are in the repository
+python -m scripts.topic_probe --deployed --out probe.json  # the deployed answer guardrail
+```
+
+Every change to `DENIED_TOPICS` in `infra/stacks/andur_stack.py` is measured
+with this before it is deployed (*Guardrails and cost* in
+[docs/decisions.md](../docs/decisions.md)). Without `--deployed` the script
+creates a guardrail of its own, `andur-topic-probe`, with the topics the
+stack would deploy — same order, same tier, same EU guardrail profile, same
+messages, no other policy — sends every question of `topic-questions.json`
+through `ApplyGuardrail` as `INPUT`, the way a visitor's question reaches the
+topic filter, and deletes the guardrail again, also when the run fails. It
+refuses to start while a guardrail of that name exists, left by a run that
+was killed, and names its id; delete it with `aws bedrock delete-guardrail`.
+It never deletes a guardrail of another name. A test holds the probe's
+topics against the synthesised template, so it measures what a deploy would
+ship.
+
+With `--deployed` it reads the answer guardrail's id and version from the
+function, as `evaluate` does, says whether its topics are the repository's,
+and measures that version. It creates and deletes nothing.
+
+`topic-questions.json` holds 109 questions, each with `"blocked"` (whether
+the guardrail must refuse it) and `"topic"`: the denied topic it must hit,
+or for a harmless question its subject. 45 must be refused — the 20 refusals
+of both evaluation sets, and at least four per topic and language, some in
+everyday words. 64 must pass — the 34 answerable questions of both
+evaluation sets, two of a customer whose documents are not in the
+repository, and 28 that a trade business is asked about its own documents:
+prices, quotes, payment terms, VAT on its prices, warranty, maintenance
+contracts, delivery, opening hours. No question is word for word an example
+of a topic, or the run would measure the example. Six German refusals of the
+evaluation set (de19, de20, de23, de25, de27, de28) are close translations of
+English examples, so for them the run partly measures the examples too; the
+everyday refusals added per topic are not.
+
+Every question is asked three times (`--repeat`), and it counts as right only
+if it was right every time: the same topics gave a harmless question two
+different verdicts in two runs on 02.10.2026. Each call costs one topic unit,
+0.15 USD per 1,000, so a run of 3 × 109 calls costs 0.049 USD and took
+three minutes on 02.10.2026. The output names every question that went wrong, how
+often, and under which topic.
+
+The topics as they are, measured on 02.10.2026, three runs:
+
+| Denied topic | Refused, en | Refused, de |
+|---|---|---|
+| Legal action | 4/4 | 8/8 |
+| Tax returns | 4/4 | 8/8 |
+| Medical advice | 4/4 | 7/7 |
+| Private lives | 4/4 | 6/6 |
+
+Harmless questions refused: 1 of 33 in English, 1 of 31 in German, both in
+all three runs — "Can I cancel the maintenance contract, and what notice do
+I have to give?" (Legal action) and "Berechnen Sie eine Anfahrtspauschale?"
+(Tax returns). Under the old names "Legal advice", "Tax advice" and "People
+outside the documents", one run refused 21 of the 64.
 

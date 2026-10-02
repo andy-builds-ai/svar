@@ -122,7 +122,7 @@ carries its cost in USD, with the day its prices were read. Both are in
 infra/       the CDK app and the stack
 app/         the answer function behind /ask
 web/         the page: index.html, app.js, language.js, markdown.js, style.css
-scripts/     ingest, retrieve, ask, evaluate, and workspace to add and remove a workspace
+scripts/     ingest, retrieve, ask, evaluate, topic_probe, and workspace to add and remove a workspace
 knowledge/   the demo corpus: two fictional companies
 docs/        architecture, operating, retrieval findings, costs, decisions, metadata convention
 tests/       stack template, answer function, scripts, page
