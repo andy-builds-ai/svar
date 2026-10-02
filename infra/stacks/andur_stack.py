@@ -790,7 +790,16 @@ class AndurStack(Stack):
                             sid="ReadWorkspaceKeys",
                             actions=["ssm:GetParameter"],
                             resources=[f"{self.api_key_path_arn}/*"],
-                        )
+                        ),
+                        # Transition, 02.10.2026: CloudFormation updates this role before
+                        # the function, so the old code, which reads every key under the
+                        # path, keeps its right until the new code runs. Remove in the
+                        # next deploy.
+                        iam.PolicyStatement(
+                            sid="ReadAllKeysUntilTheNewCodeRuns",
+                            actions=["ssm:GetParametersByPath"],
+                            resources=[self.api_key_path_arn],
+                        ),
                     ]
                 ),
                 "CountQuestionsPerKey": iam.PolicyDocument(
