@@ -659,12 +659,9 @@ def test_answer_role_has_five_policies_on_named_resources(
         "WriteLogs",
     }
 
-    read_keys, transition = policies["ReadApiKeys"]["Statement"]
+    (read_keys,) = policies["ReadApiKeys"]["Statement"]
     assert read_keys["Action"] == "ssm:GetParameter"
     assert joined_last_part(read_keys["Resource"]) == f":parameter{API_KEY_PARAMETER_PATH}/*"
-    # Until the next deploy: the old code keeps reading every key while the role changes.
-    assert transition["Action"] == "ssm:GetParametersByPath"
-    assert joined_last_part(transition["Resource"]) == f":parameter{API_KEY_PARAMETER_PATH}"
 
     (count,) = policies["CountQuestionsPerKey"]["Statement"]
     assert count["Action"] == "dynamodb:UpdateItem"
@@ -1508,7 +1505,7 @@ def test_no_role_may_write_or_delete_a_key(template: Template) -> None:
         )
         if action.startswith("ssm:")
     )
-    assert ssm_actions == ["ssm:GetParameter", "ssm:GetParametersByPath"]
+    assert ssm_actions == ["ssm:GetParameter"]
 
 
 def test_the_key_function_role_may_only_write_its_log(
