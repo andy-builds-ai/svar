@@ -343,6 +343,19 @@ wrote a different answer or the guardrail's check judged the same one
 differently. Not tried: `topK` (Nova takes it in `additionalModelRequestFields`).
 Two runs cannot say how often the answers differ.
 
+**2026-10-03 — An answer is a sentence, not numbers in brackets.** The open
+question from 29.09. is answered for q16: rebuilt outside the function with
+the same sources, prompt and temperature, Nova Pro wrote only citation marks
+("[1][2]", "[2][3][4]") in 3 of 13 tries. The relevance check scores such an
+answer 0 and withholds it, rightly. The system prompt now says to write the
+answer as a sentence in words, because numbers in brackets alone are not an
+answer; with that rule the same question gave a full sentence in 10 of 10
+tries. Across both evaluation sets one run each gave 28 of 30 and 29 of 32
+with the rule against 28 of 30 and 28 of 32 without it (03.10.2026): no harm,
+and a difference small enough to be the model's own spread. In both runs
+`topic:Private lives` withheld the answers to q15 and de11 on the way out,
+which the topic probe does not measure.
+
 **2026-09-17 — The layers of an answer come from its citations, not from the
 model.** Asked to flag unconfirmed sources, the model ignored the rule or
 applied it everywhere.

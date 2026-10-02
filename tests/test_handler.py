@@ -2539,6 +2539,9 @@ def test_system_prompt_holds_the_rules_the_response_relies_on() -> None:
     assert NOT_IN_SOURCES_ANSWER in handler.system_prompt("en")
     assert "[1]" in handler.system_prompt("en")
     assert "only from the numbered sources" in handler.system_prompt("en")
+    # Nova Pro answered "[1][2]" alone in 3 of 13 tries on 03.10.2026; the relevance
+    # check withholds such an answer. With this rule: 0 of 10.
+    assert "numbers in brackets alone are not an answer" in handler.system_prompt("en")
 
 
 # --- Model ---------------------------------------------------------------
