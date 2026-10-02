@@ -93,29 +93,76 @@ MSYS_NO_PATHCONV=1 aws ssm delete-parameter --region eu-west-1 --name /andur/api
 python -m scripts.workspace add quillmoor
 ```
 
-The function keeps the keys it has read for 5 minutes
-(`KEY_CACHE_SECONDS`), so **a deleted or replaced key keeps working for up to
-5 minutes** — and longer if Parameter Store cannot be *read* at the moment the
-5 minutes are up, because expired keys that cannot be replaced go on deciding
-rather than turning every request into a 500.
+The function reads only the key of the workspace a request names: one
+`GetParameter` on `/andur/api-keys/<workspace>`, with decryption. It never
+reads the other keys, and the read costs the same whether there are two
+workspaces or two thousand. It keeps each key it has read for 5 minutes
+(`KEY_CACHE_SECONDS`), each workspace on its own clock, so **a deleted or
+replaced key keeps working for up to 5 minutes** while Parameter Store
+answers. Once the 5 minutes are up, Parameter Store answers that the
+parameter is not there (`ParameterNotFound`): the function forgets the key
+and answers 401, the same as for a workspace that never had one.
 
-An empty path is not that case. Delete every parameter under
-`/andur/api-keys` and the store still answers, it just has nothing to say: the
-function throws away the keys it holds and answers 500 until keys exist again
-(`NoWorkspaceKeys`). So retiring every workspace at once does take effect
-within the 5 minutes, outage or none. To revoke a single key at once, change
-the function after deleting it —
-every running instance is replaced, and the new ones read the keys fresh:
+If Parameter Store cannot be *read* when the 5 minutes are up, the expired
+key goes on deciding rather than turning every request into a 500 — but for
+no more than 15 minutes after its last good read (`KEY_MAX_AGE_SECONDS`,
+three times the cache time). Past that, every request for the workspace is a
+500 until a read succeeds, and the old key decides nothing. So **a deleted
+key stops within 5 minutes while the store answers, and within 15 minutes
+whatever happens**; during an outage it ends in a 500, not in a free pass.
+To revoke a key at once, change the function after deleting it — every
+running instance is replaced, and the new ones read the keys fresh:
 
 ```bash
 aws lambda update-function-configuration --region eu-west-1 --function-name andur-answer --description "keys rotated"
 ```
 
-A new key works at once: a key the function does not know makes it read the
-keys again before it answers 401. It does that at most every 10 seconds per
-running instance (`KEY_RELOAD_MIN_SECONDS`), so a stream of wrong keys cannot
-turn into a stream of Parameter Store reads. A key stored for two workspaces
-opens neither; the log names both.
+A new key works at once: a key that is not the one the function holds for
+the workspace makes it read that workspace's key again before it answers 401.
+It does that at most every 10 seconds per workspace and running instance
+(`KEY_RELOAD_MIN_SECONDS`), at most once per request, and at most 10 times
+every 10 seconds per instance across all workspaces (`WRONG_KEY_READS`), so
+wrong keys sent round many workspaces cannot turn into a stream of Parameter
+Store reads either. Over that cap the key the instance holds decides: a wrong
+key is still a 401, and a key that was just changed works a few seconds
+later. A key due to be read again after its 5 minutes is not capped. A workspace
+without a key is remembered as such for those 10 seconds too: the same
+invented name sent again and again costs one read every 10 seconds. What was
+learned about such a name is dropped at the first successful read after its
+10 seconds, so the names do not pile up in the function's memory. A read
+that fails is remembered the same way: a workspace the instance holds nothing
+for, asked for again within 10 seconds of a failed read, is a 500 without a
+second read, so an outage is not a read per request either.
+
+A stream of *different* invented names would cost one read each — nothing
+can be known about a name before it is looked up. So each running instance
+reads at most 10 times every 10 seconds for workspaces it holds no key for
+(`UNKNOWN_KEY_READS`): a name it has not read yet, or one it found without a
+key. Beyond that it answers **503** with `Retry-After: 10` and *Too many keys
+are being checked right now; try again in a few seconds.*, without a read.
+Five instances at that rate are at most 5 reads a second, an eighth of the
+40 a second Parameter Store allows an account by default for `GetParameter`,
+`GetParameters` and `GetParametersByPath` together, so invented names cannot
+use up the reads that real customers' first requests need. A key the
+instance already holds is never held back by this, also not when it is due
+to be read again. An instance that has not read a real customer's key yet
+can, during such a stream, answer that customer with the 503 too; that is the
+price of the cap, and the sentence tells the customer to try again. The stream
+needs neither a key nor parallel requests: about one request a second per
+instance, each with a new invented name, is enough. After a cold start or a
+deploy, when no instance holds a key yet, that reaches every customer.
+
+A wrong key, the key of another workspace and a workspace without a key all
+get the same 401 with the same sentence, *This key does not open the
+workspace …*. The sentence does not tell which workspaces exist; status and
+timing can, since the 503 and the 500 of an outage reach only names an
+instance holds no key for. Workspace names are therefore not a secret. Before
+02.10.2026 the function read every key and answered the key of another
+workspace with 403; it no longer knows the other keys. For the same reason it
+can no longer see that two workspaces were given the same key.
+`scripts.workspace add` draws every key from 32 random bytes, so that happens
+only if a key is written into a parameter by hand — and such a key would open
+both workspaces. Never do that.
 
 ## Keys are budgets, not passwords
 
@@ -445,7 +492,7 @@ tables at the top of `app/handler.py`:
   (`STOP_NOTES`) or whose personal details were masked (`GUARDRAIL_NOTES`);
 - the sentence for a question the guardrail refused and for an answer it
   withheld (below);
-- the `error` of every status in *Errors*: the 400, 401, 402, 403, 429 and
+- the `error` of every status in *Errors*: the 400, 401, 402, 429 and
   502 sentences, the fixed sentence of a 500, and the one for a crash.
 
 What stays as it is: the model's answer is in the language of the
@@ -631,13 +678,13 @@ below describe the English one.
 | Status | When |
 |---|---|
 | 400 | The body is not a JSON object, has no valid `workspace`, or the question is empty or longer than 1,000 characters. |
-| 401 | No `X-Andur-Key` header, or a key that belongs to no workspace. No `WWW-Authenticate` in the response: that header names an authentication scheme for `Authorization`, and the key does not travel there. |
+| 401 | No `X-Andur-Key` header, or a key that is not the key of the requested workspace: a wrong key, the key of another workspace, or a workspace that has no key. The last three share one sentence, so the sentence does not tell which workspaces exist (*Getting a key*). No `WWW-Authenticate` in the response: that header names an authentication scheme for `Authorization`, and the key does not travel there. |
 | 402 | A valid key for this workspace with nothing left: its questions are used up, or its window has closed. The sentence says which. Waiting does not help — a new key does. |
-| 403 | A valid key, but for another workspace. |
 | 405 | Any method other than `POST`. The response carries `Allow: POST`. |
 | 429 | With an `error` sentence: a key on a plan has used its questions for this month or for today (*Plans*); the sentence says which, and the quota comes back with the next day or month. Without one: more requests at once than the function may run (5). Lambda refuses those before any code runs, so the body is Lambda's own: `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
-| 500 | The function is set up wrong (an environment variable, unreadable keys), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.* (*Der Dienst ist nicht eingerichtet.*); the cause is in the log. |
+| 500 | The function is set up wrong (an environment variable, unreadable keys), the workspace's key could not be read and the function holds none younger than 15 minutes (*Getting a key*), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.* (*Der Dienst ist nicht eingerichtet.*); the cause is in the log. |
 | 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer. The sentence names the cause. |
+| 503 | This instance has used its 10 reads in 10 seconds for workspaces it holds no key for (*Getting a key*). The response carries `Retry-After: 10`; nothing was read and nothing counted. |
 
 Two more can arrive that the function never saw. Neither body is
 `{"error": ...}`, which is how a client tells them from a refusal:
@@ -653,9 +700,8 @@ needs them, and a deployment set up wrong is a 500 whatever the request looks
 like. A request without a valid key learns nothing about its question, and a
 question the handler refuses anyway costs its key nothing.
 
-402 is none of the three it could be mistaken for. 401 means the key is
-unknown, 403 that it belongs to another workspace — this key is valid and
-opens this workspace. 429 is Lambda's concurrency limit and means *too many
+402 is neither of the two it could be mistaken for. 401 means the key does
+not open the requested workspace — this key does. 429 is Lambda's concurrency limit and means *too many
 at once, try again in a moment*; a spent budget means the opposite, that
 trying again will not help. A key on a plan never gets a 402: its quota
 comes back, so a full one is a 429, with a sentence that Lambda's has not.
@@ -664,7 +710,8 @@ comes back, so a full one is a 429, with a sentence that Lambda's has not.
 
 One JSON line per request in the log group `/aws/lambda/andur-answer`, kept
 30 days (these from us-east-1, 23.09.2026; the `answered` line is from before
-the excerpt guardrail, so it has no `excerpt_policies` yet):
+the excerpt guardrail, so it has no `excerpt_policies` yet, and the 401 line
+from before its sentence named the workspace):
 
 ```json
 {"event": "answered", "status": 200, "workspace": "pellwick", "model": "nvidia.nemotron-super-3-120b", "input_tokens": 1326, "output_tokens": 32, "hits": 5, "dropped": 0, "cited": 2, "guardrail": "none", "guardrail_policies": [], "grounding_score": 0.99, "relevance_score": 1.0, "guardrail_units": {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 5}, "cost_usd": 0.00112, "price_date": "2026-09-23", "latency_ms": 3430}
@@ -687,15 +734,18 @@ prompt — the question and passages out of a company's documents. A model
 call AWS turned away gives a `converse-rejected` line first, with the error
 code, the time into the request (`elapsed_ms`) and whether the second call is
 made (`retry`); counting these lines tells how often it happens. Parameter
-Store and the budget table do add the full exception (`keys-unreadable`,
-`budget-unreadable`); neither call carries a question. A budget item with a
+Store and the budget table are logged the same way, class and code
+(`keys-unreadable`, with the workspace whose key could not be read, and
+`budget-unreadable`): their messages name the function's role and the
+account. A budget item with a
 plan nobody defined gives a `budget-plan-unknown` line, one whose count of
-this month or day is not a number a `budget-item-broken` line (*Plans*). A key shared by two
-workspaces gives a `duplicate-key` line. A failed reread of the keys
-is a `keys-reload-failed` line, with `stale: true` when the keys were already
-past their five minutes and the old ones went on deciding. A key path that is
-readable and empty is not a failed reread: it ends the request as a `failed`
-line with status 500 and the path in its `error` field. A bug is one
+this month or day is not a number a `budget-item-broken` line (*Plans*). A failed reread of a
+workspace's key is a `keys-reload-failed` line with the workspace, with
+`stale: true` when the key was already past its five minutes and the old one
+went on deciding; past its 15 minutes the request ends as a `failed` line
+with status 500 instead. A key that is not there is not a failed reread: the
+request ends as a `refused` line with status 401. A request held back by the
+cap on reads for unknown workspaces is a `failed` line with status 503. A bug is one
 `crashed` line with the traceback in a field. The first line after a cold
 start names the boto3 and botocore versions of the runtime.
 
@@ -758,7 +808,7 @@ A global profile (`global.…`) is never used: it may route the question out
 of the EU.
 
 Timeouts: every AWS call has a connect and a read timeout (`CLIENT_LIMITS`
-in `aws.py`). Reading the keys, counting the budget, retrieving and masking
+in `aws.py`). Reading the key, counting the budget, retrieving and masking
 the excerpts are tried twice; the model call once, because a converse
 that timed out may already have produced its answer, and a second attempt
 would pay for the input tokens again. The exception is a call AWS documents
@@ -774,15 +824,13 @@ twice, which is the safe direction: the count runs ahead, never behind. The
 budget call waits the shortest of all, since it sits in front of every
 question. The excerpt guardrail is a `bedrock-runtime` call with limits of
 its own (2 + 5 seconds): under the model's 40 it would push the worst case
-past the function's timeout. Added up, the worst case is 171 seconds —
-Parameter Store counts twice, because an
-unknown key makes the function read the keys again before it answers 401, and
-the budget table counts twice, because an item whose own window outlasts it is
+past the function's timeout. Added up, the worst case is 149 seconds —
+Parameter Store counts once, because the function reads only the requested
+workspace's key and reads it at most once per request, however many
+workspaces there are, and the budget table counts twice, because an item whose own window outlasts it is
 put right with a second write, and a key on a plan is counted with a second
 write after the demo's refused it. A request with the second model call ends
-by second 115, so it does not add to the 171. The 171 hold for up to ten
-workspaces: Parameter Store hands out the keys ten to a page, and every
-further page is one more call, read twice, 44 seconds more in the worst case. The
+by second 115, so it does not add to the 149. The
 function's timeout is 180, so a hanging Bedrock call still ends as a 502 with
 a reason, not as a bare timeout.
 

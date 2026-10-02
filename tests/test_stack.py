@@ -580,11 +580,11 @@ def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
     A hanging Bedrock call ends as the handler's 502, not as a Lambda timeout;
     the function ends before the 15 minutes a Function URL call may take; and
     the ask script waits longer than the function, so it prints the 502. The
-    innermost number counts the keys twice, because an unknown key is read
-    again before it is refused, and the budget table twice, because a wrong
-    item is put right with a second write.
+    innermost number counts the key once, because only the requested
+    workspace's key is read, at most once per request, and the budget table
+    twice, because a wrong item is put right with a second write.
     """
-    assert aws.worst_case_seconds() == 171
+    assert aws.worst_case_seconds() == 149
     assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
 
 
@@ -660,8 +660,8 @@ def test_answer_role_has_five_policies_on_named_resources(
     }
 
     (read_keys,) = policies["ReadApiKeys"]["Statement"]
-    assert read_keys["Action"] == "ssm:GetParametersByPath"
-    assert joined_last_part(read_keys["Resource"]) == f":parameter{API_KEY_PARAMETER_PATH}"
+    assert read_keys["Action"] == "ssm:GetParameter"
+    assert joined_last_part(read_keys["Resource"]) == f":parameter{API_KEY_PARAMETER_PATH}/*"
 
     (count,) = policies["CountQuestionsPerKey"]["Statement"]
     assert count["Action"] == "dynamodb:UpdateItem"
@@ -1505,7 +1505,7 @@ def test_no_role_may_write_or_delete_a_key(template: Template) -> None:
         )
         if action.startswith("ssm:")
     )
-    assert ssm_actions == ["ssm:GetParametersByPath"]
+    assert ssm_actions == ["ssm:GetParameter"]
 
 
 def test_the_key_function_role_may_only_write_its_log(

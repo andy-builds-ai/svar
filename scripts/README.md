@@ -279,7 +279,7 @@ language and they are English.
 | Exit code | Meaning |
 |---|---|
 | 0 | Answered. |
-| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, 402 demo budget used up, 429 with a sentence: the plan's quota for the month or the day reached, 403 key of another workspace, 400 bad question, 502 Bedrock failed). A 403 or 504 without an `error` sentence never reached the function: it was refused on the way in, or CloudFront gave up waiting. |
+| 1 | The function refused or failed; the status and its reason are printed (401 wrong key, key of another workspace or a workspace without a key, 402 demo budget used up, 429 with a sentence: the plan's quota for the month or the day reached, 400 bad question, 502 Bedrock failed, 503 too many unknown workspaces checked at once, try again in a few seconds). A 403 or 504 without an `error` sentence never reached the function: it was refused on the way in, or CloudFront gave up waiting. |
 | 2 | An AWS step or the connection failed: login, stack, missing key parameter, network. |
 
 ## workspace — adding and removing a workspace

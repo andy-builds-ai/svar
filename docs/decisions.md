@@ -188,6 +188,55 @@ deleted one stops within 5 minutes, and a flood of wrong keys is not a flood
 of Parameter Store reads. Keys that cannot be reread keep working; a key
 path that reads empty ends them.
 
+**2026-10-02 — The function reads only the key of the workspace a request
+names.** One `GetParameter` on `<path>/<workspace>` instead of every key under
+the path. Parameter Store hands out the path ten keys to a page, so from the
+eleventh workspace on the read was two calls, and the worst case of the
+timeouts went past the function's 180 seconds; now it is one call whatever
+the number of customers, and the function never holds another customer's key.
+The entry above holds per workspace: each key has its own 5 minutes and its
+own 10 seconds between rereads, and a request reads at most once. A workspace
+without a key is remembered as such for those 10 seconds, so the same
+invented name costs one read every 10 seconds, and it is forgotten at the
+first good read after them so the names do not fill the function's memory.
+Three things
+changed with it. The key of another workspace is a 401 now, not a 403: the
+function no longer knows whose key it is, and a wrong key, a foreign key and
+a workspace without a key share one sentence, so the sentence does not tell
+which workspaces exist (status and timing can; the names are not a secret).
+The check for one key stored for two workspaces is
+gone, since it needed every key; `scripts.workspace add` draws keys from 32
+random bytes, so only a key written by hand can repeat. And an empty key path
+is no longer a 500: a deleted key is `ParameterNotFound`, the key stops within
+its 5 minutes, and the request is a 401. The role may
+`ssm:GetParameter` on `<path>/*` and nothing else in Parameter Store.
+
+**2026-10-02 — An old key decides for at most 15 minutes, and invented names
+have a cap.** A key that cannot be read again goes on deciding, as decided
+on 2026-09-17, but only until 15 minutes after its last good read
+(`KEY_MAX_AGE_SECONDS`, three cache times); then its workspace is a 500 until
+the store answers. Without that limit a deleted key lived as long as an
+outage did. Fifteen minutes ride out ten minutes of trouble at Parameter
+Store and still end a revoked key on a clock. A failed read is remembered for
+10 seconds also for a workspace the instance holds nothing for, so an outage
+is not a read per request. And each instance reads at most 10 times in 10
+seconds for workspaces it holds no key for (`UNKNOWN_KEY_READS`); beyond
+that it answers 503 with `Retry-After: 10`, without a read. Five instances
+are then at most 5 reads a second, an eighth of the 40 a second the account
+has by default for all `GetParameter*` calls, so a stream of invented names
+cannot spend the account's reads. It can still give a customer whose key the
+instance does not hold yet a 503, with about one request a second and no key;
+nothing tells a real name from an invented one before it is read. One answered
+question took 0.7 to 4.4 seconds inside the function, so an instance answers
+few real customers in 10 seconds, and only those it holds no key for yet
+count; 10 leaves room. A key the instance holds never meets the cap. 503 and
+not 401, because nothing was looked up, and not 429, which here is a key's own
+quota. Rereads because a presented key is not the cached one have a cap of
+their own, 10 in 10 seconds per instance across workspaces
+(`WRONG_KEY_READS`): the brake per workspace alone would let wrong keys sent
+round many real workspaces spend the same reads. Over it the cached key
+decides, so a wrong key stays a 401 and a just-changed key waits a few seconds.
+
 **2026-09-18 — The key travels in `X-Andur-Key`.** CloudFront signs every
 request to the function URL and overwrites `Authorization` with its own
 signature.
@@ -321,7 +370,8 @@ guardrail after it end at 115. The 5 seconds to CloudFront's 120 are for
 what the handler's clock does not see — the cold start (Init Duration 0.11
 seconds, measured), the way from CloudFront to the function and the runtime
 around the handler; they cost nothing measurable, since the model call
-starts within 5 seconds of a request. The worst case stays 171. The pause is short because its length made no
+starts within 5 seconds of a request. The second call does not add to the
+worst case. The pause is short because its length made no
 measured difference: twenty calls back to back were turned away none of the
 time, twenty with ten seconds between them twice. It sits in the handler,
 not in botocore's retry setting, which would repeat timeouts too, and the
@@ -335,8 +385,8 @@ checked, so anyone could cause them.
 
 **2026-09-17 — Every AWS call has a connect and a read timeout, and the sum
 of all of them stays under the function's timeout.** A hanging call ends as a
-502 with a reason, not as a bare Lambda timeout. Today 171 of 180 seconds,
-with one page of keys, which holds up to ten workspaces.
+502 with a reason, not as a bare Lambda timeout. Today 149 of 180 seconds,
+whatever the number of workspaces: the key is one call (2026-10-02).
 
 **2026-09-17 — At most 5 requests at a time.** The cap on the bill matters
 more than keeping a demo reachable; a stranger with five parallel calls can

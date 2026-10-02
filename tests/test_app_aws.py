@@ -59,24 +59,25 @@ def test_the_budget_counter_waits_the_shortest() -> None:
 
 
 def test_worst_case_is_every_attempt_timing_out() -> None:
-    """ssm 2 × 22, budget 2 × 16, retrieve 2 × (3 + 10) + 6, converse 1 × (3 + 40),
+    """ssm 1 × 22, budget 2 × 16, retrieve 2 × (3 + 10) + 6, converse 1 × (3 + 40),
     excerpts 2 × (2 + 5) + 6.
 
-    Twice the keys, because an unknown key makes the handler read them again
-    before it answers 401. Twice the budget table, because an item whose own
-    window outlasts it is put right with a second write. One call each for
-    retrieve, converse and the excerpt guardrail.
+    Once the key, because the handler reads only the requested workspace's key
+    and reads it at most once per request, however many workspaces there are.
+    Twice the budget table, because an item whose own window outlasts it is put
+    right with a second write. One call each for retrieve, converse and the
+    excerpt guardrail.
     """
-    assert aws.KEY_READS_PER_REQUEST == 2
+    assert aws.KEY_READS_PER_REQUEST == 1
     assert aws.BUDGET_WRITES_PER_REQUEST == 2
-    assert aws.worst_case_seconds() == 2 * 22 + 2 * 16 + 32 + 43 + 20 == 171
+    assert aws.worst_case_seconds() == 1 * 22 + 2 * 16 + 32 + 43 + 20 == 149
 
 
 def test_a_second_model_call_ends_before_cloudfront_gives_up() -> None:
     """It may start until second 50: 2 of pause, 3 + 40 of converse, 2 × (2 + 5) + 6 of
     excerpts, and the answer is back at 115 — 5 seconds before CloudFront's 120, for the
     cold start and the way in that the handler's clock does not see. The worst case of
-    every timeout stays 171."""
+    every timeout stays 149."""
     assert aws.ORIGIN_MARGIN_SECONDS == 5
     assert aws.latest_model_retry_start() == 120 - 5 - 2 - 43 - 20 == 50
     ends = (
@@ -87,7 +88,7 @@ def test_a_second_model_call_ends_before_cloudfront_gives_up() -> None:
     )
     assert ends + aws.ORIGIN_MARGIN_SECONDS <= aws.ORIGIN_TIMEOUT_SECONDS
     assert ends < aws.ORIGIN_TIMEOUT_SECONDS
-    assert aws.worst_case_seconds() == 171
+    assert aws.worst_case_seconds() == 149
     assert aws.CLIENT_LIMITS["bedrock-runtime"].attempts == 1
 
 

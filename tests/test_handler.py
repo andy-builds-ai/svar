@@ -20,7 +20,7 @@ import operator
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -39,7 +39,6 @@ from handler import (
     BadRequest,
     BudgetSpent,
     ConfigurationError,
-    Forbidden,
     LLMError,
     MethodNotAllowed,
     RetrievalError,
@@ -188,10 +187,8 @@ def bedrock_response(
     }
 
 
-def parameters(keys: dict[str, str]) -> list[dict[str, str]]:
-    return [
-        {"Name": f"/andur/api-keys/{workspace}", "Value": key} for workspace, key in keys.items()
-    ]
+def parameters(keys: dict[str, str]) -> dict[str, str]:
+    return {f"/andur/api-keys/{workspace}": key for workspace, key in keys.items()}
 
 
 class FakeAgentRuntime:
@@ -272,24 +269,23 @@ class FakeGuardrail:
 
 
 class FakeSSM:
-    """Parameter Store; ``pages`` is the store as it is now and can change between reads."""
+    """Parameter Store; ``parameters`` is the store as it is now and can change between reads."""
 
     def __init__(
-        self, pages: list[list[dict[str, str]]] | None = None, error: Exception | None = None
+        self, parameters: dict[str, str] | None = None, error: Exception | None = None
     ) -> None:
-        self.pages = pages if pages is not None else []
+        self.parameters = parameters if parameters is not None else {}
         self.error = error
         self.calls: list[dict[str, Any]] = []
 
-    def get_paginator(self, operation: str) -> "FakeSSM":
-        assert operation == "get_parameters_by_path"
-        return self
-
-    def paginate(self, **kwargs: Any) -> Iterator[dict[str, Any]]:
+    def get_parameter(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
         if self.error:
             raise self.error
-        return iter({"Parameters": page} for page in self.pages)
+        name = kwargs["Name"]
+        if name not in self.parameters:
+            raise client_error("ParameterNotFound", operation="GetParameter")
+        return {"Parameter": {"Name": name, "Type": "SecureString", "Value": self.parameters[name]}}
 
 
 def conditional_check_failed(item: dict[str, Any] | None) -> Exception:
@@ -540,7 +536,10 @@ class FakeWallClock(FakeClock):
 def cold_start(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     """Every test starts as a fresh function instance: no keys read, a clock of its own."""
     clock = FakeClock()
-    monkeypatch.setattr(handler, "_key_cache", handler.KeyCache())
+    monkeypatch.setattr(handler, "_key_cache", {})
+    monkeypatch.setattr(handler, "_failed_reads", {})
+    monkeypatch.setattr(handler, "_unknown_reads", [])
+    monkeypatch.setattr(handler, "_wrong_key_reads", [])
     monkeypatch.setattr(handler, "clock", clock)
     monkeypatch.setattr(handler, "wall_clock", FakeWallClock())
     handler.log_sdk_versions.cache_clear()
@@ -561,7 +560,7 @@ def aws(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     for name, value in ENVIRONMENT.items():
         monkeypatch.setenv(name, value)
     clients: dict[str, Any] = {
-        "ssm": FakeSSM([parameters(KEYS)]),
+        "ssm": FakeSSM(parameters(KEYS)),
         "bedrock-agent-runtime": FakeAgentRuntime(
             [hit(), hit(layer="inbox", name="draft--01.md", text="Draft.")]
         ),
@@ -870,139 +869,188 @@ def test_the_401_does_not_announce_an_authentication_scheme() -> None:
 
 # --- Keys ----------------------------------------------------------------
 
+#: What the store holds for the default request's workspace, as the handler asks for it.
+QUILLMOOR_READ = {"Name": "/andur/api-keys/quillmoor", "WithDecryption": True}
 
-def test_keys_are_mapped_to_workspaces_by_parameter_name() -> None:
-    entries = [
-        {"Name": "/andur/api-keys/quillmoor", "Value": "K1"},
-        {"Name": "/andur/api-keys/Not A Workspace", "Value": "K2"},
-        {"Name": "/andur/api-keys-other/pellwick", "Value": "K3"},
-        {"Name": "/other/pellwick", "Value": "K4"},
+
+def test_the_right_key_opens_its_workspace_with_one_read_of_its_own_key(
+    aws: dict[str, Any],
+) -> None:
+    assert call(event())[0] == 200
+    assert aws["ssm"].calls == [QUILLMOOR_READ]
+
+
+def test_a_wrong_key_is_401(aws: dict[str, Any]) -> None:
+    status, body = call(event(key="wrong-key"))
+    assert status == 401
+    assert body == {"error": "This key does not open the workspace quillmoor."}
+    assert aws["ssm"].calls == [QUILLMOOR_READ]
+
+
+def test_another_workspaces_key_is_401_and_its_key_is_never_read(aws: dict[str, Any]) -> None:
+    """The function reads only the key of the workspace the request names. Another
+    workspace's key is just a wrong key to it, even while that key sits in the cache."""
+    pellwick = {"question": "How?", "workspace": "pellwick"}
+    assert call(event(pellwick, key=KEYS["pellwick"]))[0] == 200
+    assert call(event(key=KEYS["pellwick"]))[0] == 401
+    assert call(event(pellwick, key=KEYS["quillmoor"]))[0] == 401
+    assert [read["Name"] for read in aws["ssm"].calls] == [
+        "/andur/api-keys/pellwick",
+        "/andur/api-keys/quillmoor",
     ]
-    assert handler.keys_by_workspace(entries, "/andur/api-keys") == {"quillmoor": "K1"}
+    assert len(aws["dynamodb"].calls) == 1
 
 
-def test_a_key_opens_only_its_own_workspace() -> None:
-    assert handler.workspace_for_key(KEYS["pellwick"], KEYS) == "pellwick"
-    assert handler.workspace_for_key("unknown", KEYS) is None
-    assert handler.workspace_for_key("", KEYS) is None
-    assert handler.workspace_for_key("schlüssel", KEYS) is None
+def test_an_unknown_workspace_is_401_with_the_same_sentence_as_a_wrong_key(
+    aws: dict[str, Any],
+) -> None:
+    """The answer does not tell a workspace that exists from one that does not."""
+    unknown = call(event({"question": "How?", "workspace": "nobody"}))
+    wrong = call(event({"question": "How?", "workspace": "pellwick"}, key="wrong-key"))
+    assert unknown == (401, {"error": "This key does not open the workspace nobody."})
+    assert wrong == (401, {"error": "This key does not open the workspace pellwick."})
+    assert handler._key_cache["nobody"].key is None
+    assert aws["dynamodb"].calls == []
 
-    handler.check_access(KEYS["quillmoor"], "quillmoor", KEYS)
-    with pytest.raises(Unauthorized):
-        handler.check_access("unknown", "quillmoor", KEYS)
-    with pytest.raises(Forbidden):
-        handler.check_access(KEYS["quillmoor"], "pellwick", KEYS)
+
+def test_an_unknown_workspace_is_remembered_for_the_reread_interval(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    nobody = event({"question": "How?", "workspace": "nobody"})
+    for _ in range(20):
+        assert call(nobody)[0] == 401
+        cold_start.advance(0.4)
+    assert len(aws["ssm"].calls) == 1
+
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    assert call(nobody)[0] == 401
+    assert len(aws["ssm"].calls) == 2
 
 
-def test_every_key_is_compared_even_after_a_match(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No early exit: the number of comparisons does not depend on which key matched."""
-    compared: list[bytes] = []
+def test_a_workspace_added_after_it_was_asked_for_works_within_the_reread_interval(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    newcomer = event({"question": "How?", "workspace": "newcomer"}, key="newcomer-key-0003")
+    assert call(newcomer)[0] == 401
+    aws["ssm"].parameters.update(parameters({"newcomer": "newcomer-key-0003"}))
+
+    assert call(newcomer)[0] == 401
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    assert call(newcomer)[0] == 200
+
+
+def test_invented_names_are_forgotten_once_they_hold_back_nothing(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    """Each new name costs one read; what was learned about it is dropped after the reread
+    interval, so a stream of invented names does not grow the cache."""
+    call(event())
+    for number in range(handler.UNKNOWN_KEY_READS - 1):
+        call(event({"question": "How?", "workspace": f"invented-{number}"}))
+    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS
+    assert len(handler._key_cache) == handler.UNKNOWN_KEY_READS
+
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    call(event({"question": "How?", "workspace": "one-more"}))
+    assert set(handler._key_cache) == {"quillmoor", "one-more"}
+
+
+def test_many_workspaces_cost_no_extra_calls(aws: dict[str, Any]) -> None:
+    """The read does not grow with the number of customers: one call, whatever the store
+    holds. Reading the whole path cost one more call per ten workspaces."""
+    aws["ssm"].parameters.update(
+        parameters({f"customer-{number}": f"key-{number}" for number in range(2000)})
+    )
+    assert call(event())[0] == 200
+    assert call(event({"question": "How?", "workspace": "customer-1999"}, key="key-1999"))[0] == 200
+    assert aws["ssm"].calls == [
+        QUILLMOOR_READ,
+        {"Name": "/andur/api-keys/customer-1999", "WithDecryption": True},
+    ]
+
+
+def test_each_workspace_keeps_its_key_for_the_cache_time(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    pellwick = event({"question": "How?", "workspace": "pellwick"}, key=KEYS["pellwick"])
+    call(event())
+    cold_start.advance(100)
+    call(pellwick)
+    cold_start.advance(handler.KEY_CACHE_SECONDS - 100 - 1)
+    call(event())
+    call(pellwick)
+    assert len(aws["ssm"].calls) == 2
+
+    cold_start.advance(1)
+    call(event())
+    call(pellwick)
+    assert [read["Name"] for read in aws["ssm"].calls[2:]] == ["/andur/api-keys/quillmoor"]
+
+    cold_start.advance(100)
+    call(pellwick)
+    assert [read["Name"] for read in aws["ssm"].calls[3:]] == ["/andur/api-keys/pellwick"]
+
+
+def test_the_key_is_read_at_most_once_per_request(
+    aws: dict[str, Any], cold_start: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Even a read that hangs past the reread interval is not followed by a second one:
+    that is the one read `aws.KEY_READS_PER_REQUEST` counts."""
+    import aws as aws_module
+
+    read = handler.read_workspace_key
+
+    def slow(path: str, workspace: str, region: str) -> str | None:
+        cold_start.advance(aws_module.call_seconds("ssm"))
+        return read(path, workspace, region)
+
+    monkeypatch.setattr(handler, "read_workspace_key", slow)
+    assert call(event(key="wrong-key"))[0] == 401
+    assert len(aws["ssm"].calls) == 1
+
+    cold_start.advance(handler.KEY_CACHE_SECONDS)
+    assert call(event(key="wrong-key"))[0] == 401
+    assert len(aws["ssm"].calls) == 2
+    assert aws_module.KEY_READS_PER_REQUEST == 1
+
+
+def test_keys_are_compared_in_constant_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    compared: list[tuple[bytes, bytes]] = []
     real_compare = handler.hmac.compare_digest
 
     def counting(a: bytes, b: bytes) -> bool:
-        compared.append(b)
+        compared.append((a, b))
         return real_compare(a, b)
 
     monkeypatch.setattr(handler.hmac, "compare_digest", counting)
-    handler.workspace_for_key(KEYS["quillmoor"], KEYS)
-    assert len(compared) == len(KEYS)
+    assert handler.same_key(KEYS["quillmoor"], KEYS["quillmoor"])
+    assert not handler.same_key("schlüssel", KEYS["quillmoor"])
+    assert not handler.same_key("", KEYS["quillmoor"])
+    assert len(compared) == 3
+    assert not handler.same_key(KEYS["quillmoor"], None)
 
 
-def test_keys_are_read_decrypted_across_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    ssm = FakeSSM([parameters({"quillmoor": "K1"}), parameters({"pellwick": "K2"})])
-    monkeypatch.setattr(handler, "client", lambda service, region: ssm)
-    assert handler.read_workspace_keys("/andur/api-keys", "us-east-1") == {
-        "quillmoor": "K1",
-        "pellwick": "K2",
-    }
-    assert ssm.calls == [{"Path": "/andur/api-keys", "Recursive": False, "WithDecryption": True}]
-
-
-def test_a_key_shared_by_two_workspaces_opens_neither(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.INFO, logger="andur")
-    ssm = FakeSSM([parameters({"quillmoor": "SAME", "pellwick": "SAME", "third": "OWN"})])
-    monkeypatch.setattr(handler, "client", lambda service, region: ssm)
-
-    assert handler.read_workspace_keys("/andur/api-keys", "us-east-1") == {"third": "OWN"}
-    (line,) = [line for line in log_lines(caplog) if line["event"] == "duplicate-key"]
-    assert line["workspaces"] == ["pellwick", "quillmoor"]
-    assert "SAME" not in caplog.text
-
-
-def test_shared_key_workspaces() -> None:
-    assert handler.shared_key_workspaces({"a": "K1", "b": "K1", "c": "K2"}) == {"a", "b"}
-    assert handler.shared_key_workspaces(KEYS) == set()
-
-
-def test_no_usable_keys_is_a_configuration_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    for store in ([[]], [parameters({"a": "SAME", "b": "SAME"})]):
-        monkeypatch.setattr(handler, "client", lambda service, region, store=store: FakeSSM(store))
-        with pytest.raises(ConfigurationError, match="No usable workspace keys"):
-            handler.read_workspace_keys("/andur/api-keys", "us-east-1")
-
-
-def test_unreadable_keys_are_a_configuration_error_and_not_kept(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    failing = FakeSSM(error=client_error("AccessDeniedException", operation="GetParametersByPath"))
-    monkeypatch.setattr(handler, "client", lambda service, region: failing)
-    with pytest.raises(ConfigurationError, match="could not be read: access denied"):
-        handler.workspace_keys("/andur/api-keys", "us-east-1")
-    assert handler._key_cache.read_at is None
-
-    monkeypatch.setattr(
-        handler, "client", lambda service, region: FakeSSM([parameters({"quillmoor": "K1"})])
-    )
-    assert handler.workspace_keys("/andur/api-keys", "us-east-1") == {"quillmoor": "K1"}
-
-
-def test_keys_are_kept_until_they_expire(
-    monkeypatch: pytest.MonkeyPatch, cold_start: FakeClock
-) -> None:
-    ssm = FakeSSM([parameters(KEYS)])
-    monkeypatch.setattr(handler, "client", lambda service, region: ssm)
-
-    handler.workspace_keys("/andur/api-keys", "us-east-1")
-    cold_start.advance(handler.KEY_CACHE_SECONDS - 1)
-    handler.workspace_keys("/andur/api-keys", "us-east-1")
-    assert len(ssm.calls) == 1
-
-    cold_start.advance(1)
-    handler.workspace_keys("/andur/api-keys", "us-east-1")
-    assert len(ssm.calls) == 2
-
-
-def test_a_deleted_key_stops_working_once_the_keys_expire(
-    aws: dict[str, Any], cold_start: FakeClock
-) -> None:
-    assert call(event())[0] == 200
-    aws["ssm"].pages = [parameters({"pellwick": KEYS["pellwick"]})]
-
-    cold_start.advance(handler.KEY_CACHE_SECONDS)
-    assert call(event())[0] == 401
+def test_only_a_checked_workspace_name_names_a_key(aws: dict[str, Any]) -> None:
+    """The name ends up in a parameter path; it must not leave the key path."""
+    for name in ("../other", "a/b", "Quillmoor", ""):
+        with pytest.raises(ValueError):
+            handler.read_workspace_key("/andur/api-keys", name, "eu-west-1")
+    assert aws["ssm"].calls == []
 
 
 def test_a_new_key_works_at_once_without_waiting_for_expiry(
     aws: dict[str, Any], cold_start: FakeClock
 ) -> None:
     assert call(event())[0] == 200
-    aws["ssm"].pages = [parameters({**KEYS, "newcomer": "newcomer-key-0003"})]
+    aws["ssm"].parameters.update(parameters({"quillmoor": "replaced-key-0004"}))
     cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
 
-    status, _ = call(event({"question": "How?", "workspace": "newcomer"}, key="newcomer-key-0003"))
-    assert status == 200
+    assert call(event(key="replaced-key-0004"))[0] == 200
+    assert call(event())[0] == 401
     assert len(aws["ssm"].calls) == 2
 
 
-def test_an_unknown_key_rereads_the_keys_once_per_request_not_twice(aws: dict[str, Any]) -> None:
-    """On a cold start the keys were just read; an unknown key does not read them again."""
-    assert call(event(key="wrong"))[0] == 401
-    assert len(aws["ssm"].calls) == 1
-
-
-def test_a_flood_of_unknown_keys_rereads_at_most_once_per_interval(
+def test_a_flood_of_wrong_keys_rereads_at_most_once_per_interval(
     aws: dict[str, Any], cold_start: FakeClock
 ) -> None:
     call(event())
@@ -1017,37 +1065,270 @@ def test_a_flood_of_unknown_keys_rereads_at_most_once_per_interval(
     assert len(aws["ssm"].calls) == 3
 
 
-def test_a_failed_reread_still_answers_an_unknown_key_with_401(
+def test_a_deleted_key_stops_working_once_it_expires(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    assert call(event())[0] == 200
+    del aws["ssm"].parameters["/andur/api-keys/quillmoor"]
+
+    cold_start.advance(handler.KEY_CACHE_SECONDS - 1)
+    assert call(event())[0] == 200
+    cold_start.advance(1)
+    assert call(event())[0] == 401
+    assert handler._key_cache["quillmoor"].key is None
+
+
+#: What AWS says when a role may not read a parameter: it names the role and the account.
+ACCESS_DENIED_MESSAGE = (
+    "User: arn:aws:sts::111122223333:assumed-role/AnswerFunctionRole/andur-answer "
+    "is not authorized to perform: ssm:GetParameter"
+)
+
+
+def test_an_unreadable_store_without_a_cached_key_lets_nobody_in(
     aws: dict[str, Any], cold_start: FakeClock, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """There is nothing old to fall back on, so this is a 500 and nothing is kept."""
     caplog.set_level(logging.INFO, logger="andur")
-    call(event())
-    aws["ssm"].error = client_error("ThrottlingException", operation="GetParametersByPath")
+    aws["ssm"].error = client_error(
+        "AccessDeniedException", ACCESS_DENIED_MESSAGE, operation="GetParameter"
+    )
+
+    status, body = call(event())
+    assert status == 500
+    assert body == {"error": NOT_CONFIGURED_MESSAGE}
+    assert "quillmoor" not in handler._key_cache
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "keys-unreadable"]
+    assert line["workspace"] == "quillmoor"
+    (failed,) = [line for line in log_lines(caplog) if line["event"] == "failed"]
+    assert "could not be read: access denied" in failed["error"]
+    assert KEYS["quillmoor"] not in caplog.text
+
+    aws["ssm"].error = None
     cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
-
-    assert call(event(key="wrong"))[0] == 401
     assert call(event())[0] == 200
-    assert any(line["event"] == "keys-reload-failed" for line in log_lines(caplog))
 
 
-def test_expired_keys_that_cannot_be_read_again_keep_working(
+def test_an_unreadable_key_is_logged_with_its_class_and_code_only(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The exception's own message names the function's role and the account."""
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["ssm"].error = client_error(
+        "AccessDeniedException", ACCESS_DENIED_MESSAGE, operation="GetParameter"
+    )
+    assert call(event())[0] == 500
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "keys-unreadable"]
+    assert line["detail"] == "ClientError: AccessDeniedException"
+    assert "111122223333" not in caplog.text
+    assert "arn:" not in caplog.text
+
+
+def test_an_uncached_name_whose_read_failed_waits_before_the_next_read(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    """During an outage a workspace this instance holds nothing for is not a read per
+    request: the failed read is remembered for `KEY_RELOAD_MIN_SECONDS`."""
+    aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
+    assert call(event())[0] == 500
+    assert call(event())[0] == 500
+    assert len(aws["ssm"].calls) == 1
+
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS - 1)
+    assert call(event())[0] == 500
+    assert len(aws["ssm"].calls) == 1
+
+    cold_start.advance(1)
+    assert call(event())[0] == 500
+    assert len(aws["ssm"].calls) == 2
+
+    aws["ssm"].error = None
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    assert call(event())[0] == 200
+    assert handler._failed_reads == {}
+
+
+def test_a_failed_read_is_remembered_from_when_it_failed(
+    aws: dict[str, Any], cold_start: FakeClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read that times out after 22 seconds still holds back the next one for the
+    whole interval, not for what is left of it after the timeout."""
+    aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
+    read = handler.read_workspace_key
+
+    def slow(path: str, workspace: str, region: str) -> str | None:
+        cold_start.advance(22)
+        return read(path, workspace, region)
+
+    monkeypatch.setattr(handler, "read_workspace_key", slow)
+    assert call(event())[0] == 500
+    assert call(event())[0] == 500
+    assert len(aws["ssm"].calls) == 1
+
+
+def test_an_expired_key_that_cannot_be_read_ends_at_its_maximum_age(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    """A deleted key cannot outlive `KEY_MAX_AGE_SECONDS` by an outage: past it, its
+    workspace is a 500 until the store answers, and then it is gone."""
+    assert call(event())[0] == 200
+    del aws["ssm"].parameters["/andur/api-keys/quillmoor"]
+    aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
+
+    cold_start.advance(handler.KEY_CACHE_SECONDS)
+    assert call(event())[0] == 200
+    cold_start.advance(handler.KEY_MAX_AGE_SECONDS - handler.KEY_CACHE_SECONDS - 1)
+    assert call(event())[0] == 200
+    reads = len(aws["ssm"].calls)
+
+    # The last try was a second ago: past the maximum age, without a read.
+    cold_start.advance(1)
+    assert call(event()) == (500, {"error": NOT_CONFIGURED_MESSAGE})
+    assert len(aws["ssm"].calls) == reads
+    # The brake is over: one more read, and it fails too.
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS - 1)
+    assert call(event()) == (500, {"error": NOT_CONFIGURED_MESSAGE})
+    assert len(aws["ssm"].calls) == reads + 1
+
+    aws["ssm"].error = None
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    assert call(event())[0] == 401
+
+
+def test_the_maximum_age_is_three_cache_times() -> None:
+    assert handler.KEY_MAX_AGE_SECONDS == 3 * handler.KEY_CACHE_SECONDS == 900
+
+
+def test_reads_for_workspaces_without_a_cached_key_are_capped_per_instance(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    """Invented names cannot spend the account's Parameter Store reads, and a customer
+    whose key is cached never notices them."""
+    assert call(event())[0] == 200
+    for number in range(handler.UNKNOWN_KEY_READS - 1):
+        assert call(event({"question": "How?", "workspace": f"invented-{number}"}))[0] == 401
+    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS
+
+    response = respond(event({"question": "How?", "workspace": "one-too-many"}))
+    assert response["statusCode"] == 503
+    assert response["headers"]["Retry-After"] == str(handler.KEY_RELOAD_MIN_SECONDS)
+    assert json.loads(response["body"]) == {
+        "error": "Too many keys are being checked right now; try again in a few seconds."
+    }
+    german = {"question": "Wie?", "workspace": "one-too-many", "language": "de"}
+    assert call(event(german))[1] == {
+        "error": "Gerade werden zu viele Schlüssel geprüft; versuchen Sie es in ein paar "
+        "Sekunden erneut."
+    }
+    assert call(event())[0] == 200
+    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS
+
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    assert call(event({"question": "How?", "workspace": "one-too-many"}))[0] == 401
+    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS + 1
+
+
+def test_a_cached_key_due_for_a_reread_is_not_capped(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    """Rereading a key the instance holds, expired or not the presented one, is the brake
+    of its own workspace, not the cap for names without a key."""
+    assert call(event())[0] == 200
+    cold_start.advance(handler.KEY_CACHE_SECONDS)
+    for number in range(handler.UNKNOWN_KEY_READS):
+        call(event({"question": "How?", "workspace": f"invented-{number}"}))
+    assert call(event({"question": "How?", "workspace": "one-too-many"}))[0] == 503
+
+    assert call(event())[0] == 200
+    assert aws["ssm"].calls[-1] == QUILLMOOR_READ
+    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS + 2
+
+
+def test_rereads_for_wrong_keys_are_capped_across_workspaces(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    """Wrong keys sent round many real workspaces cannot spend the account's reads;
+    over the cap the cached key decides, and a wrong key is still a 401."""
+    names = [f"shop-{number}" for number in range(handler.WRONG_KEY_READS + 1)]
+    for name in names:
+        aws["ssm"].parameters[f"/andur/api-keys/{name}"] = f"{name}-key"
+    for start in range(0, len(names), handler.UNKNOWN_KEY_READS):
+        for name in names[start : start + handler.UNKNOWN_KEY_READS]:
+            assert call(event({"question": "How?", "workspace": name}, key=f"{name}-key"))[0] == 200
+        cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    reads = len(aws["ssm"].calls)
+
+    for name in names:
+        assert call(event({"question": "How?", "workspace": name}, key="wrong-key"))[0] == 401
+    assert len(aws["ssm"].calls) == reads + handler.WRONG_KEY_READS
+
+    assert (
+        call(event({"question": "How?", "workspace": names[-1]}, key=f"{names[-1]}-key"))[0] == 200
+    )
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    assert call(event({"question": "How?", "workspace": names[-1]}, key="wrong-key"))[0] == 401
+    assert len(aws["ssm"].calls) == reads + handler.WRONG_KEY_READS + 1
+
+
+def timeout_errors() -> list[Exception]:
+    exceptions = pytest.importorskip("botocore.exceptions")
+    endpoint = "https://ssm.eu-west-1.amazonaws.com/"
+    return [
+        exceptions.ReadTimeoutError(endpoint_url=endpoint),
+        exceptions.EndpointConnectionError(endpoint_url=endpoint),
+    ]
+
+
+@pytest.mark.parametrize("index", [0, 1], ids=["read-timeout", "no-connection"])
+def test_a_key_read_that_times_out_without_a_cached_key_is_500(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture, index: int
+) -> None:
+    caplog.set_level(logging.INFO, logger="andur")
+    error = timeout_errors()[index]
+    aws["ssm"].error = error
+
+    assert call(event()) == (500, {"error": NOT_CONFIGURED_MESSAGE})
+    assert call(event())[0] == 500
+    assert len(aws["ssm"].calls) == 1
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "keys-unreadable"]
+    assert line["detail"] == type(error).__name__
+    assert "amazonaws.com" not in caplog.text
+
+
+@pytest.mark.parametrize("index", [0, 1], ids=["read-timeout", "no-connection"])
+def test_a_key_read_that_times_out_with_a_cached_key_keeps_the_old_one(
+    aws: dict[str, Any], cold_start: FakeClock, caplog: pytest.LogCaptureFixture, index: int
+) -> None:
+    caplog.set_level(logging.INFO, logger="andur")
+    assert call(event())[0] == 200
+    aws["ssm"].error = timeout_errors()[index]
+    cold_start.advance(handler.KEY_CACHE_SECONDS)
+
+    assert call(event())[0] == 200
+    assert call(event(key="wrong"))[0] == 401
+    assert len(aws["ssm"].calls) == 2
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "keys-reload-failed"]
+    assert line["stale"] is True
+
+
+def test_an_expired_key_that_cannot_be_read_again_keeps_working(
     aws: dict[str, Any], cold_start: FakeClock, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A brief Parameter Store outage must not turn every request into a 500.
 
-    The keys in hand are old, not wrong. They go on deciding, and the next
-    attempt waits `KEY_RELOAD_MIN_SECONDS` — the same brake an unknown key
-    runs into, so an outage cannot become a read per request.
+    The key in hand is old, not wrong. It goes on deciding, and the next
+    attempt waits `KEY_RELOAD_MIN_SECONDS` — the same brake a wrong key runs
+    into, so an outage cannot become a read per request.
     """
     caplog.set_level(logging.INFO, logger="andur")
     call(event())
-    aws["ssm"].error = client_error("ThrottlingException", operation="GetParametersByPath")
+    aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
     cold_start.advance(handler.KEY_CACHE_SECONDS)
 
     assert call(event())[0] == 200
     assert len(aws["ssm"].calls) == 2
     (line,) = [line for line in log_lines(caplog) if line["event"] == "keys-reload-failed"]
-    assert line["stale"] is True
+    assert (line["workspace"], line["stale"]) == ("quillmoor", True)
 
     cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS - 1)
     assert call(event())[0] == 200
@@ -1056,62 +1337,44 @@ def test_expired_keys_that_cannot_be_read_again_keep_working(
     cold_start.advance(1)
     assert call(event())[0] == 200
     assert len(aws["ssm"].calls) == 3
+    assert KEYS["quillmoor"] not in caplog.text
 
 
-def test_keys_deleted_from_the_store_stop_working_at_once(
+def test_a_failed_reread_still_answers_a_wrong_key_with_401(
     aws: dict[str, Any], cold_start: FakeClock, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """An empty key path is an answer, not an outage.
-
-    Deleting every parameter under the path is how all workspaces are
-    retired at once. The store is readable and says there are no keys, so the
-    keys in hand are not old but gone. Treated as a failed read, they would
-    have gone on opening workspaces until a deploy wrote new ones — and the
-    five minutes the README promises would have meant nothing.
-    """
     caplog.set_level(logging.INFO, logger="andur")
+    call(event())
+    aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+
+    assert call(event(key="wrong"))[0] == 401
     assert call(event())[0] == 200
-    aws["ssm"].pages = []
-    cold_start.advance(handler.KEY_CACHE_SECONDS)
-
-    status, body = call(event())
-    assert status == 500
-    assert body == {"error": NOT_CONFIGURED_MESSAGE}
-    assert handler._key_cache.keys == {}
-    assert not [line for line in log_lines(caplog) if line["event"] == "keys-reload-failed"]
-    # The caller reads the fixed sentence; the reason is in the log.
-    (line,) = [line for line in log_lines(caplog) if line["event"] == "failed"]
-    assert line["status"] == 500 and "No usable workspace keys" in line["error"]
-
-    # And it stays refused: nothing old is left to fall back on.
-    assert call(event())[0] == 500
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "keys-reload-failed"]
+    assert line["stale"] is False
 
 
-def test_an_unreadable_store_and_an_empty_one_are_not_the_same_error() -> None:
-    """The stale path catches one and not the other; that is what the class is for."""
-    assert issubclass(handler.NoWorkspaceKeys, handler.ConfigurationError)
-    assert handler.NoWorkspaceKeys.status == 500
+def test_an_unknown_workspace_stays_unknown_while_the_store_cannot_be_read(
+    aws: dict[str, Any], cold_start: FakeClock
+) -> None:
+    nobody = event({"question": "How?", "workspace": "nobody"})
+    assert call(nobody)[0] == 401
+    aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
+    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    assert call(nobody)[0] == 401
 
 
-def test_a_function_that_never_read_any_keys_lets_nobody_in(aws: dict[str, Any]) -> None:
-    """There is nothing old to fall back on, so this stays a 500."""
-    aws["ssm"].error = client_error("ThrottlingException", operation="GetParametersByPath")
-    status, body = call(event())
-    assert status == 500
-    assert body == {"error": NOT_CONFIGURED_MESSAGE}
-
-
-def test_an_expired_key_still_stops_working_once_the_keys_can_be_read_again(
+def test_an_expired_key_still_stops_working_once_the_store_can_be_read_again(
     aws: dict[str, Any], cold_start: FakeClock
 ) -> None:
     """The price of keeping old keys: a deleted key lives until the next good read."""
     assert call(event())[0] == 200
-    aws["ssm"].error = client_error("ThrottlingException", operation="GetParametersByPath")
+    del aws["ssm"].parameters["/andur/api-keys/quillmoor"]
+    aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
     cold_start.advance(handler.KEY_CACHE_SECONDS)
     assert call(event())[0] == 200
 
     aws["ssm"].error = None
-    aws["ssm"].pages = [parameters({"pellwick": KEYS["pellwick"]})]
     cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
     assert call(event())[0] == 401
 
@@ -1278,7 +1541,7 @@ def test_a_question_that_is_refused_costs_nothing(aws: dict[str, Any]) -> None:
     [
         (event(key="wrong-key"), 401),
         (event(key=None), 401),
-        (event({"question": "How?", "workspace": "pellwick"}), 403),
+        (event({"question": "How?", "workspace": "pellwick"}), 401),
     ],
     ids=["wrong-key", "no-key", "other-workspace"],
 )
@@ -1293,14 +1556,20 @@ def test_a_table_that_cannot_be_reached_is_500_and_not_a_free_pass(
     aws: dict[str, Any], caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO, logger="andur")
-    aws["dynamodb"].error = client_error("ResourceNotFoundException", operation="UpdateItem")
+    aws["dynamodb"].error = client_error(
+        "ResourceNotFoundException",
+        "Requested resource not found: arn:aws:dynamodb:eu-west-1:111122223333:table/x",
+        operation="UpdateItem",
+    )
 
     status, body = call(event())
     assert status == 500
     assert body == {"error": NOT_CONFIGURED_MESSAGE}
     assert aws["bedrock-agent-runtime"].calls == []
     assert aws["bedrock-runtime"].calls == []
-    assert any(line["event"] == "budget-unreadable" for line in log_lines(caplog))
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "budget-unreadable"]
+    assert line["detail"] == "ClientError: ResourceNotFoundException"
+    assert "111122223333" not in caplog.text
 
 
 def test_a_throttled_table_is_500_too(aws: dict[str, Any]) -> None:
@@ -1430,7 +1699,7 @@ def test_which_half_ran_out_is_read_from_the_item_the_condition_refused() -> Non
 
 def test_the_spent_status_is_none_of_the_three_it_could_be_mistaken_for() -> None:
     assert BudgetSpent.status == 402
-    assert BudgetSpent.status not in {Unauthorized.status, Forbidden.status, 429}
+    assert BudgetSpent.status not in {Unauthorized.status, 403, 429}
     assert BudgetSpent.headers == {}
 
 
@@ -2970,7 +3239,7 @@ def test_only_foreign_hits_count_as_no_hits(aws: dict[str, Any]) -> None:
         (event(key="wrong-key"), 401),
         (event(key=None), 401),
         (event(key="quillmoor-key-0001, pellwick-key-0002"), 401),
-        (event({"question": "How?", "workspace": "pellwick"}), 403),
+        (event({"question": "How?", "workspace": "pellwick"}), 401),
         (event({"question": "", "workspace": "quillmoor"}), 400),
         (event({"question": "x" * (MAX_QUESTION_CHARACTERS + 1), "workspace": "quillmoor"}), 400),
         (event({"question": "How?"}), 400),
@@ -3122,14 +3391,14 @@ def test_an_answer_logs_one_line_with_tokens_hits_dropped_and_latency(
             401,
             "quillmoor",
         ),
-        (event({"question": "What is the secret plan?", "workspace": "pellwick"}), 403, "pellwick"),
+        (event({"question": "What is the secret plan?", "workspace": "pellwick"}), 401, "pellwick"),
         (
             event({"question": "What is the secret plan?", "workspace": "quillmoor"}),
             200,
             "quillmoor",
         ),
     ],
-    ids=["401", "403", "200"],
+    ids=["wrong-key", "other-workspace", "200"],
 )
 def test_every_request_is_logged_with_its_workspace_and_never_with_the_question(
     aws: dict[str, Any],
@@ -3285,9 +3554,9 @@ def test_every_error_read_after_the_body_has_a_german_sentence() -> None:
     public = {
         "BadRequest",
         "Unauthorized",
-        "Forbidden",
         "BudgetSpent",
         "QuotaReached",
+        "KeyReadsSpent",
         "RetrievalError",
         "LLMError",
     }
@@ -3501,11 +3770,16 @@ GERMAN_ERRORS = [
         401,
         "Ein Schlüssel ist nötig: Senden Sie ihn im Header X-Andur-Key.",
     ),
-    ("wrong key", event(in_("de"), key="wrong-key"), 401, "Der Schlüssel ist ungültig."),
+    (
+        "wrong key",
+        event(in_("de"), key="wrong-key"),
+        401,
+        "Dieser Schlüssel öffnet den Arbeitsbereich quillmoor nicht.",
+    ),
     (
         "foreign workspace",
         event(in_("de", {"workspace": "pellwick"})),
-        403,
+        401,
         "Dieser Schlüssel öffnet den Arbeitsbereich pellwick nicht.",
     ),
     (

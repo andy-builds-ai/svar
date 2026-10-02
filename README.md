@@ -44,7 +44,7 @@ USD, 3425 ms in the function):
   on the page with Nova Pro, the first after a deploy included
   (`latency_ms`); a median of 1.8 seconds from retrieval to cost line for
   the 22 answerable questions, measured from a laptop in Germany.
-- **Tests:** 874 passing and one skipped, without AWS — 46 seconds on a
+- **Tests:** 887 passing and one skipped, without AWS — 45 seconds on a
   local laptop on 02.10.2026. The skipped one compares German time with the
   time zone database, which that laptop does not have and CI does.
 - **Documents:** 37 Markdown documents of two fictional companies, uploaded
@@ -99,7 +99,7 @@ and answers stay in the EU.
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                  # 875 tests, no AWS needed
+pytest -q                                  # 888 tests, no AWS needed
 
 cdk bootstrap aws://<account>/eu-west-1    # once per account and region
 cdk deploy                                 # builds everything

@@ -788,8 +788,8 @@ class AndurStack(Stack):
                     statements=[
                         iam.PolicyStatement(
                             sid="ReadWorkspaceKeys",
-                            actions=["ssm:GetParametersByPath"],
-                            resources=[self.api_key_path_arn],
+                            actions=["ssm:GetParameter"],
+                            resources=[f"{self.api_key_path_arn}/*"],
                         )
                     ]
                 ),
