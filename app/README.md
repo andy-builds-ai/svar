@@ -12,7 +12,7 @@ stack's distribution. Inside the account a role with
 `lambda:InvokeFunctionUrl` can sign a call itself; the key, the workspace and
 the budget are checked in the function either way.
 Everything arrives through the web address — see *One address for everything*
-in the [main README](../docs/architecture.md#one-address-for-everything).
+in [architecture](../docs/architecture.md#one-address-for-everything).
 
 It runs only while a question is in flight; there is nothing to pay while
 nobody asks. `aws.py` holds the AWS clients with their timeouts and retries.
@@ -658,7 +658,8 @@ comes back, so a full one is a 429, with a sentence that Lambda's has not.
 ## Logs
 
 One JSON line per request in the log group `/aws/lambda/andur-answer`, kept
-30 days (these from us-east-1, 23.09.2026):
+30 days (these from us-east-1, 23.09.2026; the `answered` line is from before
+the excerpt guardrail, so it has no `excerpt_policies` yet):
 
 ```json
 {"event": "answered", "status": 200, "workspace": "pellwick", "model": "nvidia.nemotron-super-3-120b", "input_tokens": 1326, "output_tokens": 32, "hits": 5, "dropped": 0, "cited": 2, "guardrail": "none", "guardrail_policies": [], "grounding_score": 0.99, "relevance_score": 1.0, "guardrail_units": {"topicPolicyUnits": 2, "sensitiveInformationPolicyUnits": 1, "contextualGroundingPolicyUnits": 5}, "cost_usd": 0.00112, "price_date": "2026-09-23", "latency_ms": 3430}
@@ -774,7 +775,9 @@ unknown key makes the function read the keys again before it answers 401, and
 the budget table counts twice, because an item whose own window outlasts it is
 put right with a second write, and a key on a plan is counted with a second
 write after the demo's refused it. A request with the second model call ends
-by second 115, so it does not add to the 171. The
+by second 115, so it does not add to the 171. The 171 hold for up to ten
+workspaces: Parameter Store hands out the keys ten to a page, and every
+further page is one more call, read twice, 44 seconds more in the worst case. The
 function's timeout is 180, so a hanging Bedrock call still ends as a 502 with
 a reason, not as a bare timeout.
 
@@ -786,9 +789,10 @@ longer than 120 seconds reaches the browser as CloudFront's 504 while the
 function runs it to the end and the question stays counted. The alternative
 would be a function timeout under 120, which would cut off answers that are
 merely slow instead of merely reporting them late. An answer took 0.7 to 3
-seconds in us-east-1 (23.09.2026), and 0.7 to 4.4 seconds inside the
-function with Nova Pro on the page in eu-west-1 (four questions,
-28.09.2026), so this is a corner, not a case.
+seconds in us-east-1 before there were guardrails (18.09.2026), 1.8 to 3.8
+seconds there with both guardrails (four answered questions, 23.09.2026),
+and 0.7 to 4.4 seconds inside the function with Nova Pro on the page in
+eu-west-1 (four questions, 28.09.2026), so this is a corner, not a case.
 
 At most 5 requests run at the same time (`ANSWER_MAX_CONCURRENCY` in the
 stack); Lambda answers the rest with 429. Five concurrent calls from a

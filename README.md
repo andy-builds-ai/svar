@@ -44,8 +44,8 @@ USD, 3425 ms in the function):
   on the page with Nova Pro, the first after a deploy included
   (`latency_ms`); a median of 1.8 seconds from retrieval to cost line for
   the 22 answerable questions, measured from a laptop in Germany.
-- **Tests:** 791 passing and one skipped, without AWS — 36 seconds on a
-  local laptop on 01.10.2026. The skipped one compares German time with the
+- **Tests:** 844 passing and one skipped, without AWS — 43 seconds on a
+  local laptop on 02.10.2026. The skipped one compares German time with the
   time zone database, which that laptop does not have and CI does.
 - **Documents:** 37 Markdown documents of two fictional companies, uploaded
   as 147 sections so that a hit is a passage, not a page.
@@ -63,8 +63,8 @@ password, counted in one conditional DynamoDB write. Two guardrails, one on
 the answer and one that masks the excerpts of its sources. Every AWS call has
 a timeout, and their sum stays under the function's own; a model call AWS
 turns away is made once more while CloudFront still waits. Everything runs
-in Ireland, so the data stays in the EU. Why each of these, and 46 more,
-with dates: [docs/decisions.md](docs/decisions.md).
+in Ireland, so the data stays in the EU. Why each of these, and every other
+decision, 70 in all, with dates: [docs/decisions.md](docs/decisions.md).
 
 ## Limits
 
@@ -93,7 +93,7 @@ and answers stay in the EU.
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                  # 689 tests, no AWS needed
+pytest -q                                  # 845 tests, no AWS needed
 
 cdk bootstrap aws://<account>/eu-west-1    # once per account and region
 cdk deploy                                 # builds everything

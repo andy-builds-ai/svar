@@ -209,7 +209,7 @@ pytest -q
 The stack tests render the stack to CloudFormation JSON and assert on it,
 including the way in: the function URL on `AWS_IAM`, both invoke permissions
 bound to this distribution alone, the private site bucket, and the `/ask`
-behaviour with its methods, its disabled cache and its response timeout. Four
+behaviour with its methods, its disabled cache and its response timeout. Some
 of them read `web/` itself, to keep the page from growing an address of its
 own, a key, a `console.log` or a file from another server. The handler tests
 drive the answer function through every status code against fake Bedrock,
@@ -218,5 +218,5 @@ update and condition strings, so a wrong attribute name fails there rather
 than in AWS. The script tests check the corpus layout, the sidecars, the
 object keys and the counters, and drive upload, job wait, retrieval and
 asking against small fake clients. None of them call AWS or need credentials,
-and they finish in seconds — a broken stack or a broken sidecar shows up
+and they finish in under a minute — a broken stack or a broken sidecar shows up
 before a deploy or a sync spends minutes finding out.

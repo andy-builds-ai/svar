@@ -52,7 +52,7 @@ pellwick 17). With fixed-size chunking at 300 tokens the index holds 304
 vectors. A retrieve hit is either a whole section — always for sections with
 a Markdown table — or a chunk of one; in 185 measured hits that was 18 to
 440 words, never a whole document. Why the split is needed is in
-"Retrieval findings" in the [README](../docs/retrieval-findings.md).
+[retrieval findings](../docs/retrieval-findings.md).
 
 The three layers in `quillmoor` show what each means:
 

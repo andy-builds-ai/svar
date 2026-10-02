@@ -7,6 +7,7 @@ exercised with small fake clients that record what they were asked.
 import codecs
 import hashlib
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -338,6 +339,130 @@ def test_slugify_makes_short_lowercase_names() -> None:
     assert slugify("### Why can't I save a booking?") == "why-can-t-i-save-a-booking"
     assert slugify("## ???") == "section"
     assert len(slugify("## " + "longword " * 20)) <= 40
+
+
+def test_slugify_spells_out_umlauts_and_sharp_s() -> None:
+    assert slugify("## Bürozeiten") == "buerozeiten"
+    assert slugify("## Stundensätze") == "stundensaetze"
+    assert slugify("## Häufige Fragen") == "haeufige-fragen"
+    assert slugify("### Größe und Maße") == "groesse-und-masse"
+
+
+def test_slugify_spells_out_capital_umlauts_and_capital_sharp_s() -> None:
+    assert slugify("## ÄRGER ÜBER ÖL") == "aerger-ueber-oel"
+    assert slugify("## Übersicht") == "uebersicht"
+    assert slugify("## STRAẞE") == "strasse"
+
+
+def test_slugify_reads_an_umlaut_stored_as_letter_and_dots() -> None:
+    assert slugify("## Bürozeiten") == "buerozeiten"
+
+
+def test_slugify_reads_wide_and_joined_letters_as_plain_ones() -> None:
+    assert slugify("## Ａｎｇｅｂｏｔ ﬁnden") == "angebot-finden"
+
+
+def test_slugify_takes_the_accent_off_other_letters() -> None:
+    assert slugify("## Café, Crème brûlée") == "cafe-creme-brulee"
+    assert slugify("## Señor Ångström") == "senor-angstroem"
+    assert slugify("## Kraków und Łódź") == "krakow-und-lodz"
+
+
+def test_slugify_spells_out_letters_that_hold_no_plain_one() -> None:
+    assert slugify("## Søren") == "soeren"
+    assert slugify("## ØRESUND, Æble, Œuvre") == "oeresund-aeble-oeuvre"
+    assert slugify("## Łukasz Đorđević") == "lukasz-dordevic"
+    # A letter no step knows is still a hyphen.
+    assert slugify("## Þing") == "ing"
+
+
+def test_slugify_of_nothing_but_special_characters_is_section() -> None:
+    assert slugify("## €§ — “”") == "section"
+    assert slugify("## 中文") == "section"
+    assert slugify("##") == "section"
+
+
+def test_slugify_keeps_its_length_limit_after_spelling_out() -> None:
+    # Two words are 37 letters as written and 43 spelled out, so the second is cut.
+    assert slugify("## " + "Überprüfungsgebühr " * 2) == "ueberpruefungsgebuehr"
+    assert len(slugify("## " + "Überprüfungsgebühr " * 5)) <= 40
+
+
+def test_a_german_heading_names_its_section_file(tmp_path: Path) -> None:
+    text = f"# Erreichbarkeit\n\n## Bürozeiten\n\n{words(100)}\n\n## Notdienst\n\n{words(100)}\n"
+    add_document(tmp_path, "kalvenstett", "human", name="erreichbarkeit.md", text=text)
+    documents, _ = discover(tmp_path)
+    keys = [item.key for item in upload_items(documents[0]) if item.key.endswith(".md")]
+    assert keys == [
+        "workspaces/kalvenstett/human/erreichbarkeit--01-buerozeiten.md",
+        "workspaces/kalvenstett/human/erreichbarkeit--02-notdienst.md",
+    ]
+
+
+def test_a_name_saved_on_a_mac_gives_the_key_a_windows_name_gives(tmp_path: Path) -> None:
+    """A Mac stores ü as u plus dots; the key is the composed ü either way."""
+    add_document(tmp_path, "kalvenstett", "human", name="Bürozeiten.md")
+    add_document(tmp_path, "kalvenstett", "human", name="Gebühren.txt")
+    documents, _ = discover(tmp_path)
+    keys = sorted(item.key for document in documents for item in upload_items(document))
+    assert keys == [
+        "workspaces/kalvenstett/human/Bürozeiten--01-buerozeiten-md.md",
+        "workspaces/kalvenstett/human/Bürozeiten--01-buerozeiten-md.md.metadata.json",
+        "workspaces/kalvenstett/human/Gebühren.txt",
+        "workspaces/kalvenstett/human/Gebühren.txt.metadata.json",
+    ]
+
+
+# --- Headings inside code fences ----------------------------------------
+
+
+def test_a_heading_in_a_code_fence_does_not_name_the_section() -> None:
+    text = "# Setup\n\nInstall it.\n\n```bash\n## comment\npip install haldrum\n```\n\nDone.\n"
+    assert split_markdown(text) == [("setup", text)]
+
+
+def test_a_title_in_a_code_fence_is_no_title() -> None:
+    text = (
+        f"Intro.\n\n```bash\n# install\npip install haldrum\n```\n\n{words(100)}\n"
+        f"\n## Usage\n\n{words(100)}\n"
+    )
+    sections = split_markdown(text)
+    assert [slug for slug, _ in sections] == ["document", "usage"]
+    assert sections[1][1].startswith("## Usage\n")
+    assert all("# install" not in part.split("```")[0] for _, part in sections[1:])
+
+
+def test_a_heading_in_a_code_fence_is_no_parent() -> None:
+    subsections = "".join(f"\n### Sub {n}\n\n{words(200)}\n" for n in range(1, 4))
+    text = "# Guide\n\n```\n## not a heading\n```\n" + subsections
+
+    sections = split_markdown(text)
+
+    assert [slug for slug, _ in sections] == ["guide", "sub-2", "sub-3"]
+    for _, part in sections[1:]:
+        assert part.startswith("# Guide\n\n### Sub")
+
+
+def slugify_as_before(heading: str) -> str:
+    """`slugify` before umlauts were spelled out: everything but a-z and 0-9 a hyphen."""
+    slug = re.sub(r"[^a-z0-9]+", "-", heading.lstrip("#").lower()).strip("-")
+    if len(slug) > 40:
+        slug = slug[:40].rsplit("-", 1)[0]
+    return slug or "section"
+
+
+def test_english_headings_keep_the_names_they_had() -> None:
+    """Every heading of the demo corpus, so no demo section has to be uploaded again."""
+    headings = [
+        line
+        for path in sorted((REPOSITORY / "knowledge").rglob("*.md"))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.startswith("#")
+    ]
+    headings += ["## 2.7 Exporting a project", "### Why can't I save a booking?", "## ???"]
+    assert len(headings) > 300
+    for heading in headings:
+        assert slugify(heading) == slugify_as_before(heading), heading
 
 
 # --- Counters ------------------------------------------------------------

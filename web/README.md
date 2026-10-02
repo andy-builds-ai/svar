@@ -83,8 +83,8 @@ A question is 1 to 1,000 characters. Enter asks, Shift + Enter starts a new
 line, and the button is disabled while an answer is on its way. Enter reaches
 the form directly, past the disabled button, so the page also keeps a flag:
 a second question while the first is in flight is ignored. Two would be two
-questions off the same ten, and an answer that may not belong to the question
-in the field.
+questions off the key's budget, and an answer that may not belong to the
+question in the field.
 
 The page stops waiting after 125 seconds. CloudFront gives up at 120 and
 sends a 504, so in every ordinary case that answer arrives first; this is the

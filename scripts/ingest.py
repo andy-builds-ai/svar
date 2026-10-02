@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import time
+import unicodedata
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -111,6 +112,18 @@ def _split_at(lines: list[str], prefix: str) -> list[list[str]]:
     return [block for block in blocks if "".join(block).strip()]
 
 
+def _outside_fences(lines: list[str]) -> list[str]:
+    """The lines outside code fences, without the fence lines: a ``# `` in code is no heading."""
+    outside: list[str] = []
+    in_fence = False
+    for line in lines:
+        if line.startswith("```"):
+            in_fence = not in_fence
+        elif not in_fence:
+            outside.append(line)
+    return outside
+
+
 def _join_short(blocks: list[list[str]]) -> list[list[str]]:
     """Join blocks under `MIN_SECTION_WORDS` to their predecessor."""
     joined: list[list[str]] = []
@@ -129,9 +142,42 @@ def _join_short(blocks: list[list[str]]) -> list[list[str]]:
     return joined
 
 
+#: Letters spelled out after lowercasing: the German ones the way Germans write them without
+#: umlauts, and the ones that hold no plain letter for the decomposition to find.
+_GERMAN_LETTERS = str.maketrans(
+    {
+        "ä": "ae",
+        "ö": "oe",
+        "ü": "ue",
+        "ß": "ss",
+        "ø": "oe",
+        "æ": "ae",
+        "œ": "oe",
+        "ł": "l",
+        "đ": "d",
+    }
+)
+
+
+def _ascii_letters(text: str) -> str:
+    """``text`` lowercased, with ä, ö, ü, ß spelled ae, oe, ue, ss and other accents dropped.
+
+    Composed first, so an umlaut stored as letter plus dots is still ``ae`` and a wide or
+    joined letter such as ``Ａ`` or ``ﬁ`` is the plain one. The remaining letters are taken
+    apart and their marks left out, so é is e; a letter neither step knows is left for
+    `slugify` to turn into a hyphen.
+    """
+    text = unicodedata.normalize("NFKC", text).lower().translate(_GERMAN_LETTERS)
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFD", text)
+        if not unicodedata.combining(character)
+    )
+
+
 def slugify(heading: str) -> str:
-    """A short, lowercase file-name part from a heading."""
-    slug = re.sub(r"[^a-z0-9]+", "-", heading.lstrip("#").lower()).strip("-")
+    """A short, lowercase ASCII file-name part from a heading."""
+    slug = re.sub(r"[^a-z0-9]+", "-", _ascii_letters(heading.lstrip("#"))).strip("-")
     if len(slug) > _SLUG_MAX_CHARACTERS:
         slug = slug[:_SLUG_MAX_CHARACTERS].rsplit("-", 1)[0]
     return slug or "section"
@@ -143,7 +189,7 @@ def _naming_heading(lines: list[str]) -> str | None:
     if first.startswith(("## ", "### ")):
         return first
     for prefix in ("## ", "# "):
-        for line in lines:
+        for line in _outside_fences(lines):
             if line.startswith(prefix):
                 return line
     return None
@@ -160,13 +206,13 @@ def _with_context(block: list[str], context: list[str]) -> str:
 def split_markdown(text: str) -> list[tuple[str, str]]:
     """Split a Markdown document into ``(slug, text)`` sections."""
     lines = text.splitlines()
-    title = next((line for line in lines if line.startswith("# ")), None)
+    title = next((line for line in _outside_fences(lines) if line.startswith("# ")), None)
     title_context = [title] if title else []
 
     sections: list[tuple[str, str]] = []
     for block in _join_short(_split_at(lines, "## ")):
         pieces = [block]
-        parent = next((line for line in block if line.startswith("## ")), None)
+        parent = next((line for line in _outside_fences(block) if line.startswith("## ")), None)
         if _words("\n".join(block)) > MAX_SECTION_WORDS:
             pieces = _join_short(_split_at(block, "### "))
         for piece in pieces:
@@ -271,8 +317,12 @@ def upload_items(document: Document) -> list[UploadItem]:
     """What a document becomes in the bucket: sections or the whole file, each with its sidecar."""
     sidecar = document.sidecar.read_bytes()
     suffix = document.path.suffix.lower()
+    # Composed, so a name saved on a Mac (an umlaut as letter plus dots) and the same name
+    # saved on Windows are one key, not two copies of the same document.
+    name = unicodedata.normalize("NFC", document.path.name)
+    stem = unicodedata.normalize("NFC", document.path.stem)
     if suffix != ".md":
-        key = object_key(document.workspace, document.layer, document.path.name)
+        key = object_key(document.workspace, document.layer, name)
         if suffix in TEXT_SUFFIXES and document.encoding != "utf-8":
             body = decoded_text(document).encode("utf-8")
         else:
@@ -285,7 +335,7 @@ def upload_items(document: Document) -> list[UploadItem]:
                 object_key(
                     document.workspace,
                     document.layer,
-                    section_filename(document.path.stem, number, slug),
+                    section_filename(stem, number, slug),
                 ),
                 text.encode("utf-8"),
                 CONTENT_TYPES[".md"],

@@ -16,7 +16,7 @@ Five commands, all run from the repository root:
   is not optional here: without it botocore cannot read the credentials that
   `aws login` writes, and every AWS call fails with "Missing Dependency".
 - A valid AWS login for the account the stack is deployed in. When it has
-  run out, both scripts stop with a message that says so; sign in with
+  run out, every script stops with a message that says so; sign in with
   `aws login` and rerun.
 - The deployed stack. Bucket, knowledge base id, data source id, web address,
   key path and budget table are read from the outputs of `AndurStack` in `eu-west-1`. The
@@ -134,8 +134,8 @@ never occurs.
 ### Sections
 
 Bedrock returned whole documents from retrieve for every demo document with
-a Markdown table, whatever the chunking (see "Retrieval findings" in the
-[README](../docs/retrieval-findings.md)). Splitting before the upload keeps
+a Markdown table, whatever the chunking (see
+[retrieval findings](../docs/retrieval-findings.md)). Splitting before the upload keeps
 a hit at most a section long, whatever the reason:
 
 1. Cut at every `## ` heading; headings inside code fences do not count.
@@ -150,6 +150,23 @@ A document without `## ` headings becomes one section. Section files are
 named `<document>--<nn>-<heading>.md`, for example
 `faq--03-projects-and-exports.md`, and each gets an exact copy of the
 document's sidecar. The files in `knowledge/` stay whole.
+
+The heading part is lowercase ASCII of at most 40 characters. The page shows
+the file name as the source's name, so letters are kept readable: `ä`, `ö`,
+`ü` and `ß` are spelled `ae`, `oe`, `ue` and `ss`, capitals too, `ø`, `æ`,
+`œ`, `ł` and `đ` are `oe`, `ae`, `oe`, `l` and `d`, and other letters lose
+their accent (`é` is `e`); every other run of characters is one hyphen. So
+`## Bürozeiten` becomes `erreichbarkeit--01-buerozeiten.md`, and a heading
+with no a–z or digit left is `section`. Until 02.10.2026 umlauts became
+hyphens (`b-rozeiten`); sections uploaded before then keep that name in the
+bucket until their workspace is uploaded again and pruned with `--delete`
+(below).
+
+The part before `--` is the document's own file name, and any file uploaded
+whole keeps its name too. Both go up composed (Unicode NFC): a Mac often
+stores `ü` in a file name as `u` and two dots, Windows as one character, and without
+that the same document saved on both would be two keys and two copies in the
+index.
 
 | Exit code | Meaning |
 |---|---|
@@ -217,8 +234,8 @@ python -m scripts.ask "How will the bulk export of all projects work?" --workspa
 It sends what any client sends, the page included: a `POST` to
 `<WebUrl>/ask` with the workspace key in `X-Andur-Key` and the SHA-256 of the
 body in `x-amz-content-sha256`. Both headers are what the way in demands, not
-the function — see *One address for everything* in the
-[README](../docs/architecture.md#one-address-for-everything). The stack output
+the function — see *One address for everything* in
+[architecture](../docs/architecture.md#one-address-for-everything). The stack output
 `FunctionUrl` is not an address to send to: from outside the account it
 answers 403 to everyone but CloudFront.
 

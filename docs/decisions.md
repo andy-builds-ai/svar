@@ -106,6 +106,19 @@ one case it cannot prune — a workspace emptied locally — is left to a
 deliberate `aws s3 rm`. The all-clear names the workspaces it compared,
 because the bucket may hold others that were not looked at.
 
+**2026-10-02 — Section names spell out umlauts.** A section's file name is
+what the page lists as its source, and it kept only a–z and 0–9: a German
+customer read `b-rozeiten` for *Bürozeiten*. Now `ä`, `ö`, `ü`, `ß` are `ae`,
+`oe`, `ue`, `ss`, as Germans write them without umlauts, `ø`, `æ`, `œ`, `ł`,
+`đ` likewise, and other letters lose their accent, so the part made from the
+heading stays plain ASCII. Not the heading as written: an umlaut can be
+stored as one character or as a letter and its dots, which would make two
+names for one heading. The part before it is the document's own file name;
+it stays as it is, only composed (NFC), for the same reason. An English
+heading keeps its name, so the demo corpus is not uploaded again; a German one
+is renamed, and its workspace needs one upload with `--delete` to drop the old
+sections.
+
 ## Workspaces and keys
 
 **2026-09-17 — One installation, workspaces separated by a metadata filter,
