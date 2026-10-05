@@ -11,6 +11,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from infra.stacks.andur_stack import (
+    ANSWER_GUARDRAIL_READS_ANSWER_TOPICS,
     DENIED_TOPICS,
     GUARDRAIL_NAME,
     PRICE_TOPIC_PER_1K_UNITS,
@@ -534,7 +535,9 @@ def test_the_deployed_guardrail_is_measured_and_never_changed(
     bedrock = FakeBedrock(existing=[{"id": "answer1", "name": GUARDRAIL_NAME}])
 
     def deployed(**kwargs: Any) -> dict[str, Any]:
-        on_answer = kwargs["guardrailIdentifier"] == "topics1"
+        on_answer = (
+            kwargs["guardrailIdentifier"] == "topics1" or ANSWER_GUARDRAIL_READS_ANSWER_TOPICS
+        )
         topics = [
             {
                 "name": name,

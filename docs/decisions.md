@@ -596,7 +596,39 @@ Jahre [4]." (0.85).
 
 **2026-09-23 — The model may only be invoked with the deployed guardrail
 version.** An IAM condition on `bedrock:GuardrailIdentifier`: a call that
-drops the guardrail fails instead of answering unguarded.
+drops the guardrail fails instead of answering unguarded. Since 05.10.2026
+any numbered version of that guardrail (next entry).
+
+**2026-10-05 — A new guardrail version leaves the answer role alone, and the
+deploy waits for the answers on the old one.** The role allowed the model
+only with `<answer guardrail arn>:<deployed number>`. A deploy with a new
+version updated the role 23 and 24 seconds before the function (CloudTrail,
+02.10.2026, two deploys), and in between the function called with the old
+number and ended in 502, the question already counted. The cleanup then
+deleted the old version 13 and 46 seconds after the function changed, while
+an answer that started on it may run 180. Now the condition is `ArnLike
+<answer guardrail arn>:*`, the Bedrock user guide's policy for "a specific
+guardrail and any of its numeric versions": a call without a guardrail, with
+the draft (the ARN without a number), with the excerpt or topic guardrail or
+any other one stays refused. The ARN itself never changes, since no property
+of a guardrail replaces it. CloudFormation deletes every replaced version, so
+outside a deploy the condition matches the deployed number only, and during
+one the old number as well, the same guardrail with its earlier settings.
+`Custom::AndurDeployDrain` comes after the function, follows the three
+versions, and waits 210 seconds when one of them changes; the cleanup comes
+after it. It costs about three and a half minutes per such deploy and two
+functions that run only then. `tests/test_deploy_steps.py` walks every order
+CloudFormation may take and checks every answer at every step; the old form
+fails it. Not taken: keeping old versions (`Retain`), since a guardrail holds
+at most 20, not adjustable, the answer guardrail reached version 3 in eight
+days, and a deploy at the quota would fail until versions are deleted by
+hand; two deploys per change, by hand every time; every guardrail in the
+account, since the excerpt guardrail checks no topic and no grounding; the
+draft instead of versions, since CloudFormation changes it before the
+function and the topic probe measures numbered versions. A Lambda alias with
+a role per published version would also close the windows that remain
+(`docs/operating.md`, *Deploy*), but it moves the function URL that
+CloudFront calls; a step of its own.
 
 **2026-09-23 — At most 30 passages.** The grounding source takes at most
 100,000 characters.

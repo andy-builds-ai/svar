@@ -28,15 +28,43 @@ others: CloudFront rolls a new configuration out to its edge locations before
 the stack reports success.
 
 A deploy that changes a guardrail setting makes a new guardrail version, and
-CloudFormation updates the answer role to that version before it updates the
-function. For a few seconds the function still calls the model with the old
-version, the role refuses it, and the question ends in 502 although it was
-already counted against the key. Deploy such a change when no customer is
-asking. A new guardrail the function calls, such as the topic guardrail of
-05.10.2026, adds nothing to that: CloudFormation creates it, and widens the
-role for it, before it updates the function, and the old code never calls it.
-After a deploy that touches the topics, `python -m scripts.topic_probe
---deployed` measures the deployed versions.
+no question fails for it, at any hour. The answer role allows every numbered
+version of the answer guardrail, so the new version leaves the role as it
+is; the function moves to the new version, and the answers already running
+finish on the old one. CloudFormation deletes the old version only in its
+cleanup phase, and before that the deploy waits 210 seconds
+(`DEPLOY_DRAIN_SECONDS`, longer than an answer may run) in
+`Custom::AndurDeployDrain`: such a deploy takes about three and a half
+minutes longer, a deploy without a new version does not wait (a stack built
+from nothing waits once, for no one). A new guardrail
+the function calls, such as the topic guardrail of 05.10.2026, adds nothing:
+CloudFormation creates it, and widens the role for it, before it updates the
+function, and the old code never calls it. After a deploy that touches the
+topics, `python -m scripts.topic_probe --deployed` measures the deployed
+versions.
+
+Two other changes still open a window, and need two deploys. A right taken
+from the answer role or moved to another resource: CloudFormation updates the
+role 23 to 24 seconds before the function (CloudTrail, 02.10.2026), and the
+old code runs without the right meanwhile. A new answer model and a replaced
+knowledge base are such changes; `cdk diff` shows them as a `-` line for
+`AnswerFunctionRole` in its IAM statement changes. And an environment
+variable the old code needs, removed or renamed: CloudFormation changes the
+function's configuration 5 to 7 seconds before its code (CloudTrail,
+28.09., 01.10. and 02.10.2026), and the old code reads the new environment
+meanwhile. Deploy first the code that works with old and new, then the
+change that takes the old away, as on 02./03.10.2026 for the key reading.
+
+The topic guardrail of 05.10.2026 comes in two deploys for the same reason.
+In the seconds the old code reads the new environment, it would call an
+answer guardrail that no longer reads the answer's topics, without the topic
+check it does not know yet: answers unchecked for their topics, though no
+error. So the first deploy keeps the answer guardrail reading the answer's
+topics as before (`ANSWER_GUARDRAIL_READS_ANSWER_TOPICS = True` in
+`infra/stacks/andur_stack.py`) and brings the topic guardrail and the code
+that calls it; the answer is checked twice. The second sets it `False`: the
+answer guardrail gets a new version, and old and new code both check the
+answer without its citations.
 
 The deploy creates no workspace key, and no customer is named anywhere in the
 repository. A workspace exists only in AWS: its key under

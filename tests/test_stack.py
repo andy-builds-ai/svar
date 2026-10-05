@@ -28,6 +28,7 @@ from aws_cdk.assertions import Match, Template
 from infra.answer_models import answer_model
 from infra.stacks.andur_stack import (
     ANSWER_FUNCTION_NAME,
+    ANSWER_GUARDRAIL_READS_ANSWER_TOPICS,
     ANSWER_MAX_CONCURRENCY,
     ANSWER_MEMORY_MB,
     ANSWER_MODEL_ID,
@@ -457,22 +458,22 @@ def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(
 def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
     stack: AndurStack, template: Template
 ) -> None:
-    """Known exceptions: both belong to functions CDK generates for a deploy.
+    """Known exceptions: all three belong to functions CDK generates for a deploy.
 
-    One answers the Delete of the retired key resources, the other copies
-    web/ into the site bucket.
+    One answers the Delete of the retired key resources, one runs the deploy
+    drain, the third copies web/ into the site bucket.
     Each gets AWSLambdaBasicExecutionRole from its construct; this stack does
-    not create either role and cannot narrow them without replacing the
+    not create these roles and cannot narrow them without replacing the
     constructs. Every role the stack defines itself carries inline policies
-    only, and both of these run during a deploy and never afterwards.
+    only, and all three of these run during a deploy and never afterwards.
     """
-    provider_role = (
-        stack.node.find_child("ApiKeyProvider").node.find_child("framework-onEvent").role
-    )
+    provider_roles = [
+        stack.node.find_child(provider).node.find_child("framework-onEvent").role
+        for provider in ("ApiKeyProvider", "DeployDrainProvider")
+    ]
     copier_role = stack.site_files.handler_role
     expected = {
-        stack.get_logical_id(provider_role.node.default_child),
-        stack.get_logical_id(copier_role.node.default_child),
+        stack.get_logical_id(role.node.default_child) for role in [*provider_roles, copier_role]
     }
     with_managed = {
         logical_id: role["Properties"]["ManagedPolicyArns"]
@@ -521,13 +522,14 @@ def test_role_can_only_be_assumed_by_bedrock_in_this_account(
 def test_the_only_compute_that_runs_between_deploys_is_the_answer_function(
     stack: AndurStack, template: Template
 ) -> None:
-    """Four functions, and three of them only ever run during a deploy.
+    """Six functions, and five of them only ever run during a deploy.
 
-    The answer function, the retired key function with the CDK framework that
-    runs it, and CDK's file copier that puts web/ into the site bucket. Nothing
-    else runs, so nothing else can cost money while nobody asks.
+    The answer function, the retired key function and the deploy drain, each with
+    the CDK framework that runs it, and CDK's file copier that puts web/ into the
+    site bucket. Nothing else runs, so nothing else can cost money while nobody
+    asks.
     """
-    template.resource_count_is("AWS::Lambda::Function", 4)
+    template.resource_count_is("AWS::Lambda::Function", 6)
     functions = template.find_resources("AWS::Lambda::Function")
     assert stack.get_logical_id(stack.answer_function.node.default_child) in functions
 
@@ -693,21 +695,10 @@ def test_answer_role_has_five_policies_on_named_resources(
     assert model["Condition"] == {
         "StringEquals": {"bedrock:InferenceProfileArn": profile["Resource"]}
     }
-    # Only through the deployed guardrail version: <guardrail arn>:<version>.
-    assert profile["Condition"] == {
-        "StringEquals": {
-            "bedrock:GuardrailIdentifier": {
-                "Fn::Join": [
-                    "",
-                    [
-                        get_att(stack, stack.guardrail, "GuardrailArn"),
-                        ":",
-                        get_att(stack, stack.guardrail_version, "Version"),
-                    ],
-                ]
-            }
-        }
-    }
+    # Only through a numbered version of the answer guardrail: <guardrail arn>:<number>, never
+    # the draft. What that allows and refuses, step by step through a deploy:
+    # tests/test_deploy_steps.py.
+    assert profile["Condition"] == guarded_by(stack)
     # The answer and topic guardrails run through the EU profile: the profile in every
     # region it routes to, and in none outside the EU.
     # The CDK sorts the resources of a statement; compared without order.
@@ -734,6 +725,18 @@ def test_answer_role_has_five_policies_on_named_resources(
 REGIONAL_MODEL_ID = "nvidia.nemotron-super-3-120b"
 
 
+def guarded_by(stack: AndurStack) -> dict[str, Any]:
+    """The condition on every statement that opens the answer model."""
+    return {
+        "ArnLike": {
+            "bedrock:GuardrailIdentifier": {
+                "Fn::Join": ["", [get_att(stack, stack.guardrail, "GuardrailArn"), ":*"]]
+            }
+        },
+        "StringNotLike": {"bedrock:GuardrailIdentifier": "*:DRAFT"},
+    }
+
+
 def test_a_model_in_the_region_is_invoked_directly_with_its_own_prices() -> None:
     app = cdk.App(context=deploy_context())
     stack = AndurStack(app, "RegionalModelStack", answer_model_id=REGIONAL_MODEL_ID)
@@ -743,7 +746,7 @@ def test_a_model_in_the_region_is_invoked_directly_with_its_own_prices() -> None
 
     assert invoke["Action"] == "bedrock:InvokeModel"
     assert joined_last_part(invoke["Resource"]) == f"::foundation-model/{REGIONAL_MODEL_ID}"
-    assert set(invoke["Condition"]["StringEquals"]) == {"bedrock:GuardrailIdentifier"}
+    assert invoke["Condition"] == guarded_by(stack)
     assert apply_guardrail["Action"] == "bedrock:ApplyGuardrail"
     variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"]
     assert variables["Variables"]["MODEL_ID"] == REGIONAL_MODEL_ID
@@ -1207,14 +1210,18 @@ def test_the_excerpt_guardrail_masks_the_same_details_and_does_nothing_else(
     assert 1 <= len(properties["BlockedOutputsMessaging"]) <= 500
 
 
-@pytest.mark.parametrize(("which", "on_answer"), [("guardrail", False), ("topic_guardrail", True)])
+@pytest.mark.parametrize(
+    ("which", "on_answer"),
+    [("guardrail", ANSWER_GUARDRAIL_READS_ANSWER_TOPICS), ("topic_guardrail", True)],
+)
 def test_the_four_topics_are_refused_in_the_question_and_in_the_answer_without_citations(
     stack: AndurStack, template: Template, which: str, on_answer: bool
 ) -> None:
-    """The answer guardrail on the model call reads the topics in the question only: in the
-    answer as the model writes it, `Private lives` withheld short harmless answers for their
-    citations [1][4] or [1][2][4], among them q15 and de11 (04.10.2026). The handler hands the
-    answer without its citations to the topic guardrail, which reads all four there."""
+    """The answer guardrail on the model call reads the topics in the question, and in the
+    answer only for the deploy that brings in the topic guardrail: in the answer as the model
+    writes it, `Private lives` withheld short harmless answers for their citations [1][4] or
+    [1][2][4], among them q15 and de11 (04.10.2026). The handler hands the answer without its
+    citations to the topic guardrail, which reads all four there."""
     properties = resource_of(stack, template, getattr(stack, which))["Properties"]
     topics = properties["TopicPolicyConfig"]["TopicsConfig"]
     assert [topic["Name"] for topic in topics] == [
@@ -1537,13 +1544,14 @@ DEPLOYED_KEY_FUNCTION_IDS = {
 
 def test_the_stack_creates_no_workspace_key(template: Template) -> None:
     """Keys come from `python -m scripts.workspace add`; no customer is named in the code.
-    The one custom resource left is the copier that puts web/ into the site bucket."""
-    custom = [
+    The custom resources left are the deploy drain, which waits and touches nothing, and
+    the copier that puts web/ into the site bucket."""
+    custom = sorted(
         resource["Type"]
         for resource in template.to_json()["Resources"].values()
         if resource["Type"].startswith("Custom::")
-    ]
-    assert custom == ["Custom::CDKBucketDeployment"]
+    )
+    assert custom == ["Custom::AndurDeployDrain", "Custom::CDKBucketDeployment"]
 
 
 def test_the_key_function_is_updated_in_place_not_replaced(template: Template) -> None:
@@ -1589,7 +1597,7 @@ def test_the_key_function_runs_the_handler_that_deletes_nothing(
 
 def test_every_log_group_has_a_retention_and_goes_with_the_stack(template: Template) -> None:
     log_groups = template.find_resources("AWS::Logs::LogGroup")
-    assert len(log_groups) == 4
+    assert len(log_groups) == 6
     for log_group in log_groups.values():
         assert log_group["Properties"]["RetentionInDays"] == 30
         assert log_group["DeletionPolicy"] == "Delete"

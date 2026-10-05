@@ -8,6 +8,7 @@ from typing import Any
 from aws_cdk import (
     Aws,
     CfnOutput,
+    CustomResource,
     Duration,
     RemovalPolicy,
     Stack,
@@ -160,6 +161,16 @@ EXCERPT_GUARDRAIL_NAME = "andur-excerpt-guardrail"
 #: citations read [1][4] or [1][2][4], and without them none (04.10.2026, docs/decisions.md).
 TOPIC_GUARDRAIL_NAME = "andur-topic-guardrail"
 
+#: Whether the answer guardrail on the model call reads the denied topics in the answer too.
+#: True for the one deploy that brings in the topic guardrail: in the seconds CloudFormation
+#: gives the old code the new environment, the old code would call an answer guardrail that no
+#: longer reads the answer's topics, without the topic check it does not know yet. With this
+#: True the answer guardrail reads the answer's topics as deployed until now; the new code checks
+#: the answer twice
+#: (on the model call, with citations, and by the topic guardrail). Set False in a second
+#: deploy, once the first is through: then old and new code both know the topic check.
+ANSWER_GUARDRAIL_READS_ANSWER_TOPICS = True
+
 #: Required by Bedrock, never shown: masking replaces text, it does not block.
 EXCERPT_BLOCKED_MESSAGE = "This excerpt was withheld."
 
@@ -216,6 +227,11 @@ ANSWER_TIMEOUT_SECONDS = 180
 ANSWER_MEMORY_MB = 512
 
 ANSWER_MAX_CONCURRENCY = 5
+
+#: How long a deploy that replaces a guardrail version waits after the answer function has
+#: changed, before CloudFormation deletes the old versions: longer than an answer may run, so
+#: no answer that started on an old version still needs it (infra/deploy_drain/handler.py).
+DEPLOY_DRAIN_SECONDS = ANSWER_TIMEOUT_SECONDS + 30
 
 LOG_RETENTION = logs.RetentionDays.ONE_MONTH
 
@@ -311,7 +327,6 @@ class AndurStack(Stack):
             self.budget_table,
             self.answer_log_group,
             self.guardrail,
-            self.guardrail_version,
             self.excerpt_guardrail,
             self.topic_guardrail,
         )
@@ -325,6 +340,10 @@ class AndurStack(Stack):
             self.topic_guardrail_version,
         )
         self.function_url = self._create_function_url(self.answer_function)
+        self.deploy_drain = self._create_deploy_drain(
+            self.answer_function,
+            [self.guardrail_version, self.excerpt_guardrail_version, self.topic_guardrail_version],
+        )
 
         self.site_bucket = self._create_site_bucket()
         self.distribution = self._create_distribution(self.site_bucket, self.function_url)
@@ -685,7 +704,8 @@ class AndurStack(Stack):
 
     def _create_guardrail(self) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
         """The guardrail on every answer, and the numbered version the function uses. Its
-        topics read the question only; the topic guardrail reads the answer."""
+        topics read the question, and the answer only while
+        `ANSWER_GUARDRAIL_READS_ANSWER_TOPICS`; the topic guardrail reads the answer."""
         return self._guardrail_with_version(
             "AnswerGuardrail",
             "answer",
@@ -697,7 +717,9 @@ class AndurStack(Stack):
                 ),
                 "blocked_input_messaging": BLOCKED_INPUT_MESSAGE,
                 "blocked_outputs_messaging": BLOCKED_OUTPUT_MESSAGE,
-                "topic_policy_config": self._topic_policy(on_answer=False),
+                "topic_policy_config": self._topic_policy(
+                    on_answer=ANSWER_GUARDRAIL_READS_ANSWER_TOPICS
+                ),
                 "cross_region_config": bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
                     guardrail_profile_arn=self._guardrail_profile_arn(self.region)
                 ),
@@ -756,13 +778,26 @@ class AndurStack(Stack):
 
     # --- Answer function -------------------------------------------------
 
-    def _invoke_answer_model(self, guardrail_identifier: str) -> list[iam.PolicyStatement]:
-        """Invoke the answer model only with the deployed guardrail version.
+    def _invoke_answer_model(self, guardrail_arn: str) -> list[iam.PolicyStatement]:
+        """Invoke the answer model only with a numbered version of the answer guardrail.
+
+        Any numbered version, not the deployed one alone: a deploy that changes a guardrail
+        setting makes a new version, and with the number in this condition CloudFormation
+        updated the role about 23 seconds before the function, which still called with the
+        old number and ended in 502. Without the number, a new version leaves this role as it
+        is. The draft (the ARN without a number), every other guardrail and a call without
+        one stay refused. Example 3 of "Enforce the use of specific guardrails" in the Bedrock
+        user guide; docs/decisions.md, 05.10.2026.
 
         An EU profile takes two statements: the profile in this region, and the
         model in the EU regions it routes to, reachable only through that profile.
         """
-        with_guardrail = {"bedrock:GuardrailIdentifier": guardrail_identifier}
+        # `:*` alone would also match a `:DRAFT` suffix, should Bedrock name the draft so; the
+        # draft changes before CloudFormation makes the version, so it is shut out by name.
+        with_guardrail = {
+            "ArnLike": {"bedrock:GuardrailIdentifier": f"{guardrail_arn}:*"},
+            "StringNotLike": {"bedrock:GuardrailIdentifier": "*:DRAFT"},
+        }
         if not self.answer_model_id.startswith(EU_PROFILE_PREFIX):
             return [
                 iam.PolicyStatement(
@@ -772,7 +807,7 @@ class AndurStack(Stack):
                         f"arn:{Aws.PARTITION}:bedrock:{Aws.REGION}::foundation-model/"
                         f"{self.answer_model_id}"
                     ],
-                    conditions={"StringEquals": with_guardrail},
+                    conditions=with_guardrail,
                 )
             ]
         profile_arn = (
@@ -785,7 +820,7 @@ class AndurStack(Stack):
                 sid="InvokeAnswerModelProfile",
                 actions=["bedrock:InvokeModel"],
                 resources=[profile_arn],
-                conditions={"StringEquals": with_guardrail},
+                conditions=with_guardrail,
             ),
             iam.PolicyStatement(
                 sid="InvokeAnswerModelInEurope",
@@ -801,13 +836,15 @@ class AndurStack(Stack):
         budget_table: dynamodb.TableV2,
         log_group: logs.LogGroup,
         guardrail: bedrock.CfnGuardrail,
-        guardrail_version: bedrock.CfnGuardrailVersion,
         excerpt_guardrail: bedrock.CfnGuardrail,
         topic_guardrail: bedrock.CfnGuardrail,
     ) -> iam.Role:
         """The execution role of the answer function: five inline policies, every statement
         on named resources. Most name one; `ApplyAnswerGuardrail` names nine — the three
-        guardrails, and the EU guardrail profile in each of its six regions."""
+        guardrails, and the EU guardrail profile in each of its six regions.
+
+        It names no guardrail version, so a deploy that replaces one leaves the role as it is.
+        """
         return iam.Role(
             self,
             "AnswerFunctionRole",
@@ -845,9 +882,7 @@ class AndurStack(Stack):
                 ),
                 "InvokeAnswerModel": iam.PolicyDocument(
                     statements=[
-                        *self._invoke_answer_model(
-                            f"{guardrail.attr_guardrail_arn}:{guardrail_version.attr_version}"
-                        ),
+                        *self._invoke_answer_model(guardrail.attr_guardrail_arn),
                         iam.PolicyStatement(
                             sid="ApplyAnswerGuardrail",
                             actions=["bedrock:ApplyGuardrail"],
@@ -921,6 +956,57 @@ class AndurStack(Stack):
     def _create_function_url(self, function: lambda_.Function) -> lambda_.FunctionUrl:
         """The function's own HTTPS address — reachable for CloudFront alone."""
         return function.add_function_url(auth_type=lambda_.FunctionUrlAuthType.AWS_IAM)
+
+    def _create_deploy_drain(
+        self, function: lambda_.Function, versions: list[bedrock.CfnGuardrailVersion]
+    ) -> CustomResource:
+        """A resource that waits `DEPLOY_DRAIN_SECONDS` after ``function`` has changed, in every
+        deploy that replaces one of ``versions``.
+
+        CloudFormation deletes a replaced version only in the cleanup phase, after every
+        resource is updated, this one too; so the old versions outlive the answers that
+        started on them. A deploy that replaces no version leaves it alone and does not wait.
+        """
+        log_group = self._create_log_group("DeployDrainFunctionLogs")
+        drain = lambda_.Function(
+            self,
+            "DeployDrainFunction",
+            description="Andur: waits during a deploy until no answer needs an old version.",
+            runtime=LAMBDA_RUNTIME,
+            architecture=lambda_.Architecture.ARM_64,
+            code=lambda_.Code.from_asset(
+                str(REPOSITORY_ROOT / "infra" / "deploy_drain"), exclude=ASSET_EXCLUDES
+            ),
+            handler="handler.on_event",
+            timeout=Duration.seconds(DEPLOY_DRAIN_SECONDS + 60),
+            role=iam.Role(
+                self,
+                "DeployDrainFunctionRole",
+                description="Lets the Andur deploy drain write its log; nothing else.",
+                assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+                inline_policies={"WriteLogs": self._write_logs_policy(log_group)},
+            ),
+            log_group=log_group,
+        )
+        provider = cr.Provider(
+            self,
+            "DeployDrainProvider",
+            on_event_handler=drain,
+            log_group=self._create_log_group("DeployDrainProviderLogs"),
+        )
+        resource = CustomResource(
+            self,
+            "DeployDrain",
+            service_token=provider.service_token,
+            resource_type="Custom::AndurDeployDrain",
+            properties={
+                # A new version changes its Ref, and that makes this an Update.
+                "GuardrailVersions": [version.ref for version in versions],
+                "Seconds": str(DEPLOY_DRAIN_SECONDS),
+            },
+        )
+        resource.node.add_dependency(function)
+        return resource
 
     # --- The page --------------------------------------------------------
 

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from infra.stacks.andur_stack import (
+    ANSWER_GUARDRAIL_READS_ANSWER_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
     DENIED_TOPICS,
@@ -559,7 +560,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.deployed:
             guardrails = deployed_guardrails(deployed_environment(args.region))
             same = all(
-                deployed_topics_match(bedrock, *guardrails[source], on_answer=source == "OUTPUT")
+                deployed_topics_match(
+                    bedrock,
+                    *guardrails[source],
+                    # the topic guardrail always reads the answer; the answer guardrail as set
+                    on_answer=source == "OUTPUT" or ANSWER_GUARDRAIL_READS_ANSWER_TOPICS,
+                )
                 for source in guardrails
             )
             version = {source: guardrails[source][1] for source in guardrails}

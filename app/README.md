@@ -517,8 +517,11 @@ their own (*The topic check of the answer* below). Nemotron 3 Super lists Guardr
 `bedrock-runtime` endpoint (its model card, read 23.09.2026); with Nova Pro
 through its EU profile the same guardrail refused, masked and withheld on
 the live page on 28.09.2026.
-The execution role may invoke the model only with the guardrail's deployed
-version named in the call; a call without it is refused.
+The execution role may invoke the model only with a numbered version of this
+guardrail named in the call; a call without it, with its draft or with any
+other guardrail is refused. Not the deployed version alone, so a deploy that
+makes a new version leaves the role as it is (`docs/decisions.md`,
+05.10.2026).
 
 Three policies, set in `infra/stacks/andur_stack.py`:
 
