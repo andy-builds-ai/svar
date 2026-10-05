@@ -169,7 +169,7 @@ TOPIC_GUARDRAIL_NAME = "andur-topic-guardrail"
 #: the answer twice
 #: (on the model call, with citations, and by the topic guardrail). Set False in a second
 #: deploy, once the first is through: then old and new code both know the topic check.
-ANSWER_GUARDRAIL_READS_ANSWER_TOPICS = True
+ANSWER_GUARDRAIL_READS_ANSWER_TOPICS = False
 
 #: Required by Bedrock, never shown: masking replaces text, it does not block.
 EXCERPT_BLOCKED_MESSAGE = "This excerpt was withheld."
