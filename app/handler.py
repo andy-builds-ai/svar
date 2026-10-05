@@ -295,6 +295,12 @@ class LLMError(HandlerError):
     status = 502
 
 
+class TopicCheckError(HandlerError):
+    """The answer could not be checked for the denied topics, so it is not given."""
+
+    status = 502
+
+
 # --- Settings ------------------------------------------------------------
 
 
@@ -326,6 +332,8 @@ class Settings:
     guardrail_version: str
     excerpt_guardrail_id: str
     excerpt_guardrail_version: str
+    topic_guardrail_id: str
+    topic_guardrail_version: str
     prices: Prices
     price_date: str
 
@@ -345,6 +353,8 @@ ENVIRONMENT_VARIABLES = {
     "guardrail_version": "GUARDRAIL_VERSION",
     "excerpt_guardrail_id": "EXCERPT_GUARDRAIL_ID",
     "excerpt_guardrail_version": "EXCERPT_GUARDRAIL_VERSION",
+    "topic_guardrail_id": "TOPIC_GUARDRAIL_ID",
+    "topic_guardrail_version": "TOPIC_GUARDRAIL_VERSION",
     "price_input_tokens": "PRICE_INPUT_PER_1K_TOKENS",
     "price_output_tokens": "PRICE_OUTPUT_PER_1K_TOKENS",
     "price_topic_units": "PRICE_TOPIC_PER_1K_UNITS",
@@ -412,7 +422,7 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             f"KEEP_DAYS ({keep_days}) must outlast WINDOW_HOURS ({window_hours}): a budget "
             "whose item disappears before its window closes is no budget."
         )
-    for name in ("guardrail_version", "excerpt_guardrail_version"):
+    for name in ("guardrail_version", "excerpt_guardrail_version", "topic_guardrail_version"):
         if not (values[name].isascii() and values[name].isdigit()):
             raise ConfigurationError(
                 f"{ENVIRONMENT_VARIABLES[name]} must be a version number, not {values[name]!r}."
@@ -441,6 +451,8 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         guardrail_version=values["guardrail_version"],
         excerpt_guardrail_id=values["excerpt_guardrail_id"],
         excerpt_guardrail_version=values["excerpt_guardrail_version"],
+        topic_guardrail_id=values["topic_guardrail_id"],
+        topic_guardrail_version=values["topic_guardrail_version"],
         prices=prices,
         price_date=price_day(values["price_date"]),
     )
@@ -1261,15 +1273,20 @@ def converse(
     )
 
 
+def model_text(response: Mapping[str, Any]) -> str | None:
+    """The first content block that carries text, not blindly the first one."""
+    blocks = response.get("output", {}).get("message", {}).get("content", [])
+    return next((block["text"] for block in blocks if "text" in block), None)
+
+
 def extract_answer(
     response: Mapping[str, Any],
     guardrail_action: str = "none",
     language: str = DEFAULT_LANGUAGE,
 ) -> str:
-    """Pick the first content block that carries text, not blindly the first one, and add the
-    note, in the request's language, when the model did not finish on its own."""
-    blocks = response.get("output", {}).get("message", {}).get("content", [])
-    text = next((block["text"] for block in blocks if "text" in block), None)
+    """The model's text, with the note, in the request's language, when the model did not
+    finish on its own."""
+    text = model_text(response)
     stop_reason = response.get("stopReason", "unknown")
     if text is None or not text.strip():
         raise LLMError(
@@ -1439,13 +1456,17 @@ def mask_excerpts(
     return counted
 
 
-def add_units(units: Mapping[str, int] | None, excerpt_units: int | None) -> dict[str, int] | None:
-    """The answer's guardrail units plus the excerpt guardrail's PII units; None when either is
-    unknown."""
-    if units is None or excerpt_units is None:
+def add_units(
+    units: Mapping[str, int] | None,
+    extra_units: int | None,
+    kind: str = "sensitiveInformationPolicyUnits",
+) -> dict[str, int] | None:
+    """The answer's guardrail units plus another call's units of one kind (by default the
+    excerpt guardrail's PII units); None when either is unknown."""
+    if units is None or extra_units is None:
         return None
     total = dict(units)
-    total["sensitiveInformationPolicyUnits"] += excerpt_units
+    total[kind] += extra_units
     return total
 
 
@@ -1474,6 +1495,51 @@ _DASH = "-–—"
 _PART = rf"\d+(?:\s*[{_DASH}]\s*\d+)?"
 _CITATION = re.compile(rf"\[\s*({_PART}(?:\s*[,;]\s*{_PART})*)\s*\]")
 _RANGE = re.compile(rf"(\d+)\s*[{_DASH}]\s*(\d+)")
+_CITATION_WITH_SPACE = re.compile(rf"\s*{_CITATION.pattern}")
+
+
+def without_citations(answer: str) -> str:
+    """The answer without its source numbers and the spaces before them: "Warned [1][2][4]"
+    and "Warned [1] [2] [4]" become "Warned", "5 years [1, 4]." becomes "5 years."."""
+    return _CITATION_WITH_SPACE.sub("", answer).strip()
+
+
+def check_answer_topics(guardrail_client: Any, settings: Settings, answer: str) -> dict[str, Any]:
+    """The denied topics the answer strays into, checked without its citations, and the topic
+    units of the check.
+
+    The answer guardrail on the model call reads the topics in the question only: in the answer
+    as the model writes it, `Private lives` withheld short harmless answers for their citations
+    alone (docs/decisions.md, 04.10.2026). A text of citations alone has no words to check and
+    costs no call. A failed check withholds the answer: it is not given unchecked.
+    """
+    text = without_citations(answer)
+    if not text:
+        return {"topics": [], "units": 0}
+    try:
+        response = guardrail_client.apply_guardrail(
+            guardrailIdentifier=settings.topic_guardrail_id,
+            guardrailVersion=settings.topic_guardrail_version,
+            source="OUTPUT",
+            content=[{"text": {"text": text}}],
+        )
+    except aws.botocore_errors() as exc:
+        log_event("topic-guard-failed", detail=aws.error_detail(exc))
+        cause = aws.error_cause(exc)
+        raise TopicCheckError(
+            f"The answer could not be checked for the denied topics: {cause}.",
+            f"Die Antwort konnte nicht auf die gesperrten Themen geprüft werden: {cause}.",
+        ) from exc
+    topics = [
+        f"topic:{topic.get('name')}"
+        for assessment in response.get("assessments", [])
+        for topic in assessment.get("topicPolicy", {}).get("topics", [])
+        if topic.get("action") == "BLOCKED"
+    ]
+    if response.get("action") == "GUARDRAIL_INTERVENED" and not topics:
+        topics = ["topic:unknown"]
+    units = response.get("usage", {}).get("topicPolicyUnits")
+    return {"topics": list(dict.fromkeys(topics)), "units": None if units is None else int(units)}
 
 
 def cited_numbers(answer: str, number_of_sources: int) -> set[int]:
@@ -1564,8 +1630,22 @@ def answer_question(
     answer = blocked_answer(response, guardrail, record.language) or extract_answer(
         response, guardrail["action"], record.language
     )
+    if guardrail["action"] != "blocked":
+        checked = check_answer_topics(
+            client("guardrail", settings.region), settings, model_text(response) or ""
+        )
+        guardrail["units"] = add_units(guardrail["units"], checked["units"], "topicPolicyUnits")
+        if checked["topics"]:
+            answer = in_language(ANSWER_WITHHELD_ANSWERS, record.language)
+            guardrail["action"] = "blocked"
+            guardrail["policies"] = list(dict.fromkeys(checked["topics"] + guardrail["policies"]))
     usage = read_usage(response)
-    if guardrail["question_refused"]:
+    # An answer withheld for a denied topic loses its sources too: their excerpts can say what
+    # the answer was withheld for, and masking takes out names and addresses, not the rest.
+    withheld_for_topic = guardrail["action"] == "blocked" and any(
+        policy.startswith("topic:") for policy in guardrail["policies"]
+    )
+    if guardrail["question_refused"] or withheld_for_topic:
         sources: list[dict[str, Any]] = []
         excerpts = {"policies": [], "units": 0}
     else:

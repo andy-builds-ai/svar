@@ -61,6 +61,8 @@ ENVIRONMENT = {
     "GUARDRAIL_VERSION": "1",
     "EXCERPT_GUARDRAIL_ID": "gr-excerpts",
     "EXCERPT_GUARDRAIL_VERSION": "2",
+    "TOPIC_GUARDRAIL_ID": "gr-topics",
+    "TOPIC_GUARDRAIL_VERSION": "3",
     "PRICE_INPUT_PER_1K_TOKENS": "0.00015",
     "PRICE_OUTPUT_PER_1K_TOKENS": "0.00065",
     "PRICE_TOPIC_PER_1K_UNITS": "0.15",
@@ -251,8 +253,32 @@ def excerpt_guard_response(
     }
 
 
+def topic_guard_response(*topics: str, units: int = 1) -> dict[str, Any]:
+    """What ApplyGuardrail returns for the topic guardrail: no topic, or these ones blocked."""
+    return {
+        "usage": {
+            "topicPolicyUnits": units,
+            "sensitiveInformationPolicyUnits": 0,
+            "contextualGroundingPolicyUnits": 0,
+        },
+        "action": "GUARDRAIL_INTERVENED" if topics else "NONE",
+        "outputs": [{"text": "Withheld."}] if topics else [],
+        "assessments": [
+            {
+                "topicPolicy": {
+                    "topics": [
+                        {"name": topic, "type": "DENY", "action": "BLOCKED", "detected": True}
+                        for topic in topics
+                    ]
+                }
+            }
+        ],
+    }
+
+
 class FakeGuardrail:
-    """The excerpt guardrail's client: ApplyGuardrail only."""
+    """The guardrail client: ApplyGuardrail only. The excerpt guardrail's calls go to
+    ``calls``, the topic guardrail's to ``topic_calls``; each has its response and error."""
 
     def __init__(
         self, response: dict[str, Any] | None = None, error: Exception | None = None
@@ -260,8 +286,16 @@ class FakeGuardrail:
         self.response = response or excerpt_guard_response()
         self.error = error
         self.calls: list[dict[str, Any]] = []
+        self.topic_response = topic_guard_response()
+        self.topic_error: Exception | None = None
+        self.topic_calls: list[dict[str, Any]] = []
 
     def apply_guardrail(self, **kwargs: Any) -> dict[str, Any]:
+        if kwargs["guardrailIdentifier"] == ENVIRONMENT["TOPIC_GUARDRAIL_ID"]:
+            self.topic_calls.append(kwargs)
+            if self.topic_error:
+                raise self.topic_error
+            return self.topic_response
         self.calls.append(kwargs)
         if self.error:
             raise self.error
@@ -679,6 +713,7 @@ def test_guardrail_and_prices_come_from_the_environment() -> None:
         "gr-excerpts",
         "2",
     )
+    assert (SETTINGS.topic_guardrail_id, SETTINGS.topic_guardrail_version) == ("gr-topics", "3")
     assert SETTINGS.prices == handler.Prices(
         input_tokens=Decimal("0.00015"),
         output_tokens=Decimal("0.00065"),
@@ -689,7 +724,9 @@ def test_guardrail_and_prices_come_from_the_environment() -> None:
     assert SETTINGS.price_date == "2026-09-23"
 
 
-@pytest.mark.parametrize("variable", ["GUARDRAIL_VERSION", "EXCERPT_GUARDRAIL_VERSION"])
+@pytest.mark.parametrize(
+    "variable", ["GUARDRAIL_VERSION", "EXCERPT_GUARDRAIL_VERSION", "TOPIC_GUARDRAIL_VERSION"]
+)
 @pytest.mark.parametrize("value", ["DRAFT", "", "1.0", "v1", "²"])
 def test_the_guardrail_version_is_a_number_and_never_the_draft(variable: str, value: str) -> None:
     with pytest.raises(ConfigurationError, match=variable):
@@ -2670,7 +2707,7 @@ def test_an_access_error_is_not_made_again(pauses: list[float]) -> None:
     assert len(bedrock.calls) == 1 and pauses == []
 
 
-@pytest.mark.parametrize(("elapsed", "calls"), [(50, 2), (50.001, 1)])
+@pytest.mark.parametrize(("elapsed", "calls"), [(30, 2), (30.001, 1)])
 def test_the_second_model_call_starts_only_while_cloudfront_still_waits(
     elapsed: float,
     calls: int,
@@ -2678,7 +2715,8 @@ def test_the_second_model_call_starts_only_while_cloudfront_still_waits(
     pauses: list[float],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """At second 50 there is still time for the pause, the call and the excerpts."""
+    """At second 30 there is still time for the pause, the call, the topic check of the answer
+    and the excerpts."""
     caplog.set_level(logging.INFO, logger="andur")
     record = handler.RequestRecord()
     cold_start.advance(elapsed)
@@ -2969,8 +3007,9 @@ def test_an_answer_carries_sources_layers_model_usage_and_latency(aws: dict[str,
     assert body["stop_reason"] == "end_turn"
     assert body["usage"] == {"input_tokens": 1624, "output_tokens": 50}
     assert body["guardrail"] == {"action": "none", "policies": []}
-    # 0.000976 for the answer, plus one PII unit at 0.10 per thousand for the excerpts.
-    assert body["cost_usd"] == 0.001076
+    # 0.000976 for the answer, plus one PII unit at 0.10 per thousand for the excerpts and one
+    # topic unit at 0.15 per thousand for the topic check of the answer.
+    assert body["cost_usd"] == 0.001226
     assert body["price_date"] == "2026-09-23"
     assert isinstance(body["latency_ms"], int)
     assert set(body) == {
@@ -3123,7 +3162,7 @@ def test_an_action_other_than_none_or_intervened_drops_every_excerpt(
     status, body = call(event())
     assert status == 200
     assert [source["excerpt"] for source in body["sources"]] == [None, None]
-    assert body["cost_usd"] == 0.001076
+    assert body["cost_usd"] == 0.001226
     (line,) = [line for line in log_lines(caplog) if line["event"] == "excerpt-guard-unusable"]
     assert line["action"] == action
 
@@ -3135,8 +3174,9 @@ def test_a_split_that_does_not_fit_keeps_the_units_counted(aws: dict[str, Any]) 
     )
     _, body = call(event())
     assert [source["excerpt"] for source in body["sources"]] == [None, None]
-    # 0.000976 for the answer, plus two PII units at 0.10 per thousand.
-    assert body["cost_usd"] == 0.001176
+    # 0.000976 for the answer, plus two PII units at 0.10 per thousand and one topic unit at
+    # 0.15 per thousand.
+    assert body["cost_usd"] == 0.001326
 
 
 def test_a_failed_excerpt_guardrail_drops_every_excerpt_and_the_cost_is_unknown(
@@ -3376,11 +3416,11 @@ def test_an_answer_logs_one_line_with_tokens_hits_dropped_and_latency(
         "grounding_score": 0.93,
         "relevance_score": 0.88,
         "guardrail_units": {
-            "topicPolicyUnits": 2,
+            "topicPolicyUnits": 3,
             "sensitiveInformationPolicyUnits": 2,
             "contextualGroundingPolicyUnits": 3,
         },
-        "cost_usd": 0.001076,
+        "cost_usd": 0.001226,
         "price_date": "2026-09-23",
         "latency_ms": line["latency_ms"],
     }
@@ -3715,6 +3755,185 @@ def test_a_blocked_answer_never_carries_the_sentence_aws_sent_back(aws: dict[str
         for asked in (None, "en", "de"):
             _, body = call(event(in_(asked)))
             assert AWS_SENTENCE not in json.dumps(body, ensure_ascii=False)
+
+
+# --- The topic check of the answer, without its citations ---
+
+
+@pytest.mark.parametrize(
+    "citations",
+    ["[1]", "[1][4]", "[1] [4]", "[1, 4]", "[1][2][4]", "[1] [2] [4]", "[1, 2, 4]", "[1][5]"],
+)
+def test_every_spelling_of_the_citations_is_taken_out_for_the_topic_check(citations: str) -> None:
+    """The spellings of 04.10.2026: on the answer as the model writes it, `Private lives`
+    withheld up to 48 of 69 harmless answers for one of them, and none without them."""
+    assert handler.without_citations(f"Warned {citations}") == "Warned"
+    assert handler.without_citations(f"For 35 days {citations}.") == "For 35 days."
+    assert handler.without_citations(f"Two {citations}. Three {citations}.") == "Two. Three."
+
+
+def test_a_text_of_citations_alone_has_nothing_left_to_check() -> None:
+    assert handler.without_citations(" [1][2] [3, 4] ") == ""
+
+
+def test_the_topic_guardrail_reads_the_answer_without_citations_the_reader_gets_them(
+    aws: dict[str, Any],
+) -> None:
+    aws["bedrock-runtime"].response = bedrock_response([{"text": "Warned [1][2][4]"}])
+    status, body = call(event())
+    assert status == 200
+    assert body["answer"] == "Warned [1][2][4]"
+    assert body["guardrail"] == {"action": "none", "policies": []}
+    (request,) = aws["guardrail"].topic_calls
+    assert request == {
+        "guardrailIdentifier": "gr-topics",
+        "guardrailVersion": "3",
+        "source": "OUTPUT",
+        "content": [{"text": {"text": "Warned"}}],
+    }
+    assert len(aws["guardrail"].calls) == 1  # the excerpts, as before
+
+
+def test_the_topic_guardrail_reads_the_masked_answer_without_the_note(
+    aws: dict[str, Any],
+) -> None:
+    """What the reader would see, less the citations; the note is the handler's own."""
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Call {NAME} on {PHONE} [1]."}],
+        "guardrail_intervened",
+        guardrail_trace(output_assessment=PHONE_MASKED),
+    )
+    call(event())
+    (request,) = aws["guardrail"].topic_calls
+    assert request["content"] == [{"text": {"text": "Call {NAME} on {PHONE}."}}]
+
+
+@pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
+def test_an_answer_the_topic_guardrail_blocks_is_withheld_in_the_language_asked(
+    aws: dict[str, Any], asked: str | None, spoken: str
+) -> None:
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Our managing director is married and has two children [1]."}]
+    )
+    aws["guardrail"].topic_response = topic_guard_response("Private lives")
+    status, body = call(event(in_(asked)))
+    assert status == 200
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS[spoken]
+    assert "married" not in json.dumps(body)
+    assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Private lives"]}
+    # Withheld for a topic, the answer loses its sources like a refused question: an excerpt
+    # can tell what the answer was withheld for. No excerpts, so no excerpt guardrail call.
+    assert body["sources"] == [] and body["layers"] == []
+    assert aws["guardrail"].calls == []
+    # 0.000976 for the answer, one topic unit for the check.
+    assert body["cost_usd"] == 0.001126
+
+
+def test_an_answer_withheld_for_a_topic_on_the_model_call_loses_its_sources_too(
+    aws: dict[str, Any],
+) -> None:
+    """A guardrail version that still reads the topics in the answer (version 3, deployed until
+    the change) withholds it there; the sources go the same way."""
+    aws["bedrock-runtime"].response = blocked_by(
+        guardrail_trace(output_assessment=ADVICE_ANSWER_BLOCKED)
+    )
+    _, body = call(event())
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["sources"] == [] and body["layers"] == []
+
+
+def test_a_withheld_masked_answer_names_the_topic_and_the_masking(aws: dict[str, Any]) -> None:
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "{NAME} lives at {ADDRESS} with his partner [2]."}],
+        "guardrail_intervened",
+        guardrail_trace(output_assessment=PHONE_MASKED),
+    )
+    aws["guardrail"].topic_response = topic_guard_response("Private lives")
+    _, body = call(event())
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["guardrail"]["action"] == "blocked"
+    assert body["guardrail"]["policies"][0] == "topic:Private lives"
+    assert "pii:PHONE" in body["guardrail"]["policies"]
+    assert "{ADDRESS}" not in json.dumps(body)
+
+
+def test_an_intervention_without_a_named_topic_still_withholds_the_answer(
+    aws: dict[str, Any],
+) -> None:
+    """Fail closed: the topic guardrail holds topics only, so its intervention is one."""
+    aws["guardrail"].topic_response = {
+        "action": "GUARDRAIL_INTERVENED",
+        "usage": {"topicPolicyUnits": 1},
+        "assessments": [],
+    }
+    _, body = call(event())
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["guardrail"] == {"action": "blocked", "policies": ["topic:unknown"]}
+
+
+def test_a_refused_question_and_a_withheld_answer_cost_no_topic_check(
+    aws: dict[str, Any],
+) -> None:
+    for trace in (
+        guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED, output_assessment={}),
+        guardrail_trace(output_assessment=UNGROUNDED),
+    ):
+        aws["bedrock-runtime"].response = blocked_by(trace)
+        call(event())
+    assert aws["guardrail"].topic_calls == []
+
+
+def test_an_answer_of_citations_alone_costs_no_topic_check(aws: dict[str, Any]) -> None:
+    aws["bedrock-runtime"].response = bedrock_response([{"text": "[1][2]"}])
+    status, body = call(event())
+    assert status == 200
+    assert body["answer"] == "[1][2]"
+    assert aws["guardrail"].topic_calls == []
+    assert body["cost_usd"] == 0.001076
+
+
+@pytest.mark.parametrize(
+    ("asked", "sentence"),
+    [
+        ("en", "The answer could not be checked for the denied topics: access denied."),
+        ("de", "Die Antwort konnte nicht auf die gesperrten Themen geprüft werden: access denied."),
+    ],
+)
+def test_an_answer_the_topic_guardrail_cannot_check_is_not_given(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture, asked: str, sentence: str
+) -> None:
+    """Fail closed: a 502 with the reason, never the answer unchecked."""
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Our managing director is married [1]."}]
+    )
+    aws["guardrail"].topic_error = client_error("AccessDeniedException", operation="ApplyGuardrail")
+    status, body = call(event(in_(asked)))
+    assert status == 502
+    assert body == {"error": sentence}
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "topic-guard-failed"]
+    assert line["detail"] == "ClientError: AccessDeniedException"
+
+
+def test_unknown_topic_units_make_the_cost_unknown(aws: dict[str, Any]) -> None:
+    aws["guardrail"].topic_response = {"action": "NONE", "usage": {}, "assessments": []}
+    _, body = call(event())
+    assert body["cost_usd"] is None
+
+
+def test_the_topic_check_adds_its_units_to_the_topic_units() -> None:
+    units = {
+        "topicPolicyUnits": 1,
+        "sensitiveInformationPolicyUnits": 1,
+        "contextualGroundingPolicyUnits": 3,
+    }
+    total = handler.add_units(units, 2, "topicPolicyUnits")
+    assert total == {
+        "topicPolicyUnits": 3,
+        "sensitiveInformationPolicyUnits": 1,
+        "contextualGroundingPolicyUnits": 3,
+    }
+    assert units["topicPolicyUnits"] == 1
 
 
 def test_the_guardrail_has_blocked_only_when_aws_stopped_and_the_trace_says_blocked(

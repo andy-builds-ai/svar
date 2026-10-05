@@ -73,6 +73,15 @@ and the question cost 0.001579 USD in all (1,717 / 33 tokens, units
 2 / 3 / 7, the 3 being one for the answer and two for the excerpts). A
 refused question costs nothing more: it returns no sources.
 
+Since 05.10.2026 the answer, without its citations, passes the topic
+guardrail as well: one more `ApplyGuardrail` call per answered question. An
+answer under 1,000 characters is one topic unit, 0.00015 USD (measured on 20
+answers and in the topic probe's 315 answer calls, one unit each). The
+answer guardrail no longer reads its topics in the answer; whether that
+saves the answer's topic unit there is not measured yet — a deployed
+answer's `guardrail_units` will show it. A withheld answer, a refused
+question and an answer of citations alone make no topic check.
+
 **The cap:** the web address is open to anyone who has it, so the answer
 function runs at most 5 requests at the same time and Lambda turns the rest
 away with HTTP 429 before any code runs. A request without a valid key never reaches the model.

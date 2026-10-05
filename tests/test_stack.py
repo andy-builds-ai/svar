@@ -70,6 +70,7 @@ from infra.stacks.andur_stack import (
     RELEVANCE_THRESHOLD,
     REPOSITORY_ROOT,
     SITE_ROOT_DOCUMENT,
+    TOPIC_GUARDRAIL_NAME,
     TOPICS_TIER,
     VECTOR_DATA_TYPE,
     VECTOR_INDEX_NAME,
@@ -582,9 +583,10 @@ def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
     the ask script waits longer than the function, so it prints the 502. The
     innermost number counts the key once, because only the requested
     workspace's key is read, at most once per request, and the budget table
-    twice, because a wrong item is put right with a second write.
+    twice, because a wrong item is put right with a second write, and the guardrail
+    twice, for the topic check of the answer and for the excerpts.
     """
-    assert aws.worst_case_seconds() == 149
+    assert aws.worst_case_seconds() == 169
     assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
 
 
@@ -632,6 +634,8 @@ def test_answer_function_is_configured_only_through_its_environment(
         "GUARDRAIL_VERSION": get_att(stack, stack.guardrail_version, "Version"),
         "EXCERPT_GUARDRAIL_ID": get_att(stack, stack.excerpt_guardrail_version, "GuardrailId"),
         "EXCERPT_GUARDRAIL_VERSION": get_att(stack, stack.excerpt_guardrail_version, "Version"),
+        "TOPIC_GUARDRAIL_ID": get_att(stack, stack.topic_guardrail_version, "GuardrailId"),
+        "TOPIC_GUARDRAIL_VERSION": get_att(stack, stack.topic_guardrail_version, "Version"),
         "PRICE_INPUT_PER_1K_TOKENS": PRICE_INPUT_PER_1K_TOKENS,
         "PRICE_OUTPUT_PER_1K_TOKENS": PRICE_OUTPUT_PER_1K_TOKENS,
         "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
@@ -704,8 +708,8 @@ def test_answer_role_has_five_policies_on_named_resources(
             }
         }
     }
-    # The answer guardrail runs through the EU profile: the profile in every region it
-    # routes to, and in none outside the EU.
+    # The answer and topic guardrails run through the EU profile: the profile in every
+    # region it routes to, and in none outside the EU.
     # The CDK sorts the resources of a statement; compared without order.
     assert apply_guardrail["Action"] == "bedrock:ApplyGuardrail"
     assert sorted(map(json.dumps, apply_guardrail["Resource"])) == sorted(
@@ -714,6 +718,7 @@ def test_answer_role_has_five_policies_on_named_resources(
             [
                 get_att(stack, stack.guardrail, "GuardrailArn"),
                 get_att(stack, stack.excerpt_guardrail, "GuardrailArn"),
+                get_att(stack, stack.topic_guardrail, "GuardrailArn"),
                 *(profile_arn(region) for region in GUARDRAIL_PROFILE_REGIONS),
             ],
         )
@@ -1156,6 +1161,8 @@ def test_the_defaults_the_stack_hands_over_are_a_budget_the_handler_accepts() ->
             "GUARDRAIL_VERSION": "1",
             "EXCERPT_GUARDRAIL_ID": "gr2",
             "EXCERPT_GUARDRAIL_VERSION": "1",
+            "TOPIC_GUARDRAIL_ID": "gr3",
+            "TOPIC_GUARDRAIL_VERSION": "1",
             "PRICE_INPUT_PER_1K_TOKENS": PRICE_INPUT_PER_1K_TOKENS,
             "PRICE_OUTPUT_PER_1K_TOKENS": PRICE_OUTPUT_PER_1K_TOKENS,
             "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
@@ -1170,20 +1177,18 @@ def test_the_defaults_the_stack_hands_over_are_a_budget_the_handler_accepts() ->
 # --- Guardrail -----------------------------------------------------------
 
 
-def test_two_guardrails_each_with_one_version(stack: AndurStack, template: Template) -> None:
-    template.resource_count_is("AWS::Bedrock::Guardrail", 2)
-    template.resource_count_is("AWS::Bedrock::GuardrailVersion", 2)
-    assert resource_of(stack, template, stack.guardrail)["Properties"]["Name"] == GUARDRAIL_NAME
-    assert (
-        resource_of(stack, template, stack.excerpt_guardrail)["Properties"]["Name"]
-        == EXCERPT_GUARDRAIL_NAME
-    )
-    version = resource_of(stack, template, stack.guardrail_version)["Properties"]
-    assert version["GuardrailIdentifier"] == get_att(stack, stack.guardrail, "GuardrailId")
-    excerpt_version = resource_of(stack, template, stack.excerpt_guardrail_version)["Properties"]
-    assert excerpt_version["GuardrailIdentifier"] == get_att(
-        stack, stack.excerpt_guardrail, "GuardrailId"
-    )
+def test_three_guardrails_each_with_one_version(stack: AndurStack, template: Template) -> None:
+    template.resource_count_is("AWS::Bedrock::Guardrail", 3)
+    template.resource_count_is("AWS::Bedrock::GuardrailVersion", 3)
+    for guardrail, version, name in (
+        (stack.guardrail, stack.guardrail_version, GUARDRAIL_NAME),
+        (stack.excerpt_guardrail, stack.excerpt_guardrail_version, EXCERPT_GUARDRAIL_NAME),
+        (stack.topic_guardrail, stack.topic_guardrail_version, TOPIC_GUARDRAIL_NAME),
+    ):
+        assert resource_of(stack, template, guardrail)["Properties"]["Name"] == name
+        assert resource_of(stack, template, version)["Properties"][
+            "GuardrailIdentifier"
+        ] == get_att(stack, guardrail, "GuardrailId")
 
 
 def test_the_excerpt_guardrail_masks_the_same_details_and_does_nothing_else(
@@ -1202,12 +1207,16 @@ def test_the_excerpt_guardrail_masks_the_same_details_and_does_nothing_else(
     assert 1 <= len(properties["BlockedOutputsMessaging"]) <= 500
 
 
-def test_the_four_topics_are_refused_in_question_and_answer(
-    stack: AndurStack, template: Template
+@pytest.mark.parametrize(("which", "on_answer"), [("guardrail", False), ("topic_guardrail", True)])
+def test_the_four_topics_are_refused_in_the_question_and_in_the_answer_without_citations(
+    stack: AndurStack, template: Template, which: str, on_answer: bool
 ) -> None:
-    topics = resource_of(stack, template, stack.guardrail)["Properties"]["TopicPolicyConfig"][
-        "TopicsConfig"
-    ]
+    """The answer guardrail on the model call reads the topics in the question only: in the
+    answer as the model writes it, `Private lives` withheld short harmless answers for their
+    citations [1][4] or [1][2][4], among them q15 and de11 (04.10.2026). The handler hands the
+    answer without its citations to the topic guardrail, which reads all four there."""
+    properties = resource_of(stack, template, getattr(stack, which))["Properties"]
+    topics = properties["TopicPolicyConfig"]["TopicsConfig"]
     assert [topic["Name"] for topic in topics] == [
         "Legal action",
         "Tax returns",
@@ -1217,16 +1226,42 @@ def test_the_four_topics_are_refused_in_question_and_answer(
     for topic in topics:
         assert topic["Type"] == "DENY"
         assert (topic["InputEnabled"], topic["InputAction"]) == (True, "BLOCK")
-        assert (topic["OutputEnabled"], topic["OutputAction"]) == (True, "BLOCK")
+        assert (topic["OutputEnabled"], topic["OutputAction"]) == (
+            (True, "BLOCK") if on_answer else (False, "NONE")
+        )
+    assert properties["TopicPolicyConfig"]["TopicsTierConfig"] == {"TierName": TOPICS_TIER}
+
+
+def test_the_topic_guardrail_checks_topics_and_does_nothing_else(
+    stack: AndurStack, template: Template
+) -> None:
+    """No masking and no grounding: those stay on the model call, where they read the answer
+    with its citations as before. Its messages are the answer guardrail's."""
+    properties = resource_of(stack, template, stack.topic_guardrail)["Properties"]
+    answer = resource_of(stack, template, stack.guardrail)["Properties"]
+    assert set(properties) == {
+        "Name",
+        "Description",
+        "BlockedInputMessaging",
+        "BlockedOutputsMessaging",
+        "TopicPolicyConfig",
+        "CrossRegionConfig",
+    }
+    assert properties["CrossRegionConfig"] == answer["CrossRegionConfig"]
+    assert properties["BlockedInputMessaging"] == answer["BlockedInputMessaging"]
+    assert properties["BlockedOutputsMessaging"] == answer["BlockedOutputsMessaging"]
+    assert "SensitiveInformationPolicyConfig" in answer
+    assert "ContextualGroundingPolicyConfig" in answer
 
 
 def test_the_topic_probe_builds_the_topics_the_stack_deploys(
     stack: AndurStack, template: Template
 ) -> None:
-    """The probe measures what a deploy would ship: the same topics in the same order, the
-    same actions, tier and EU profile. Bedrock names the fields in camelCase, CloudFormation
-    in PascalCase, and CloudFormation calls the tier `TopicsTierConfig`."""
-    properties = resource_of(stack, template, stack.guardrail)["Properties"]
+    """The probe measures what a deploy would ship in the topic guardrail: the same topics in
+    the same order, the same actions, tier and EU profile. Bedrock names the fields in
+    camelCase, CloudFormation in PascalCase, and CloudFormation calls the tier
+    `TopicsTierConfig`."""
+    properties = resource_of(stack, template, stack.topic_guardrail)["Properties"]
     deployed = properties["TopicPolicyConfig"]
     probe = topic_probe.probe_request()
     assert [
@@ -1449,6 +1484,32 @@ def test_the_guardrail_version_is_an_output(stack: AndurStack, template: Templat
     assert output["Value"] == {"Ref": stack.get_logical_id(stack.guardrail_version)}
     (excerpt_output,) = template.find_outputs("ExcerptGuardrailRef").values()
     assert excerpt_output["Value"] == {"Ref": stack.get_logical_id(stack.excerpt_guardrail_version)}
+    (topic_output,) = template.find_outputs("TopicGuardrailRef").values()
+    assert topic_output["Value"] == {"Ref": stack.get_logical_id(stack.topic_guardrail_version)}
+
+
+def test_a_changed_topic_makes_new_versions_of_the_answer_and_the_topic_guardrail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both read `DENIED_TOPICS`, one on the question, one on the answer: a changed
+    definition has to reach the versions the function uses, both of them."""
+    from infra.stacks import andur_stack
+
+    def descriptions() -> tuple[str, str]:
+        other = AndurStack(cdk.App(context=deploy_context()), "TopicStack")
+        resources = Template.from_stack(other).to_json()["Resources"]
+        return tuple(
+            resources[other.get_logical_id(version)]["Properties"]["Description"]
+            for version in (other.guardrail_version, other.topic_guardrail_version)
+        )
+
+    answer_before, topic_before = descriptions()
+    name, definition, examples = andur_stack.DENIED_TOPICS[0]
+    changed = ((name, definition + " Changed.", examples), *andur_stack.DENIED_TOPICS[1:])
+    monkeypatch.setattr(andur_stack, "DENIED_TOPICS", changed)
+    answer_after, topic_after = descriptions()
+    assert answer_after != answer_before
+    assert topic_after != topic_before
 
 
 def test_no_role_may_do_more_than_count_on_the_budget_table(template: Template) -> None:

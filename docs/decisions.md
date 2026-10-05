@@ -354,7 +354,8 @@ tries. Across both evaluation sets one run each gave 28 of 30 and 29 of 32
 with the rule against 28 of 30 and 28 of 32 without it (03.10.2026): no harm,
 and a difference small enough to be the model's own spread. In both runs
 `topic:Private lives` withheld the answers to q15 and de11 on the way out,
-which the topic probe does not measure.
+which the topic probe did not measure then (see 05.10.2026 under *Guardrails
+and cost*).
 
 **2026-09-17 — The layers of an answer come from its citations, not from the
 model.** Asked to flag unconfirmed sources, the model ignored the rule or
@@ -379,7 +380,8 @@ would pay twice, the same reason a timeout is never repeated. The other
 throttling codes the handler knows are no Converse errors, so nothing
 documents them either way. The second call waits 2 seconds and starts only
 up to second 50 of the request: 2 of pause, 43 of call and 20 of excerpt
-guardrail after it end at 115. The 5 seconds to CloudFront's 120 are for
+guardrail after it end at 115. Since 05.10.2026 up to second 30: the topic
+check of the answer is a second guardrail call of 20. The 5 seconds to CloudFront's 120 are for
 what the handler's clock does not see — the cold start (Init Duration 0.11
 seconds, measured), the way from CloudFront to the function and the runtime
 around the handler; they cost nothing measurable, since the model call
@@ -398,8 +400,9 @@ checked, so anyone could cause them.
 
 **2026-09-17 — Every AWS call has a connect and a read timeout, and the sum
 of all of them stays under the function's timeout.** A hanging call ends as a
-502 with a reason, not as a bare Lambda timeout. Today 149 of 180 seconds,
-whatever the number of workspaces: the key is one call (2026-10-02).
+502 with a reason, not as a bare Lambda timeout. Today 169 of 180 seconds,
+whatever the number of workspaces: the key is one call (2026-10-02), and the
+guardrail two, the topic check of the answer and the excerpts (2026-10-05).
 
 **2026-09-17 — At most 5 requests at a time.** The cap on the bill matters
 more than keeping a demo reachable; a stranger with five parallel calls can
@@ -538,8 +541,58 @@ runs every change that freed one of the two refused another harmless
 question or let a refusal through; a narrower legal topic did both. The
 verdicts are not fixed either: the same topics gave one question two verdicts
 in two runs, so a question counts as right only if it is right in every run.
-The probe reads the question only; whether the topics withhold a right answer
-about a contract or a warranty on the way out is not measured.
+The probe read the question only then; since 04.10.2026 it reads answers
+too.
+
+**2026-10-05 — The answer is checked for the denied topics without its
+citations, by a guardrail of its own.** `Private lives` withheld q15 and de11
+in the evaluation of 03.10, on the answer. Rebuilt outside the
+function with the same passages, prompt and guardrail version, 25 tries
+each: the trace put every block in `outputAssessments`, never in
+`inputAssessment`, and it fell on the same wordings every time — "Warned
+[1][2][4]" withheld 4 of 4 times, "Warned [1][2][4][6]" let through 16 of 16;
+"Die Garantie gilt für 5 Jahre [1][4]." withheld, the same with "[4]" not.
+The 0 input and 0 output tokens in the evaluation said nothing about the
+side: Bedrock reported 0 for every answer it withheld in the rebuild, also
+when the trace held what the model wrote. The citations decide it: with
+`[1][4]` behind them `Private lives` withheld 11 of 69 harmless answers, with `[1][2][4]` 16, with `[1]`, `[2]`,
+`[1][2]` or none 0 (`ApplyGuardrail` as OUTPUT on the deployed version). Not
+fixed by four new definitions (each kept "Warned [1][2][4]" withheld and moved
+verdicts of other topics), by other spellings of the citations (`[1] [4]`,
+`[1, 4]` and the like withheld up to 48 of 69), nor by a topic of its own for
+answers (it withheld the same citations). Taking `Private lives` off the
+answer (built on 04.10., never deployed) freed q15 but let all 8 answers in
+the probe that tell something private pass; rejected: an answer that tells
+something private from the documents stays withheld. So the citations are
+taken out before the topics read the answer. The answer guardrail on the
+model call reads the four topics in the question only; the handler applies
+`andur-topic-guardrail`, which holds the same four topics and nothing else,
+as OUTPUT to the answer without its citations (`without_citations`), and
+withholds the answer if it blocks. The reader gets the answer with its
+citations, and masking, grounding and relevance read it on the model call as
+before. A guardrail of its own because the answer guardrail cannot read one
+text for its topics and another for grounding in the same call, and applying
+it once more would run the masking and grounding again and pay for them. A
+check that fails withholds the answer as a 502: it is never given unchecked.
+An answer withheld for a topic comes back without sources, like a refused
+question: an excerpt can tell what the answer was withheld for, and masking
+takes out names and addresses, not "is married and has two children".
+Measured with the probe (05.10.2026, three runs, answers without their
+citations): questions unchanged, 45/45 refused and 2/64 harmless refused;
+answers, 31 of 32 to withhold withheld — all 8 private ones, also with the
+address masked as the function would show it, and not the German medical
+`rmd4` ("Die Schnittwunde muss nicht genäht werden, ein Pflaster reicht."),
+which passed with every topic on both sides on 04.10. too; 0 of 73 harmless
+withheld (with citations, the answer side withheld q15 and de11, or de04a2 and
+hd01, depending on the setting); and 0 of the 276 answers with `[1][4]`,
+`[1][2][4]`, `[2][4]` or `[1][5]` behind them (32 on the deployed version 3).
+It costs one more `ApplyGuardrail` call per answered question: one topic
+unit, 0.00015 USD, and 0.44 seconds measured from outside AWS. de11 stays
+withheld for a second reason: the
+grounding check, which the user guide lists for English, French and Spanish
+only, scored its German answers to English passages 0.25 to 0.54 and withheld
+31 of 35 in the rebuilds; the four that passed read "Die Garantie gilt für 5
+Jahre [4]." (0.85).
 
 **2026-09-23 — The model may only be invoked with the deployed guardrail
 version.** An IAM condition on `bedrock:GuardrailIdentifier`: a call that

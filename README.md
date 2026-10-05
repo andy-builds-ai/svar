@@ -59,12 +59,13 @@ USD, 3425 ms in the function):
 
 Everything with a monthly base fee is left out: S3 Vectors behind a Bedrock
 knowledge base instead of a search cluster. A key is a budget, not a
-password, counted in one conditional DynamoDB write. Two guardrails, one on
-the answer and one that masks the excerpts of its sources. Every AWS call has
+password, counted in one conditional DynamoDB write. Three guardrails: one on
+the answer, one that checks the answer without its citations for the denied
+topics, and one that masks the excerpts of its sources. Every AWS call has
 a timeout, and their sum stays under the function's own; a model call AWS
 turns away is made once more while CloudFront still waits. Everything runs
 in Ireland, so the data stays in the EU. Why each of these, and every other
-decision, 71 in all, with dates: [docs/decisions.md](docs/decisions.md).
+decision, 75 in all, with dates: [docs/decisions.md](docs/decisions.md).
 
 ## Limits
 

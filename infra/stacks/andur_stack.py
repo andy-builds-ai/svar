@@ -155,6 +155,11 @@ BLOCKED_OUTPUT_MESSAGE = (
 
 EXCERPT_GUARDRAIL_NAME = "andur-excerpt-guardrail"
 
+#: The guardrail that checks the answer for `DENIED_TOPICS`, with its citations taken out: on
+#: the answer as the model writes it, `Private lives` withheld short harmless answers whose
+#: citations read [1][4] or [1][2][4], and without them none (04.10.2026, docs/decisions.md).
+TOPIC_GUARDRAIL_NAME = "andur-topic-guardrail"
+
 #: Required by Bedrock, never shown: masking replaces text, it does not block.
 EXCERPT_BLOCKED_MESSAGE = "This excerpt was withheld."
 
@@ -300,6 +305,7 @@ class AndurStack(Stack):
         )
         self.guardrail, self.guardrail_version = self._create_guardrail()
         self.excerpt_guardrail, self.excerpt_guardrail_version = self._create_excerpt_guardrail()
+        self.topic_guardrail, self.topic_guardrail_version = self._create_topic_guardrail()
         self.answer_role = self._create_answer_role(
             self.knowledge_base,
             self.budget_table,
@@ -307,6 +313,7 @@ class AndurStack(Stack):
             self.guardrail,
             self.guardrail_version,
             self.excerpt_guardrail,
+            self.topic_guardrail,
         )
         self.answer_function = self._create_answer_function(
             self.knowledge_base,
@@ -315,6 +322,7 @@ class AndurStack(Stack):
             self.answer_log_group,
             self.guardrail_version,
             self.excerpt_guardrail_version,
+            self.topic_guardrail_version,
         )
         self.function_url = self._create_function_url(self.answer_function)
 
@@ -655,8 +663,29 @@ class AndurStack(Stack):
             resource_name=GUARDRAIL_PROFILE_ID,
         )
 
+    def _topic_policy(self, on_answer: bool) -> bedrock.CfnGuardrail.TopicPolicyConfigProperty:
+        """`DENIED_TOPICS` in the Standard tier, read in the question and, if ``on_answer``,
+        in the answer too."""
+        return bedrock.CfnGuardrail.TopicPolicyConfigProperty(
+            topics_config=[
+                bedrock.CfnGuardrail.TopicConfigProperty(
+                    name=name,
+                    definition=definition,
+                    examples=examples,
+                    type="DENY",
+                    input_enabled=True,
+                    input_action="BLOCK",
+                    output_enabled=on_answer,
+                    output_action="BLOCK" if on_answer else "NONE",
+                )
+                for name, definition, examples in DENIED_TOPICS
+            ],
+            topics_tier_config=bedrock.CfnGuardrail.TopicsTierConfigProperty(tier_name=TOPICS_TIER),
+        )
+
     def _create_guardrail(self) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
-        """The guardrail on every answer, and the numbered version the function uses."""
+        """The guardrail on every answer, and the numbered version the function uses. Its
+        topics read the question only; the topic guardrail reads the answer."""
         return self._guardrail_with_version(
             "AnswerGuardrail",
             "answer",
@@ -668,24 +697,7 @@ class AndurStack(Stack):
                 ),
                 "blocked_input_messaging": BLOCKED_INPUT_MESSAGE,
                 "blocked_outputs_messaging": BLOCKED_OUTPUT_MESSAGE,
-                "topic_policy_config": bedrock.CfnGuardrail.TopicPolicyConfigProperty(
-                    topics_config=[
-                        bedrock.CfnGuardrail.TopicConfigProperty(
-                            name=name,
-                            definition=definition,
-                            examples=examples,
-                            type="DENY",
-                            input_enabled=True,
-                            input_action="BLOCK",
-                            output_enabled=True,
-                            output_action="BLOCK",
-                        )
-                        for name, definition, examples in DENIED_TOPICS
-                    ],
-                    topics_tier_config=bedrock.CfnGuardrail.TopicsTierConfigProperty(
-                        tier_name=TOPICS_TIER
-                    ),
-                ),
+                "topic_policy_config": self._topic_policy(on_answer=False),
                 "cross_region_config": bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
                     guardrail_profile_arn=self._guardrail_profile_arn(self.region)
                 ),
@@ -720,6 +732,25 @@ class AndurStack(Stack):
                 "blocked_input_messaging": EXCERPT_BLOCKED_MESSAGE,
                 "blocked_outputs_messaging": EXCERPT_BLOCKED_MESSAGE,
                 "sensitive_information_policy_config": masking_policy(),
+            },
+        )
+
+    def _create_topic_guardrail(self) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
+        """The guardrail that checks the answer, without its citations, for the denied topics,
+        and its numbered version. The function applies it as OUTPUT; its topics are set on
+        both sides, exactly like the guardrail `python -m scripts.topic_probe` measures."""
+        return self._guardrail_with_version(
+            "TopicGuardrail",
+            "topic",
+            {
+                "name": TOPIC_GUARDRAIL_NAME,
+                "description": "Andur: withholds answers that stray into a denied topic.",
+                "blocked_input_messaging": BLOCKED_INPUT_MESSAGE,
+                "blocked_outputs_messaging": BLOCKED_OUTPUT_MESSAGE,
+                "topic_policy_config": self._topic_policy(on_answer=True),
+                "cross_region_config": bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
+                    guardrail_profile_arn=self._guardrail_profile_arn(self.region)
+                ),
             },
         )
 
@@ -772,9 +803,10 @@ class AndurStack(Stack):
         guardrail: bedrock.CfnGuardrail,
         guardrail_version: bedrock.CfnGuardrailVersion,
         excerpt_guardrail: bedrock.CfnGuardrail,
+        topic_guardrail: bedrock.CfnGuardrail,
     ) -> iam.Role:
         """The execution role of the answer function: five inline policies, every statement
-        on named resources. Most name one; `ApplyAnswerGuardrail` names eight — both
+        on named resources. Most name one; `ApplyAnswerGuardrail` names nine — the three
         guardrails, and the EU guardrail profile in each of its six regions."""
         return iam.Role(
             self,
@@ -822,7 +854,8 @@ class AndurStack(Stack):
                             resources=[
                                 guardrail.attr_guardrail_arn,
                                 excerpt_guardrail.attr_guardrail_arn,
-                                # The answer guardrail runs through the EU profile.
+                                topic_guardrail.attr_guardrail_arn,
+                                # The answer and topic guardrails run through the EU profile.
                                 *(
                                     self._guardrail_profile_arn(region)
                                     for region in GUARDRAIL_PROFILE_REGIONS
@@ -843,6 +876,7 @@ class AndurStack(Stack):
         log_group: logs.LogGroup,
         guardrail_version: bedrock.CfnGuardrailVersion,
         excerpt_guardrail_version: bedrock.CfnGuardrailVersion,
+        topic_guardrail_version: bedrock.CfnGuardrailVersion,
     ) -> lambda_.Function:
         """The question handler from app/, configured entirely through its environment."""
         return lambda_.Function(
@@ -873,6 +907,8 @@ class AndurStack(Stack):
                 "GUARDRAIL_VERSION": guardrail_version.attr_version,
                 "EXCERPT_GUARDRAIL_ID": excerpt_guardrail_version.attr_guardrail_id,
                 "EXCERPT_GUARDRAIL_VERSION": excerpt_guardrail_version.attr_version,
+                "TOPIC_GUARDRAIL_ID": topic_guardrail_version.attr_guardrail_id,
+                "TOPIC_GUARDRAIL_VERSION": topic_guardrail_version.attr_version,
                 "PRICE_INPUT_PER_1K_TOKENS": self.answer_model.input_per_1k,
                 "PRICE_OUTPUT_PER_1K_TOKENS": self.answer_model.output_per_1k,
                 "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
@@ -1087,6 +1123,15 @@ class AndurStack(Stack):
             "ExcerptGuardrailRef",
             value=self.excerpt_guardrail_version.ref,
             description="The guardrail that masks the sources' excerpts, as <id>|<version>.",
+        )
+        CfnOutput(
+            self,
+            "TopicGuardrailRef",
+            value=self.topic_guardrail_version.ref,
+            description=(
+                "The guardrail that checks the answer, without its citations, for the denied "
+                "topics, as <id>|<version>."
+            ),
         )
         CfnOutput(
             self,

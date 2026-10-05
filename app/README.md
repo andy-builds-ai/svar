@@ -511,8 +511,9 @@ either. A client that does reads English.
 ## The guardrail
 
 Every model call goes through one Bedrock guardrail, on the same `converse`
-call (`guardrailConfig`), so there is no separate `ApplyGuardrail` call for
-the answer. Nemotron 3 Super lists Guardrails among its features on the
+call (`guardrailConfig`). One check of the answer runs apart from it: the
+denied topics, read in the answer without its citations by a guardrail of
+their own (*The topic check of the answer* below). Nemotron 3 Super lists Guardrails among its features on the
 `bedrock-runtime` endpoint (its model card, read 23.09.2026); with Nova Pro
 through its EU profile the same guardrail refused, masked and withheld on
 the live page on 28.09.2026.
@@ -522,24 +523,29 @@ version named in the call; a call without it is refused.
 Three policies, set in `infra/stacks/andur_stack.py`:
 
 - **Refused topics:** legal, tax and medical advice, and questions about
-  public figures or a person's private life. Checked on the question and on
-  the answer. A refused question never reaches the model — the answer is the
+  public figures or a person's private life. This guardrail checks all four
+  on the question only; the answer is checked for the same four apart from
+  it, without its citations (below). A refused question never reaches the
+  model — the answer is the
   guardrail's message, the status is still 200, and the question is spent.
   It comes back without sources: nothing was answered from them, and their
-  excerpts would put the documents' text next to a refusal. An answer the
-  grounding check withholds keeps its sources. The topics run in the
+  excerpts would put the documents' text next to a refusal. An answer
+  withheld for a topic comes back without sources too: an excerpt can tell
+  what the answer was withheld for. An answer the grounding check withholds
+  keeps its sources. The topics run in the
   Standard tier, which reads German; the Classic tier reads only English,
   French and Spanish and let 5 of 16 German refusals through (measured with
   `ApplyGuardrail` on 01.10.2026). The Standard tier needs a guardrail
   profile: the EU one, `eu.guardrail.v1:0`, which from eu-west-1 routes the
   checks to six EU regions and no others (`GUARDRAIL_PROFILE_REGIONS`). The
-  answer role may apply the guardrail through that profile in those six
-  regions only. The four topics are `Legal action`, `Tax returns`,
+  answer role may apply the guardrail, and the topic guardrail, through that
+  profile in those six regions only. The four topics are `Legal action`, `Tax returns`,
   `Medical advice` and `Private lives`, named and defined narrowly so that
   a customer's questions about the business's own prices, contracts,
   payment terms and warranty pass: under the names "Legal advice" and "Tax
   advice", 21 of 64 harmless questions were refused. Every change to them is
-  measured first with `python -m scripts.topic_probe` (`scripts/README.md`).
+  measured first with `python -m scripts.topic_probe`, on questions and on
+  answers (`scripts/README.md`).
 - **Masked personal details:** names, e-mail addresses, phone numbers and
   addresses in the answer are replaced by their type, such as `{EMAIL}`. The
   question is not checked, and neither are the passages: the model reads the
@@ -549,21 +555,32 @@ Three policies, set in `infra/stacks/andur_stack.py`:
   thresholds are 0.7, the value the user guide works its example with; AWS
   names no default. Every answered log line carries both scores, which is
   what a threshold is tuned by. The user guide lists English, French and
-  Spanish for this check and no tier that adds German; how it scores a
-  German answer is not measured yet.
+  Spanish for this check and no tier that adds German. Measured on de11
+  (04.10.2026): the German answer "Die Garantie gilt für fünf Jahre, wenn
+  sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet
+  [1][4]." to English passages that say "5 years" scored 0.25 and was
+  withheld; the short "Die Garantie gilt für 5 Jahre [4]." scored 0.85 and
+  passed.
 
 How the message tells them apart: the passages go in a `guardContent`
 block qualified `grounding_source` — the reference for the grounding check
 and nothing the other policies read. The question goes in a block qualified
 `query` and `guard_content` — the query for the relevance check, and text
-the topic filter reads. A query may be at most 1,000 characters, the same
+the topic filter reads. The trace's `guardrailCoverage` shows it: on the way
+in the guardrail read the question's characters only (107 of 8,682 for de11),
+on the way out the answer alone, without the question (04.10.2026). A query may be at most 1,000 characters, the same
 limit as a question; the grounding source at most 100,000, which is why a
 deployment may ask for at most 30 passages (`MAX_RESULTS`).
 
 "Private lives" is an approximation: the topic filter does
 not see the documents, so it cannot know who is in them. It refuses
 questions about public figures and private lives; an answer about somebody
-the passages do not mention is caught by the grounding check instead.
+the passages do not mention is caught by the grounding check instead. An
+answer that tells something private from the documents to a question it let
+pass is withheld by the topic check of the answer: all 8 such answers in
+`topic-answers.json`, in every one of three runs, also with the address
+masked as the reader would see it (05.10.2026). It is a classifier, not a
+promise. What a reader must never see does not belong in the documents.
 
 The guardrail's version is a number, never `DRAFT`. A changed setting
 changes a digest in the version's description, and since that description is
@@ -572,7 +589,9 @@ function — not at the same instant: CloudFormation updates the execution
 role, whose model permission names the version, before the function. For
 those seconds the running function still calls with the old version, the
 role refuses it, and a question ends in 502 after it was counted. See
-[docs/operating.md](../docs/operating.md#deploy).
+[docs/operating.md](../docs/operating.md#deploy). The topic guardrail's
+version is handled the same way, but nothing in the role names it: its
+`ApplyGuardrail` permission names the guardrail, whatever the version.
 
 What the trace says goes to the log, never what it matched: a masked phone
 number is logged as `pii:PHONE`, not as the number, and the trace's copy of
@@ -610,6 +629,47 @@ one with no model tokens and `grounding` and `relevance` in
 test traces in `tests/test_handler.py` are hand-built in Bedrock's shape. The
 condition does not look at the language of the question, only at the trace
 and the stop reason.
+
+### The topic check of the answer
+
+On the answer as the model writes it, the topics judged the citations along
+with the words: `Private lives` withheld 11 of 69 harmless answers with
+`[1][4]` behind them, 16 with `[1][2][4]`, up to 48 with `[1, 2, 4]`, and
+none without (04.10.2026, `docs/decisions.md`). So the answer guardrail reads
+the topics in the question only, and the handler checks the answer apart:
+`without_citations` takes out every number in square brackets and the spaces
+before it — `[1]`, `[1][4]`, `[1] [4]`, `[1, 4]`, `[1-3]` — and the rest goes
+to `andur-topic-guardrail` through `ApplyGuardrail` as `OUTPUT`. That
+guardrail holds the four topics, set like the answer guardrail's but read on
+both sides, in the same tier and EU profile, and nothing else. The reader
+gets the answer with its citations; masking, grounding and relevance read it
+on the model call as before.
+
+It reads the text the reader would get, less the citations: masked where the
+answer guardrail masked (`{NAME}`), without the handler's note. If it blocks,
+the answer is the handler's withheld sentence, the response keeps its
+sources as one the grounding check withholds, and `guardrail.policies` names
+the topic, `topic:Private lives`, ahead of what was masked. An intervention
+that names no topic still withholds the answer, as `topic:unknown`.
+
+No check runs where nothing is given: for a refused question, an answer the
+answer guardrail already withheld, and an answer of citations alone, which
+has no words to judge. The check's topic units count into `cost_usd`, one
+per answer under 1,000 characters, 0.00015 USD; it took 0.44 seconds per
+call measured from outside AWS (20 answers one after the other, 05.10.2026).
+
+It fails closed: a call that fails ends the request in 502 with the cause,
+and the answer is not given unchecked. The log line is `topic-guard-failed`
+with the error code. The question has been counted by then, as with every
+502 after the model call.
+
+Measured with `python -m scripts.topic_probe` on 05.10.2026, three runs:
+of 32 answers to withhold, 31 were withheld in every run — the German
+medical `rmd4` ("Die Schnittwunde muss nicht genäht werden, ein Pflaster
+reicht.") passed every time, as it did with every topic on both sides on
+04.10. —, of 73 harmless answers none, and of the 276 harmless answers with
+`[1][4]`, `[1][2][4]`, `[2][4]` or `[1][5]` behind them none (32 on the
+answer guardrail deployed until then).
 
 ### The excerpts
 
@@ -683,7 +743,7 @@ below describe the English one.
 | 405 | Any method other than `POST`. The response carries `Allow: POST`. |
 | 429 | With an `error` sentence: a key on a plan has used its questions for this month or for today (*Plans*); the sentence says which, and the quota comes back with the next day or month. Without one: more requests at once than the function may run (5). Lambda refuses those before any code runs, so the body is Lambda's own: `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
 | 500 | The function is set up wrong (an environment variable, unreadable keys), the workspace's key could not be read and the function holds none younger than 15 minutes (*Getting a key*), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.* (*Der Dienst ist nicht eingerichtet.*); the cause is in the log. |
-| 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer. The sentence names the cause. |
+| 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer; or the answer could not be checked for the denied topics, and is not given. The sentence names the cause. |
 | 503 | This instance has used its 10 reads in 10 seconds for workspaces it holds no key for (*Getting a key*). The response carries `Retry-After: 10`; nothing was read and nothing counted. |
 
 Two more can arrive that the function never saw. Neither body is
@@ -724,7 +784,9 @@ exception: a `crashed` line carries a traceback, and an exception message
 inside it can quote what the code choked on.
 
 What the excerpt guardrail masked is in `excerpt_policies` of the
-`answered` line, by type. `hits` counts the passages that reached the model,
+`answered` line, by type. A topic the topic check of the answer found is in
+`guardrail_policies`, and its unit in `guardrail_units`; a check that failed
+is a `topic-guard-failed` line with the error class and code. `hits` counts the passages that reached the model,
 also for a refused question that returns none of them.
 
 A Bedrock failure adds a `retrieve-failed` or `converse-failed` line with
@@ -780,6 +842,8 @@ from files.
 | `GUARDRAIL_VERSION` | Its deployed version, a number. `DRAFT` is refused. |
 | `EXCERPT_GUARDRAIL_ID` | The stack's excerpt guardrail. |
 | `EXCERPT_GUARDRAIL_VERSION` | Its deployed version, a number. |
+| `TOPIC_GUARDRAIL_ID` | The stack's topic guardrail, which checks the answer without its citations. |
+| `TOPIC_GUARDRAIL_VERSION` | Its deployed version, a number. |
 | `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00092`. |
 | `PRICE_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens, `0.00368`. |
 | `PRICE_TOPIC_PER_1K_UNITS` | USD per 1,000 text units of the topic filter, `0.15`. |
@@ -815,22 +879,23 @@ would pay for the input tokens again. The exception is a call AWS documents
 as not run — throttled over a quota, a service unable to handle it, a model
 not ready (`MODEL_REJECTION_CODES` in `handler.py`; an internal error is not
 among them, the model may have run). The handler makes it once more after 2
-seconds, but only up to second 50 of the request (`latest_model_retry_start()`
+seconds, but only up to second 30 of the request (`latest_model_retry_start()`
 in `aws.py`): the pause, a model call that runs into its 3 + 40 seconds and
-the excerpt guardrail's 20 after it end by second 115, and the 5 seconds to
+two guardrail calls of 20 after it, the topic check of the answer and the
+excerpts, end by second 115, and the 5 seconds to
 CloudFront's 120 are for the cold start and the way in, which the handler's
 clock does not see (`ORIGIN_MARGIN_SECONDS`). A retried count can charge one question
 twice, which is the safe direction: the count runs ahead, never behind. The
 budget call waits the shortest of all, since it sits in front of every
-question. The excerpt guardrail is a `bedrock-runtime` call with limits of
-its own (2 + 5 seconds): under the model's 40 it would push the worst case
-past the function's timeout. Added up, the worst case is 149 seconds —
+question. The two guardrail calls are `bedrock-runtime` calls with limits of
+their own (2 + 5 seconds): under the model's 40 they would push the worst case
+past the function's timeout. Added up, the worst case is 169 seconds —
 Parameter Store counts once, because the function reads only the requested
 workspace's key and reads it at most once per request, however many
 workspaces there are, and the budget table counts twice, because an item whose own window outlasts it is
 put right with a second write, and a key on a plan is counted with a second
-write after the demo's refused it. A request with the second model call ends
-by second 115, so it does not add to the 149. The
+write after the demo's refused it, and the guardrail twice. A request with
+the second model call ends by second 115, so it does not add to the 169. The
 function's timeout is 180, so a hanging Bedrock call still ends as a 502 with
 a reason, not as a bare timeout.
 

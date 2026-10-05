@@ -104,9 +104,12 @@ in [app/README.md](../app/README.md).
 Every answer passes a guardrail on the same model call: it refuses legal,
 tax and medical advice and questions about people's private lives, masks
 names, e-mail addresses, phone numbers and addresses in the answer, and
-withholds an answer the retrieved passages do not carry. The excerpts of
-the sources pass a second guardrail that masks the same details, and a
-refused question comes back without sources.
+withholds an answer the retrieved passages do not carry. The answer itself,
+without its citations, passes a second guardrail that withholds it if it
+strays into one of the same four topics: with the citations, short harmless
+answers were withheld for them alone. The excerpts of the sources pass a
+third guardrail that masks the same details. A refused question, and an
+answer withheld for one of the four topics, come back without sources.
 
 The masking is statistical, not a list of names, and it misses. In the
 browser acceptance on 23.09.2026 the answer to the phone question was

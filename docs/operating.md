@@ -32,7 +32,11 @@ CloudFormation updates the answer role to that version before it updates the
 function. For a few seconds the function still calls the model with the old
 version, the role refuses it, and the question ends in 502 although it was
 already counted against the key. Deploy such a change when no customer is
-asking.
+asking. A new guardrail the function calls, such as the topic guardrail of
+05.10.2026, adds nothing to that: CloudFormation creates it, and widens the
+role for it, before it updates the function, and the old code never calls it.
+After a deploy that touches the topics, `python -m scripts.topic_probe
+--deployed` measures the deployed versions.
 
 The deploy creates no workspace key, and no customer is named anywhere in the
 repository. A workspace exists only in AWS: its key under

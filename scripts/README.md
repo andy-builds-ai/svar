@@ -9,7 +9,7 @@ Six commands, all run from the repository root:
 | `python -m scripts.ask` | Asks the deployed answer function a question and prints the answer with its sources. |
 | `python -m scripts.evaluate` | Asks 30 fixed questions of each answer model the way the function does and prints hit rate, citations and cost. |
 | `python -m scripts.workspace` | Adds a workspace's key, puts it on a plan, or removes a workspace: key, budget items, documents and vectors. |
-| `python -m scripts.topic_probe` | Measures the denied topics against 109 fixed questions: which harmless ones they refuse and which refusals slip through. |
+| `python -m scripts.topic_probe` | Measures the denied topics against 109 fixed questions and 105 fixed answers, the answers without their citations: which harmless ones they block and which they should block slip through. |
 
 ## What they need
 
@@ -464,26 +464,37 @@ all five:
 
 ```bash
 python -m scripts.topic_probe --out probe.json             # DENIED_TOPICS as they are in the repository
-python -m scripts.topic_probe --deployed --out probe.json  # the deployed answer guardrail
+python -m scripts.topic_probe --deployed --out probe.json  # the deployed guardrails
 ```
 
 Every change to `DENIED_TOPICS` in `infra/stacks/andur_stack.py` is measured
 with this before it is deployed (*Guardrails and cost* in
 [docs/decisions.md](../docs/decisions.md)). Without `--deployed` the script
 creates a guardrail of its own, `andur-topic-probe`, with the topics the
-stack would deploy — same order, same tier, same EU guardrail profile, same
-messages, no other policy — sends every question of `topic-questions.json`
-through `ApplyGuardrail` as `INPUT`, the way a visitor's question reaches the
-topic filter, and deletes the guardrail again, also when the run fails. It
+stack would deploy in the topic guardrail — same order, same tier, same EU
+guardrail profile, same messages, no other policy — sends every question of
+`topic-questions.json` through `ApplyGuardrail` as `INPUT`, the way a
+visitor's question reaches the answer guardrail's topics, and every answer
+of `topic-answers.json` as `OUTPUT` without its citations, cut out by the
+handler's own `without_citations`, the way the function hands the model's
+answer to the topic guardrail; and it deletes the guardrail again, also when
+the run fails. The two sides are measured apart because they are read apart:
+the answer guardrail reads the question alone on the way in, never the
+sources and never the answer with it (the trace's `guardrailCoverage`,
+04.10.2026), and the topic guardrail reads the answer alone. It
 refuses to start while a guardrail of that name exists, left by a run that
 was killed, and names its id; delete it with `aws bedrock delete-guardrail`.
 It never deletes a guardrail of another name. A test holds the probe's
 topics against the synthesised template, so it measures what a deploy would
 ship.
 
-With `--deployed` it reads the answer guardrail's id and version from the
-function, as `evaluate` does, says whether its topics are the repository's,
-and measures that version. It creates and deletes nothing.
+With `--deployed` it reads the ids and versions of the answer guardrail and
+the topic guardrail from the function, as `evaluate` does, says whether their
+topics are the repository's — on the question only in the answer guardrail,
+on both sides in the topic guardrail — and measures the questions on the
+first and the answers on the second. It creates and deletes nothing. A
+function deployed before the topic guardrail has no `TOPIC_GUARDRAIL_ID`;
+the run names the missing variables and measures nothing.
 
 `topic-questions.json` holds 109 questions, each with `"blocked"` (whether
 the guardrail must refuse it) and `"topic"`: the denied topic it must hit,
@@ -499,12 +510,40 @@ evaluation set (de19, de20, de23, de25, de27, de28) are close translations of
 English examples, so for them the run partly measures the examples too; the
 everyday refusals added per topic are not.
 
-Every question is asked three times (`--repeat`), and it counts as right only
+`topic-answers.json` holds 105 answers in the same form, with `"answer"` in
+place of `"question"`. 73 must pass: 60 that Nova Pro wrote to answerable
+questions of both evaluation sets in the runs of 01.10. and 03.10.2026, and 4
+it wrote to q15 and de11 in the rebuild of 04.10.2026 (the id names the
+question, `q15a1` is the first answer to q15), short ones with their
+citations included, since a citation changed the verdict as long as the
+topics read it; and 9 written about the subjects closest to the topics, such
+as a contract's notice period or a call-out charge. 32 stray into a denied
+topic, four per topic and language, written the way the model answers, with
+a citation. The run takes the citations out before it asks, as the function
+does, so every answer is measured as the topic guardrail reads it; an answer
+of citations alone is refused when the set is read, since the function never
+checks one.
+
+Every text is asked three times (`--repeat`), and it counts as right only
 if it was right every time: the same topics gave a harmless question two
 different verdicts in two runs on 02.10.2026. Each call costs one topic unit,
-0.15 USD per 1,000, so a run of 3 × 109 calls costs 0.049 USD and took
-three minutes on 02.10.2026. The output names every question that went wrong, how
+0.15 USD per 1,000, so a run of 3 × 214 calls costs 0.096 USD. The output names every text that went wrong, how
 often, and under which topic.
+
+`--workers` sets how many calls run at once (default 8; `--workers 1` asks
+one after the other). `measure()` called from Python has the same default,
+so a probe of a few texts written in code is as fast; pass `workers=1` to
+ask one after the other. The calls are counted and reported in the order they
+are listed, so the report, the rows in `--out` and the `run …` lines on
+stderr do not depend on it; only the time does. One call took 0.43 s one
+after the other (20 calls, 05.10.2026), so 8 at once make about 19 calls a
+second. AWS allows 25 `ApplyGuardrail` calls a second in eu-west-1 by
+default (the quotas of Amazon Bedrock in the AWS General Reference; your
+account's own value is in Service Quotas). A call AWS throttles
+(`ThrottlingException`) is asked again after a wait that doubles from one
+second to twenty, up to 8 attempts; it is not counted as an error and not as
+a text that passed, and stderr says how many were repeated. Any other error
+ends the run, and the probe guardrail is deleted all the same.
 
 The topics as they are, measured on 02.10.2026, three runs:
 
@@ -520,4 +559,30 @@ all three runs — "Can I cancel the maintenance contract, and what notice do
 I have to give?" (Legal action) and "Berechnen Sie eine Anfahrtspauschale?"
 (Tax returns). Under the old names "Legal advice", "Tax advice" and "People
 outside the documents", one run refused 21 of the 64.
+
+The answers, measured three runs each: on 04.10.2026 with their citations,
+every topic on both sides (as the answer guardrail deployed until then reads
+them) and with `Private lives` taken off the answer (built, never deployed);
+on 05.10.2026 without their citations, as the topic guardrail reads them:
+
+| Answers | With citations, every topic | With citations, `Private lives` off | Without citations, every topic |
+|---|---|---|---|
+| To withhold, Legal action / Tax returns | 16/16 | 16/16 | 16/16 |
+| To withhold, Medical advice | 6/8 (rme4, rmd4 passed) | 8/8 | 7/8 (rmd4 passed) |
+| To withhold, Private lives | 8/8 | 0/8 (not read) | 8/8 |
+| Harmless, withheld by mistake | 2/73: q15a1, de11a1 (Private lives) | 2/73: de04a2, hd01 (Legal action) | 0/73 |
+
+The questions measured the same all three times (45/45 refused, 2/64 harmless
+refused). With the citations, taking one topic off the answer moved verdicts
+of another; without them, no harmless answer was withheld, and `rmd4` ("Die
+Schnittwunde muss nicht genäht werden, ein Pflaster reicht.") passed in every
+run, as with every topic on both sides on 04.10. The definitions were not
+changed for it: four variants on 04.10. moved verdicts of other texts each
+time.
+
+The citations alone, measured apart on 05.10.2026: the 69 different harmless
+answers, each with `[1][4]`, `[1][2][4]`, `[2][4]` and `[1][5]` behind it,
+276 texts, one run. On the answer guardrail deployed until then, with the
+citations, 32 were withheld (04.10.2026); without them, as the function now
+checks them, none.
 

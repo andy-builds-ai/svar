@@ -31,6 +31,9 @@ KEY_READS_PER_REQUEST = 1
 
 BUDGET_WRITES_PER_REQUEST = 2
 
+#: After the model call: the topic check of the answer, then the excerpts' masking.
+GUARDRAIL_CALLS_PER_REQUEST = 2
+
 #: How long CloudFront waits for an answer: `ORIGIN_RESPONSE_TIMEOUT_SECONDS` in the stack.
 ORIGIN_TIMEOUT_SECONDS = 120
 
@@ -55,16 +58,16 @@ def call_seconds(service: str) -> int:
 def latest_model_retry_start() -> int:
     """How far into a request the second model call may still start.
 
-    After it come the pause, the model call and the excerpt guardrail; all of
-    that has to end before CloudFront gives up, less a margin for what the
-    handler cannot see.
+    After it come the pause, the model call and two guardrail calls (the topic
+    check of the answer, the excerpts); all of that has to end before CloudFront
+    gives up, less a margin for what the handler cannot see.
     """
     return (
         ORIGIN_TIMEOUT_SECONDS
         - ORIGIN_MARGIN_SECONDS
         - MODEL_RETRY_PAUSE_SECONDS
         - call_seconds("bedrock-runtime")
-        - call_seconds("guardrail")
+        - GUARDRAIL_CALLS_PER_REQUEST * call_seconds("guardrail")
     )
 
 
@@ -74,13 +77,17 @@ def worst_case_seconds() -> int:
     A request with a second model call ends by `ORIGIN_TIMEOUT_SECONDS`, so it
     counts only if that were the longer of the two.
     """
-    calls = {"ssm": KEY_READS_PER_REQUEST, "dynamodb": BUDGET_WRITES_PER_REQUEST}
+    calls = {
+        "ssm": KEY_READS_PER_REQUEST,
+        "dynamodb": BUDGET_WRITES_PER_REQUEST,
+        "guardrail": GUARDRAIL_CALLS_PER_REQUEST,
+    }
     every_timeout = sum(calls.get(service, 1) * call_seconds(service) for service in CLIENT_LIMITS)
     with_model_retry = (
         latest_model_retry_start()
         + MODEL_RETRY_PAUSE_SECONDS
         + call_seconds("bedrock-runtime")
-        + call_seconds("guardrail")
+        + GUARDRAIL_CALLS_PER_REQUEST * call_seconds("guardrail")
     )
     return max(every_timeout, with_model_retry)
 
