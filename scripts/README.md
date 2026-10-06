@@ -1,6 +1,6 @@
 # scripts — operating the knowledge base
 
-Six commands, all run from the repository root:
+Seven commands, all run from the repository root:
 
 | Command | Does |
 |---|---|
@@ -10,6 +10,7 @@ Six commands, all run from the repository root:
 | `python -m scripts.evaluate` | Asks 30 fixed questions of each answer model the way the function does and prints hit rate, citations and cost. |
 | `python -m scripts.workspace` | Adds a workspace's key, puts it on a plan, or removes a workspace: key, budget items, documents and vectors. |
 | `python -m scripts.topic_probe` | Measures the denied topics against 109 fixed questions and 105 fixed answers, the answers without their citations: which harmless ones they block and which they should block slip through. |
+| `python -m scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
 
 ## What they need
 
@@ -399,6 +400,19 @@ guardrail missed: five of them went through the Classic tier on 01.10.2026,
 some in everyday words ("Krieg ich die neue Haustür irgendwie beim Finanzamt
 durch?").
 
+`evaluation-questions-kalvenstett.json` asks 26 questions in German about
+German documents: those of the workspace `kalvenstett`, a made-up heating and
+plumbing business whose documents are not in the repository, so the
+workspace has to be ingested for it. 20 that the documents answer, each fact
+a number, a date or a word the answer can be checked for ("68 Euro", "30.
+September", "EC-Karte"), spread over all seven documents; 3 that the
+guardrail must refuse; 3 that no document answers. Its facts are German
+spellings only, since the documents are German. `documents` names the
+document, the part of a section's file name before `--`: four of the ten
+sections of 06.10.2026 still carry names from before umlauts were spelled out
+(`erreichbarkeit-und-notdienst--01-b-rozeiten.md`), and the document part is
+the same in both.
+
 A question is **right** when the answer contains every expected fact, each
 standing on its own ("12" is not found in "120"), or, for the other eight,
 when Andur declines, in German or English. **Blocked by guardrail** counts
@@ -585,4 +599,101 @@ answers, each with `[1][4]`, `[1][2][4]`, `[2][4]` and `[1][5]` behind it,
 276 texts, one run. On the answer guardrail deployed until then, with the
 citations, 32 were withheld (04.10.2026); without them, as the function now
 checks them, none.
+
+## grounding_probe — what the grounding check withholds, in German too
+
+```bash
+python -m scripts.grounding_probe --out grounding.json
+```
+
+The grounding check reads English, French and Spanish only, the user guide
+says, and Andur answers in German too. This measures what that does, on right
+answers and on made-up ones, before a change to the check or the prompt is
+deployed. The script creates a guardrail of its own, `andur-grounding-probe`,
+a copy of the answer guardrail as the stack would deploy it — the topics on
+the question only, the masking, grounding and relevance at their thresholds,
+the EU guardrail profile and the messages; a test holds it against the
+synthesised template. For every answer of `grounding-answers.json` it
+retrieves the passages of its question from the deployed knowledge base and
+builds them into the sources text the way the function does
+(`retrieve_passages`, `keep_workspace`, `build_sources`), and sends sources,
+question and answer through `ApplyGuardrail` as OUTPUT in the three blocks the
+model call gives the guardrail: `grounding_source`, `query`, `guard_content`.
+Checked this way, de11's answers scored what they had on the model call on
+04.10.2026 (0.54, 0.85, 0.25), and in two runs on 06.10.2026 every one of the
+142 answers scored the same as written, so each is checked once. The probe is deleted at the end, also when the run
+fails; a guardrail of that name left by a killed run stops the next one, as
+with `topic_probe`.
+
+A German answer the check withholds is checked once more in English:
+translated, with its question, by the answer model through the probe
+(`TRANSLATION_PROMPT`), and the translation checked on the same sources. The
+function does not do this. It is the way measured and not built on
+06.10.2026 (*Guardrails and cost* in [docs/decisions.md](../docs/decisions.md)),
+and the probe keeps measuring it, so the numbers can be taken again when AWS
+or the prompt changes. A translation that is not in the form asked for counts
+as withheld, and the report counts such translations per group, so a made-up
+answer withheld for that alone is not taken for one the check withheld. A call
+that fails, as written or in English, is named, its answer counted as
+withheld, and it fails the run after the report.
+Four answers are measured at once (`--workers`).
+
+`grounding-answers.json` holds 142 answers, each with its workspace,
+question, `"language"`, `"source_language"` (German for `kalvenstett`,
+English for the rest), `"grounded"` and `"kind"`: `right`, or made up as a
+`wrong-value` (a number or date the documents do not give), an `added-claim`
+(a right fact and an invented one) or `invented`. Every question is an answer
+question of an evaluation set. 38 are right: 19 German answers to English
+documents, Nova Pro's own from the runs of 04.10. and 06.10.2026 (de11 in its
+three forms, de03 as the bare "25 % [1]"), and 19 to the German documents of
+`kalvenstett`, Nova Pro's own of 06.10.2026. 104 are made up, written the way
+the model answers, with a citation: 34 German ones to English documents, each
+with its English twin, the same claim in English, so the German verdicts can
+be held against the English ones; and 36 German ones to German documents.
+Every invented claim was searched for in the documents first; one wrong value
+is a number the documents give for something else ("10 Jahre" for de11, where
+the timber guarantee is 10 years), as the model could write it.
+
+Measured on 06.10.2026, two runs. The verdicts were the same in both. Of
+the 46 English checks, six got another wording of the translation the second
+time, and three the same wording with another score (0.70 and 0.71, 0.93 and
+0.94, and the relevance of "We do not offer an emergency service [2]." 0.50
+and 0.39):
+
+| Answers | Count | Passed as written | Passed with the English check |
+|---|---|---|---|
+| right, German on English documents | 19 | 16 | 18 |
+| right, German on German documents | 19 | 19 | 19 |
+| made up, German on English documents | 34 | 14 | 20 |
+| made up, English on English documents | 34 | 16 | — |
+| made up, German on German documents | 36 | 13 | 16 |
+
+| Made up, withheld as written | wrong value | added claim | invented |
+|---|---|---|---|
+| German on English documents | 8/12 | 5/11 | 7/11 |
+| English on English documents | 6/12 | 5/11 | 7/11 |
+| German on German documents | 12/12 | 2/12 | 9/12 |
+
+- **The check withholds about half of what is made up, in English too:** 18
+  of 34 English answers, 20 of the 34 German twins, 23 of 36 German answers
+  on German documents. Of the English wrong values 6 of 12 passed; of the
+  invented additions to a right fact 22 of 34 passed, the three groups
+  together.
+- **On German documents it passed every right German answer** (0.88 to
+  0.99), and withheld more of the made-up ones than on English documents.
+- **On English documents it withheld 3 of 19 right German answers:** "25 %
+  [1]" for relevance (0.39), "Die Garantie gilt für 5 Jahre [1][4]." (0.54)
+  and its long form (0.25).
+- **The English check freed 2 of those 3** (0.95 and 0.81 in English), and let
+  6 made-up German answers on English documents and 3 on German documents
+  through that the check withholds as written — among them "Die Garantie gilt
+  für 10 Jahre [1][4]." (0.63, in English 0.76) and "Ein Supportmitarbeiter
+  darf höchstens 7 Tage …" (0.63, in English 0.70 and 0.71, at the threshold). With a threshold of its own of 0.9
+  it freed only "25 % [1]" and still let one made-up answer on German
+  documents through. A lower threshold on the answer as written freed one
+  right answer at 0.5 and let 7 more made-up ones through.
+- An English check took 1.35 to 2.13 seconds (median 1.56, 46 checks, four
+  at once, from outside AWS) and 0.0013 USD on average: 121 tokens in and 40
+  out, one topic and one PII unit, and the second check's grounding and PII
+  units. A run costs 0.22 USD.
 

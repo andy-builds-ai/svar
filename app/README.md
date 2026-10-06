@@ -563,7 +563,15 @@ Three policies, set in `infra/stacks/andur_stack.py`:
   sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet
   [1][4]." to English passages that say "5 years" scored 0.25 and was
   withheld; the short "Die Garantie gilt für 5 Jahre [4]." scored 0.85 and
-  passed.
+  passed. On 142 fixed answers (06.10.2026, `python -m
+  scripts.grounding_probe`): of right German answers it withheld 3 of 19 on
+  English documents and none of 19 on German ones; of made-up answers it
+  withheld about half, 18 of 34 in English, 20 of 34 in German on English
+  documents, 23 of 36 on German documents. It is a filter, not a proof that
+  an answer is right: a wrong number in a sentence the passages otherwise
+  carry passed 6 of 12 times in English. Checking a withheld German answer
+  once more in English was measured and not built, since it let made-up
+  answers through that the check withholds (docs/decisions.md).
 
 How the message tells them apart: the passages go in a `guardContent`
 block qualified `grounding_source` — the reference for the grounding check

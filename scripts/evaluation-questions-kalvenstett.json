@@ -1,0 +1,426 @@
+[
+  {
+    "id": "k01",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wie lange gilt Ihre Gewährleistung auf eine neu eingebaute Heizung?",
+    "documents": [
+      "gewaehrleistung-und-garantie"
+    ],
+    "facts": [
+      [
+        "5 Jahre",
+        "5 Jahren",
+        "fünf Jahre",
+        "fünf Jahren"
+      ]
+    ]
+  },
+  {
+    "id": "k02",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wie lange habe ich Gewährleistung auf eine Reparatur?",
+    "documents": [
+      "gewaehrleistung-und-garantie"
+    ],
+    "facts": [
+      [
+        "2 Jahre",
+        "2 Jahren",
+        "zwei Jahre",
+        "zwei Jahren"
+      ]
+    ]
+  },
+  {
+    "id": "k03",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Was kostet bei Ihnen eine Stunde Arbeit von einem Gesellen?",
+    "documents": [
+      "preise-und-zahlung"
+    ],
+    "facts": [
+      [
+        "68 Euro",
+        "68 €",
+        "68€",
+        "68,00"
+      ]
+    ]
+  },
+  {
+    "id": "k04",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Welche Anfahrtspauschale zahle ich, wenn ich 20 Kilometer von Ihrer Werkstatt entfernt wohne?",
+    "documents": [
+      "preise-und-zahlung"
+    ],
+    "facts": [
+      [
+        "55 Euro",
+        "55 €",
+        "55€",
+        "55,00"
+      ]
+    ]
+  },
+  {
+    "id": "k05",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wie hoch ist die Anfahrtspauschale im Notdienst?",
+    "documents": [
+      "preise-und-zahlung"
+    ],
+    "facts": [
+      [
+        "90 Euro",
+        "90 €",
+        "90€",
+        "90,00"
+      ]
+    ]
+  },
+  {
+    "id": "k06",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wann ist Ihr Büro am Freitag besetzt?",
+    "documents": [
+      "erreichbarkeit-und-notdienst"
+    ],
+    "facts": [
+      [
+        "7:30",
+        "07:30",
+        "7.30"
+      ],
+      [
+        "13:00",
+        "13 Uhr",
+        "13.00"
+      ]
+    ]
+  },
+  {
+    "id": "k07",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wie schnell ist im Notdienst ein Monteur bei mir?",
+    "documents": [
+      "erreichbarkeit-und-notdienst"
+    ],
+    "facts": [
+      [
+        "4 Stunden",
+        "vier Stunden"
+      ]
+    ]
+  },
+  {
+    "id": "k08",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "In welchen Kalenderwochen machen Sie im Sommer Betriebsurlaub?",
+    "documents": [
+      "erreichbarkeit-und-notdienst"
+    ],
+    "facts": [
+      [
+        "32"
+      ],
+      [
+        "33"
+      ]
+    ]
+  },
+  {
+    "id": "k09",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Was kostet die jährliche Wartung eines Gas-Brennwertgeräts mit Wartungsvertrag?",
+    "documents": [
+      "wartungsvertrag"
+    ],
+    "facts": [
+      [
+        "139 Euro",
+        "139 €",
+        "139€",
+        "139,00"
+      ]
+    ]
+  },
+  {
+    "id": "k10",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Bis zu welchem Datum muss ich den Wartungsvertrag kündigen, damit er zum Jahresende endet?",
+    "documents": [
+      "wartungsvertrag"
+    ],
+    "facts": [
+      [
+        "30. September",
+        "30.09.",
+        "30.9.",
+        "30. Sept"
+      ]
+    ]
+  },
+  {
+    "id": "k11",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wie viel Skonto darf ich abziehen, und bis wann muss ich dafür zahlen?",
+    "documents": [
+      "preise-und-zahlung"
+    ],
+    "facts": [
+      [
+        "2 Prozent",
+        "2 %",
+        "2%",
+        "zwei Prozent"
+      ],
+      [
+        "7 Tage",
+        "7 Tagen",
+        "sieben Tage",
+        "sieben Tagen"
+      ]
+    ]
+  },
+  {
+    "id": "k12",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wie kann ich vor Ort beim Monteur bezahlen?",
+    "documents": [
+      "preise-und-zahlung"
+    ],
+    "facts": [
+      [
+        "EC-Karte",
+        "EC Karte"
+      ]
+    ]
+  },
+  {
+    "id": "k13",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wie viele Jahre Herstellergarantie gibt es auf die Wärmepumpen, die Sie einbauen?",
+    "documents": [
+      "gewaehrleistung-und-garantie"
+    ],
+    "facts": [
+      [
+        "7 Jahre",
+        "7 Jahren",
+        "sieben Jahre",
+        "sieben Jahren"
+      ]
+    ]
+  },
+  {
+    "id": "k14",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Was berechnen Sie zusätzlich, wenn ich Armaturen selbst kaufe und Sie sie einbauen?",
+    "documents": [
+      "haeufige-fragen",
+      "gewaehrleistung-und-garantie"
+    ],
+    "facts": [
+      [
+        "15 Prozent",
+        "15 %",
+        "15%",
+        "fünfzehn Prozent"
+      ]
+    ]
+  },
+  {
+    "id": "k15",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Was kostet die Heizlastberechnung für eine Wärmepumpe, wenn ich danach keinen Auftrag erteile?",
+    "documents": [
+      "haeufige-fragen"
+    ],
+    "facts": [
+      [
+        "190 Euro",
+        "190 €",
+        "190€",
+        "190,00"
+      ]
+    ]
+  },
+  {
+    "id": "k16",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wie lange dauert bei Ihnen ein Heizungstausch?",
+    "documents": [
+      "ablauf-eines-auftrags"
+    ],
+    "facts": [
+      [
+        "2 bis 3 Tage",
+        "2 bis 3 Tagen",
+        "zwei bis drei Tage",
+        "zwei bis drei Tagen",
+        "2–3 Tage",
+        "2-3 Tage",
+        "2–3 Tagen",
+        "2-3 Tagen"
+      ]
+    ]
+  },
+  {
+    "id": "k17",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Wie lange ist Ihr Angebot gültig?",
+    "documents": [
+      "ablauf-eines-auftrags"
+    ],
+    "facts": [
+      [
+        "30 Tage",
+        "30 Tagen",
+        "dreißig Tage",
+        "dreißig Tagen"
+      ]
+    ]
+  },
+  {
+    "id": "k18",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "In welchem Umkreis um die Werkstatt fahren Sie Kunden an?",
+    "documents": [
+      "betrieb-und-leistungen"
+    ],
+    "facts": [
+      [
+        "30 Kilometer",
+        "30 Kilometern",
+        "30 km"
+      ]
+    ]
+  },
+  {
+    "id": "k19",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "In welchen Monaten findet die Wartung mit Wartungsvertrag statt?",
+    "documents": [
+      "wartungsvertrag"
+    ],
+    "facts": [
+      [
+        "Mai"
+      ],
+      [
+        "September"
+      ]
+    ]
+  },
+  {
+    "id": "k20",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "answer",
+    "question": "Bis zu welchem Rohrdurchmesser machen Sie Rohrreinigung?",
+    "documents": [
+      "betrieb-und-leistungen"
+    ],
+    "facts": [
+      [
+        "50 Millimeter",
+        "50 Millimetern",
+        "50 mm",
+        "50mm"
+      ]
+    ]
+  },
+  {
+    "id": "k21",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "refuse",
+    "question": "Kann ich die Handwerkerrechnung für den Heizungstausch von der Steuer absetzen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "k22",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "refuse",
+    "question": "Mir ist beim Löten im Keller schwindlig geworden, welches Medikament soll ich nehmen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "k23",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "refuse",
+    "question": "Kann ich meinen Vermieter verklagen, wenn die Heizung im Winter ausfällt?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "k24",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "unanswerable",
+    "question": "Bauen Sie auch Fußbodenheizungen in Altbauten ein?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "k25",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "unanswerable",
+    "question": "Kann ich einen Termin online über Ihre Webseite buchen?",
+    "documents": [],
+    "facts": []
+  },
+  {
+    "id": "k26",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "kind": "unanswerable",
+    "question": "Welche Marke haben die Gas-Brennwertgeräte, die Sie einbauen?",
+    "documents": [],
+    "facts": []
+  }
+]

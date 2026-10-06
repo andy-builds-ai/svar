@@ -459,7 +459,7 @@ def test_a_failed_delete_does_not_hide_why_the_run_failed(
     def delete_fails(**kwargs: Any) -> None:
         raise AwsProblem("Deleting the guardrail andur-topic-probe failed: network")
 
-    monkeypatch.setattr(topic_probe, "delete_probe", lambda b, g: delete_fails())
+    monkeypatch.setattr(topic_probe, "delete_probe", lambda b, g, n: delete_fails())
     assert run_main(monkeypatch, tmp_path, bedrock, runtime, ready=never_ready) == 2
     err = capsys.readouterr().err
     assert "failed to become ready" in err
@@ -474,7 +474,7 @@ def test_a_failed_delete_after_a_finished_run_keeps_the_report_and_fails_the_run
     def delete_fails(**kwargs: Any) -> None:
         raise AwsProblem("Deleting the guardrail andur-topic-probe failed: network")
 
-    monkeypatch.setattr(topic_probe, "delete_probe", lambda b, g: delete_fails())
+    monkeypatch.setattr(topic_probe, "delete_probe", lambda b, g, n: delete_fails())
     out = tmp_path / "out.json"
     code = run_main(monkeypatch, tmp_path, FakeBedrock(), FakeRuntime(set()), "--out", str(out))
     assert code == 2

@@ -43,6 +43,10 @@ cdk diff     # compares it with the deployed stack; needs an AWS login, changes 
   operator's word. `python -m scripts.topic_probe` creates and deletes a
   guardrail named `andur-topic-probe` and costs about 0.05 USD a run; run it
   only when asked, and after every change to `DENIED_TOPICS` ask for it.
+  `python -m scripts.grounding_probe` creates and deletes a guardrail named
+  `andur-grounding-probe` and cost 0.22 USD a run on 06.10.2026; run it only
+  when asked, and after every change to the grounding check or the prompt ask
+  for it.
 - **Region is `eu-west-1`,** pinned in `infra/app.py`. Use EU inference
   profiles, never a global one.
 - **Model IDs and prices live only in `infra/answer_models.py`.** Add a model

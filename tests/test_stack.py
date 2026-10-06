@@ -80,7 +80,7 @@ from infra.stacks.andur_stack import (
     AndurStack,
     replacement_safe_name,
 )
-from scripts import ask, topic_probe
+from scripts import ask, grounding_probe, topic_probe
 
 #: The file `cdk deploy` reads its context from. The tests read the same file,
 #: so that what is synthesised here is what would be deployed.
@@ -1285,6 +1285,40 @@ def test_the_topic_probe_builds_the_topics_the_stack_deploys(
     assert probe["blockedInputMessaging"] == properties["BlockedInputMessaging"]
     assert probe["blockedOutputsMessaging"] == properties["BlockedOutputsMessaging"]
     assert probe["name"] == "andur-topic-probe" != properties["Name"]
+
+
+def pascal_case(value: Any) -> Any:
+    """Bedrock's camelCase field names as CloudFormation spells them, all the way down."""
+    if isinstance(value, Mapping):
+        return {key[0].upper() + key[1:]: pascal_case(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [pascal_case(item) for item in value]
+    return value
+
+
+def test_the_grounding_probe_copies_the_answer_guardrail(
+    stack: AndurStack, template: Template
+) -> None:
+    """What the probe checks German answers with is what the function checks them with: the
+    answer guardrail's topics on the same sides, its masking, its grounding thresholds, its
+    profile and messages. CloudFormation calls the tier `TopicsTierConfig`."""
+    properties = resource_of(stack, template, stack.guardrail)["Properties"]
+    probe = grounding_probe.probe_request()
+    topics = probe["topicPolicyConfig"]
+    assert pascal_case(topics["topicsConfig"]) == properties["TopicPolicyConfig"]["TopicsConfig"]
+    assert pascal_case(topics["tierConfig"]) == properties["TopicPolicyConfig"]["TopicsTierConfig"]
+    for name in ("sensitiveInformationPolicyConfig", "contextualGroundingPolicyConfig"):
+        assert pascal_case(probe[name]) == properties[name[0].upper() + name[1:]], name
+    assert probe["crossRegionConfig"] == {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}
+    assert properties["CrossRegionConfig"] == {
+        "GuardrailProfileArn": profile_arn({"Ref": "AWS::Region"})
+    }
+    assert probe["blockedInputMessaging"] == properties["BlockedInputMessaging"]
+    assert probe["blockedOutputsMessaging"] == properties["BlockedOutputsMessaging"]
+    assert probe["name"] == "andur-grounding-probe" != properties["Name"]
+    assert set(probe) - {"name", "description"} == {
+        key[0].lower() + key[1:] for key in properties if key not in {"Name", "Description"}
+    }
 
 
 def test_topic_definitions_follow_the_user_guides_best_practices() -> None:

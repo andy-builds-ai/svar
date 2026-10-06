@@ -1,0 +1,1422 @@
+[
+  {
+    "id": "de01r1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange ist der Link von der Seite „Passwort vergessen“ gültig?",
+    "answer": "60 Minuten [1][3]",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de01r2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange ist der Link von der Seite „Passwort vergessen“ gültig?",
+    "answer": "Der Link von der Seite „Passwort vergessen“ ist 60 Minuten gültig [1][3].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de02r1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie groß darf eine einzelne Datei sein, die ich in Haldrum hochlade?",
+    "answer": "Die größte einzelne Datei, die hochgeladen werden kann, ist 250 MB [1][3].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de03r1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Welche Gutschrift bekommt ein Business-Kunde, wenn die monatliche Verfügbarkeit unter 99,0 % fällt?",
+    "answer": "25 % [1]",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de03r2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Welche Gutschrift bekommt ein Business-Kunde, wenn die monatliche Verfügbarkeit unter 99,0 % fällt?",
+    "answer": "Ein Business-Kunde erhält eine Gutschrift von 25 % auf die monatliche Abonnementgebühr, wenn die monatliche Verfügbarkeit unter 99,0 % fällt [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de04r1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie viele Tage darf eine Haldrum-Zahlung überfällig sein, bevor unsere Organisation nur noch lesbar ist?",
+    "answer": "45 Tage [1]",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de04r2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie viele Tage darf eine Haldrum-Zahlung überfällig sein, bevor unsere Organisation nur noch lesbar ist?",
+    "answer": "Die Organisation wird nach 45 Tagen Überfälligkeit der Zahlung schreibgeschützt [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de05r1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange darf ein Quillmoor-Supportmitarbeiter höchstens auf unsere Organisation zugreifen, wenn wir es ihm erlauben?",
+    "answer": "72 Stunden [1][6]",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de06r1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange bewahrt Quillmoor die täglichen Vollsicherungen auf?",
+    "answer": "35 Tage [1]",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de06r2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange bewahrt Quillmoor die täglichen Vollsicherungen auf?",
+    "answer": "Die täglichen Vollsicherungen werden für 35 Tage aufbewahrt [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de07r1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wann ist der Code-Freeze für Haldrum 4.4 geplant?",
+    "answer": "Der Code-Freeze für Haldrum 4.4 ist für den 27. Oktober 2026 geplant. [3]",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de08r1",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wann hat die Werkstatt werktags geöffnet?",
+    "answer": "Von 07:30 bis 16:30 Uhr [2].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de08r2",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wann hat die Werkstatt werktags geöffnet?",
+    "answer": "Die Werkstatt hat werktags von 07:30 bis 16:30 geöffnet [2].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de10r1",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Was berechnen Sie pro Tischler für einen ganzen Tag Zusatzarbeit, die nicht im Angebot stand?",
+    "answer": "380 £ pro Tischler [1]",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de10r2",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Was berechnen Sie pro Tischler für einen ganzen Tag Zusatzarbeit, die nicht im Angebot stand?",
+    "answer": "Der Tagessatz für einen Tischler beträgt £380 [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de11r1",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie lange gilt die Garantie, wenn sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet?",
+    "answer": "Die Garantie gilt für 5 Jahre [1][4].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de11r2",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie lange gilt die Garantie, wenn sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet?",
+    "answer": "Die Garantie gilt für 5 Jahre [4].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de11r3",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie lange gilt die Garantie, wenn sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet?",
+    "answer": "Die Garantie gilt für 5 Jahre, wenn sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet [1][4].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de12r1",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie oft sollte ich die Außenseite meiner Eichen-Haustür nachölen?",
+    "answer": "Einmal im Jahr, idealerweise im späten Frühjahr [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "de01x1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange ist der Link von der Seite „Passwort vergessen“ gültig?",
+    "answer": "Der Link von der Seite „Passwort vergessen“ ist 30 Minuten gültig [1][3].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q01x1",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "How long does the link from the 'Forgot password' page stay usable?",
+    "answer": "The link from the 'Forgot password' page stays usable for 30 minutes [1][3].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de01x2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange ist der Link von der Seite „Passwort vergessen“ gültig?",
+    "answer": "Der Link ist 60 Minuten gültig und kann im Profil einmal um weitere 60 Minuten verlängert werden [1][3].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q01x2",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "How long does the link from the 'Forgot password' page stay usable?",
+    "answer": "The link stays usable for 60 minutes and can be extended once by another 60 minutes in the profile [1][3].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de01x3",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange ist der Link von der Seite „Passwort vergessen“ gültig?",
+    "answer": "Der Link bleibt gültig, bis Sie das neue Passwort mit einem SMS-Code bestätigen [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q01x3",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "How long does the link from the 'Forgot password' page stay usable?",
+    "answer": "The link stays usable until you confirm the new password with a code sent by text message [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de02x1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie groß darf eine einzelne Datei sein, die ich in Haldrum hochlade?",
+    "answer": "Die größte einzelne Datei, die hochgeladen werden kann, ist 2 GB [1][3].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q02x1",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "What is the largest single file I can upload to Haldrum?",
+    "answer": "The largest single file that can be uploaded is 2 GB [1][3].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de02x2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie groß darf eine einzelne Datei sein, die ich in Haldrum hochlade?",
+    "answer": "Eine einzelne Datei darf bis 250 MB groß sein, im Business-Tarif bis 5 GB [1][3].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q02x2",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "What is the largest single file I can upload to Haldrum?",
+    "answer": "A single file can be up to 250 MB, and up to 5 GB on the Business plan [1][3].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de02x3",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie groß darf eine einzelne Datei sein, die ich in Haldrum hochlade?",
+    "answer": "Haldrum begrenzt nicht die Größe einzelner Dateien, sondern nur die Zahl der Dateien je Projekt [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q02x3",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "What is the largest single file I can upload to Haldrum?",
+    "answer": "Haldrum does not limit the size of single files, only the number of files per project [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de03x1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Welche Gutschrift bekommt ein Business-Kunde, wenn die monatliche Verfügbarkeit unter 99,0 % fällt?",
+    "answer": "Ein Business-Kunde erhält eine Gutschrift von 50 % auf die monatliche Abonnementgebühr [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q03x1",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "What service credit does a Business customer get if monthly uptime drops below 99.0 %?",
+    "answer": "A Business customer gets a 50 % service credit on the monthly fee [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de03x2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Welche Gutschrift bekommt ein Business-Kunde, wenn die monatliche Verfügbarkeit unter 99,0 % fällt?",
+    "answer": "Ein Business-Kunde erhält eine Gutschrift von 25 %, die ohne Antrag automatisch auf der nächsten Rechnung steht [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q03x2",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "What service credit does a Business customer get if monthly uptime drops below 99.0 %?",
+    "answer": "A Business customer gets a 25 % credit, which appears on the next invoice automatically, without a claim [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de03x3",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Welche Gutschrift bekommt ein Business-Kunde, wenn die monatliche Verfügbarkeit unter 99,0 % fällt?",
+    "answer": "Business-Kunden erhalten statt einer Gutschrift einen kostenlosen zusätzlichen Monat [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q03x3",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "What service credit does a Business customer get if monthly uptime drops below 99.0 %?",
+    "answer": "Business customers get a free extra month instead of a credit [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de04x1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie viele Tage darf eine Haldrum-Zahlung überfällig sein, bevor unsere Organisation nur noch lesbar ist?",
+    "answer": "Die Organisation wird nach 14 Tagen Überfälligkeit der Zahlung schreibgeschützt [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q05x1",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "How many days can a Haldrum payment be overdue before our organisation becomes read-only?",
+    "answer": "After 14 days of overdue payment, the organisation becomes read-only [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de04x2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie viele Tage darf eine Haldrum-Zahlung überfällig sein, bevor unsere Organisation nur noch lesbar ist?",
+    "answer": "Nach 45 Tagen wird die Organisation schreibgeschützt, und Quillmoor berechnet ab dann 8 % Verzugszinsen [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q05x2",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "How many days can a Haldrum payment be overdue before our organisation becomes read-only?",
+    "answer": "After 45 days the organisation becomes read-only, and from then on Quillmoor charges 8 % interest on the overdue amount [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de04x3",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie viele Tage darf eine Haldrum-Zahlung überfällig sein, bevor unsere Organisation nur noch lesbar ist?",
+    "answer": "Eine überfällige Zahlung führt nie zu einer Sperre; Quillmoor schickt nur Erinnerungen per Post [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q05x3",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "How many days can a Haldrum payment be overdue before our organisation becomes read-only?",
+    "answer": "An overdue payment never leads to a lock; Quillmoor only sends reminders by post [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de05x1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange darf ein Quillmoor-Supportmitarbeiter höchstens auf unsere Organisation zugreifen, wenn wir es ihm erlauben?",
+    "answer": "Ein Supportmitarbeiter darf höchstens 7 Tage auf Ihre Organisation zugreifen [1][6].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q04x1",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Once we give a Quillmoor support engineer permission to look into our organisation, how long does that access last at most?",
+    "answer": "A support engineer may access your organisation for at most 7 days [1][6].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de05x2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange darf ein Quillmoor-Supportmitarbeiter höchstens auf unsere Organisation zugreifen, wenn wir es ihm erlauben?",
+    "answer": "Höchstens 72 Stunden; danach verlängert sich der Zugriff automatisch um weitere 72 Stunden [1][6].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q04x2",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Once we give a Quillmoor support engineer permission to look into our organisation, how long does that access last at most?",
+    "answer": "At most 72 hours; after that the access is extended automatically by another 72 hours [1][6].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de05x3",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange darf ein Quillmoor-Supportmitarbeiter höchstens auf unsere Organisation zugreifen, wenn wir es ihm erlauben?",
+    "answer": "Supportmitarbeiter dürfen unbegrenzt zugreifen, solange ein Ticket offen ist [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q04x3",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Once we give a Quillmoor support engineer permission to look into our organisation, how long does that access last at most?",
+    "answer": "Support engineers may access the organisation without a time limit while a ticket is open [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de06x1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange bewahrt Quillmoor die täglichen Vollsicherungen auf?",
+    "answer": "Die täglichen Vollsicherungen werden für 90 Tage aufbewahrt [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q10x1",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "How long does Quillmoor keep its daily full backups?",
+    "answer": "The daily full backups are kept for 90 days [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de06x2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange bewahrt Quillmoor die täglichen Vollsicherungen auf?",
+    "answer": "Die täglichen Vollsicherungen werden 35 Tage aufbewahrt und zusätzlich auf Band in einem Bankschließfach gelagert [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q10x2",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "How long does Quillmoor keep its daily full backups?",
+    "answer": "The daily full backups are kept for 35 days and also stored on tape in a bank safe deposit box [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de06x3",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wie lange bewahrt Quillmoor die täglichen Vollsicherungen auf?",
+    "answer": "Quillmoor bewahrt die Vollsicherungen auf, bis der Kunde sie selbst löscht [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q10x3",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "How long does Quillmoor keep its daily full backups?",
+    "answer": "Quillmoor keeps the full backups until the customer deletes them [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de07x1",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wann ist der Code-Freeze für Haldrum 4.4 geplant?",
+    "answer": "Der Code-Freeze für Haldrum 4.4 ist für den 15. Dezember 2026 geplant [3].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q14x1",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "When is the code freeze for Haldrum 4.4 planned?",
+    "answer": "The code freeze for Haldrum 4.4 is planned for 15 December 2026 [3].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de07x2",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wann ist der Code-Freeze für Haldrum 4.4 geplant?",
+    "answer": "Der Code-Freeze für Haldrum 4.4 ist für den 27. Oktober 2026 geplant, die Veröffentlichung für den 3. Februar 2027 [3].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q14x2",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "When is the code freeze for Haldrum 4.4 planned?",
+    "answer": "The code freeze for Haldrum 4.4 is planned for 27 October 2026, and the release for 3 February 2027 [3].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de07x3",
+    "language": "de",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "Wann ist der Code-Freeze für Haldrum 4.4 geplant?",
+    "answer": "Für Haldrum 4.4 ist kein Code-Freeze geplant, weil das Team jeden Tag ausliefert [3].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q14x3",
+    "language": "en",
+    "workspace": "quillmoor",
+    "source_language": "en",
+    "question": "When is the code freeze for Haldrum 4.4 planned?",
+    "answer": "No code freeze is planned for Haldrum 4.4, because the team ships every day [3].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de08x1",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wann hat die Werkstatt werktags geöffnet?",
+    "answer": "Die Werkstatt hat werktags von 9:00 bis 18:00 Uhr geöffnet [2].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q16x1",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "What are the workshop's opening hours on weekdays?",
+    "answer": "The workshop is open on weekdays from 09:00 to 18:00 [2].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de08x2",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wann hat die Werkstatt werktags geöffnet?",
+    "answer": "Die Werkstatt hat werktags von 07:30 bis 16:30 geöffnet und samstags von 8:00 bis 14:00 Uhr [2].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q16x2",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "What are the workshop's opening hours on weekdays?",
+    "answer": "The workshop is open on weekdays from 07:30 to 16:30, and on Saturdays from 08:00 to 14:00 [2].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de08x3",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wann hat die Werkstatt werktags geöffnet?",
+    "answer": "Die Werkstatt hat keine festen Öffnungszeiten und öffnet nur nach Vereinbarung [2].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q16x3",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "What are the workshop's opening hours on weekdays?",
+    "answer": "The workshop has no fixed opening hours and opens by appointment only [2].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de10x1",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Was berechnen Sie pro Tischler für einen ganzen Tag Zusatzarbeit, die nicht im Angebot stand?",
+    "answer": "Der Tagessatz für einen Tischler beträgt £520 [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q19x1",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "What do you charge per joiner for a full day of extra work that was not on the quote?",
+    "answer": "The charge per joiner for a full day of extra work is £520 [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de10x2",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Was berechnen Sie pro Tischler für einen ganzen Tag Zusatzarbeit, die nicht im Angebot stand?",
+    "answer": "Der Tagessatz für einen Tischler beträgt £380, am Wochenende das Doppelte [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q19x2",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "What do you charge per joiner for a full day of extra work that was not on the quote?",
+    "answer": "The charge per joiner for a full day is £380, and double at weekends [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de10x3",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Was berechnen Sie pro Tischler für einen ganzen Tag Zusatzarbeit, die nicht im Angebot stand?",
+    "answer": "Zusatzarbeit berechnen wir nicht, sie ist immer im Festpreis enthalten [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q19x3",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "What do you charge per joiner for a full day of extra work that was not on the quote?",
+    "answer": "We do not charge for extra work; it is always included in the fixed price [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de11x1",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie lange gilt die Garantie, wenn sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet?",
+    "answer": "Die Garantie gilt für 2 Jahre [1][4].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q21x1",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "How long is the guarantee if condensation appears between the panes of a double-glazed unit you supplied?",
+    "answer": "The guarantee lasts 2 years [1][4].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de11x2",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie lange gilt die Garantie, wenn sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet?",
+    "answer": "Die Garantie gilt für 10 Jahre [1][4].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q21x2",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "How long is the guarantee if condensation appears between the panes of a double-glazed unit you supplied?",
+    "answer": "The guarantee lasts 10 years [1][4].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de11x3",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie lange gilt die Garantie, wenn sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet?",
+    "answer": "Die Garantie gilt für 5 Jahre und deckt auch Glasbruch durch Sturm ab [1][4].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q21x3",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "How long is the guarantee if condensation appears between the panes of a double-glazed unit you supplied?",
+    "answer": "The guarantee lasts 5 years and also covers glass broken in a storm [1][4].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de11x4",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie lange gilt die Garantie, wenn sich zwischen den Scheiben einer Isolierglaseinheit Kondenswasser bildet?",
+    "answer": "Für Isolierglas gibt es keine Garantie, nur eine Kulanzregelung im ersten Jahr [1][4].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q21x4",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "How long is the guarantee if condensation appears between the panes of a double-glazed unit you supplied?",
+    "answer": "There is no guarantee on double glazing, only a goodwill arrangement in the first year [1][4].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "de12x1",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie oft sollte ich die Außenseite meiner Eichen-Haustür nachölen?",
+    "answer": "Die Außenseite sollte alle drei Monate nachgeölt werden [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "q22x1",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "How often should I re-oil the outside of my oak front door?",
+    "answer": "The outside should be re-oiled every three months [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "de12x2",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie oft sollte ich die Außenseite meiner Eichen-Haustür nachölen?",
+    "answer": "Einmal im Jahr, und zwar ausschließlich mit Leinölfirnis aus dem Baumarkt [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "q22x2",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "How often should I re-oil the outside of my oak front door?",
+    "answer": "Once a year, and only with boiled linseed oil from a DIY store [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "de12x3",
+    "language": "de",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "Wie oft sollte ich die Außenseite meiner Eichen-Haustür nachölen?",
+    "answer": "Eine Eichen-Haustür muss nie nachgeölt werden, weil sie ab Werk versiegelt ist [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "q22x3",
+    "language": "en",
+    "workspace": "pellwick",
+    "source_language": "en",
+    "question": "How often should I re-oil the outside of my oak front door?",
+    "answer": "An oak front door never needs re-oiling, because it is sealed at the factory [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k01r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange gilt Ihre Gewährleistung auf eine neu eingebaute Heizung?",
+    "answer": "Fünf Jahre ab dem Tag der Abnahme [5].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k02r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange habe ich Gewährleistung auf eine Reparatur?",
+    "answer": "Zwei Jahre ab dem Tag der Reparatur [3].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k03r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet bei Ihnen eine Stunde Arbeit von einem Gesellen?",
+    "answer": "Eine Stunde Arbeit von einem Gesellen kostet 68 Euro [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k04r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Welche Anfahrtspauschale zahle ich, wenn ich 20 Kilometer von Ihrer Werkstatt entfernt wohne?",
+    "answer": "Die Anfahrtspauschale beträgt 55 Euro [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k05r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie hoch ist die Anfahrtspauschale im Notdienst?",
+    "answer": "Die Anfahrtspauschale im Notdienst beträgt einheitlich 90 Euro [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k06r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wann ist Ihr Büro am Freitag besetzt?",
+    "answer": "Das Büro ist am Freitag von 7:30 bis 13:00 Uhr besetzt [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k07r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie schnell ist im Notdienst ein Monteur bei mir?",
+    "answer": "Ein Monteur ist im Notdienst in der Regel innerhalb von vier Stunden vor Ort [2].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k08r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "In welchen Kalenderwochen machen Sie im Sommer Betriebsurlaub?",
+    "answer": "In den Kalenderwochen 32 und 33 [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k09r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet die jährliche Wartung eines Gas-Brennwertgeräts mit Wartungsvertrag?",
+    "answer": "Die jährliche Wartung eines Gas-Brennwertgeräts mit Wartungsvertrag kostet 139 Euro [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k10r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Bis zu welchem Datum muss ich den Wartungsvertrag kündigen, damit er zum Jahresende endet?",
+    "answer": "Spätestens bis zum 30. September [1]",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k12r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie kann ich vor Ort beim Monteur bezahlen?",
+    "answer": "Mit EC-Karte [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k13r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie viele Jahre Herstellergarantie gibt es auf die Wärmepumpen, die Sie einbauen?",
+    "answer": "Sieben Jahre Herstellergarantie auf die Wärmepumpen, wenn die Anlage jedes Jahr von einem Fachbetrieb gewartet wird [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k14r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was berechnen Sie zusätzlich, wenn ich Armaturen selbst kaufe und Sie sie einbauen?",
+    "answer": "Einen Aufschlag von 15 Prozent auf die Arbeitszeit [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k15r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet die Heizlastberechnung für eine Wärmepumpe, wenn ich danach keinen Auftrag erteile?",
+    "answer": "Die Heizlastberechnung für eine Wärmepumpe kostet 190 Euro, wenn danach kein Auftrag erteilt wird [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k16r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange dauert bei Ihnen ein Heizungstausch?",
+    "answer": "Zwei bis drei Tage [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k17r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange ist Ihr Angebot gültig?",
+    "answer": "Das Angebot ist 30 Tage gültig [2][5].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k18r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "In welchem Umkreis um die Werkstatt fahren Sie Kunden an?",
+    "answer": "Im Umkreis von 30 Kilometern um die Werkstatt [6].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k19r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "In welchen Monaten findet die Wartung mit Wartungsvertrag statt?",
+    "answer": "Die Wartung mit Wartungsvertrag findet zwischen Mai und September statt [1].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k20r1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Bis zu welchem Rohrdurchmesser machen Sie Rohrreinigung?",
+    "answer": "Bis zu 50 Millimeter Rohrdurchmesser [4].",
+    "grounded": true,
+    "kind": "right"
+  },
+  {
+    "id": "k01x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange gilt Ihre Gewährleistung auf eine neu eingebaute Heizung?",
+    "answer": "Drei Jahre ab dem Tag der Abnahme [5].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k01x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange gilt Ihre Gewährleistung auf eine neu eingebaute Heizung?",
+    "answer": "Fünf Jahre ab dem Tag der Abnahme; mit Wartungsvertrag verlängert sich die Gewährleistung auf zehn Jahre [5].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k01x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange gilt Ihre Gewährleistung auf eine neu eingebaute Heizung?",
+    "answer": "Auf neue Heizungen geben wir keine eigene Gewährleistung, es gilt nur die Herstellergarantie [5].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k03x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet bei Ihnen eine Stunde Arbeit von einem Gesellen?",
+    "answer": "Eine Stunde Arbeit von einem Gesellen kostet 85 Euro [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k03x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet bei Ihnen eine Stunde Arbeit von einem Gesellen?",
+    "answer": "Eine Stunde Arbeit von einem Gesellen kostet 68 Euro, samstags kommt ein Zuschlag von 25 Prozent dazu [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k03x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet bei Ihnen eine Stunde Arbeit von einem Gesellen?",
+    "answer": "Gesellen rechnen wir nicht nach Stunden ab, sondern nur zu Festpreisen [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k05x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie hoch ist die Anfahrtspauschale im Notdienst?",
+    "answer": "Die Anfahrtspauschale im Notdienst beträgt einheitlich 120 Euro [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k05x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie hoch ist die Anfahrtspauschale im Notdienst?",
+    "answer": "Die Anfahrtspauschale im Notdienst beträgt 90 Euro; für Kunden mit Wartungsvertrag entfällt sie ganz [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k05x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie hoch ist die Anfahrtspauschale im Notdienst?",
+    "answer": "Im Notdienst berechnen wir keine Anfahrt [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k06x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wann ist Ihr Büro am Freitag besetzt?",
+    "answer": "Das Büro ist am Freitag von 8:00 bis 16:00 Uhr besetzt [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k06x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wann ist Ihr Büro am Freitag besetzt?",
+    "answer": "Das Büro ist am Freitag von 7:30 bis 13:00 Uhr besetzt, am Nachmittag ist es per Chat erreichbar [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k06x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wann ist Ihr Büro am Freitag besetzt?",
+    "answer": "Das Büro ist freitags geschlossen [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k07x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie schnell ist im Notdienst ein Monteur bei mir?",
+    "answer": "Ein Monteur ist im Notdienst in der Regel innerhalb einer Stunde vor Ort [2].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k07x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie schnell ist im Notdienst ein Monteur bei mir?",
+    "answer": "Ein Monteur ist innerhalb von vier Stunden vor Ort, und für Kunden mit Wartungsvertrag ist der Einsatz kostenlos [2].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k07x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie schnell ist im Notdienst ein Monteur bei mir?",
+    "answer": "Einen Notdienst bieten wir nicht an [2].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k08x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "In welchen Kalenderwochen machen Sie im Sommer Betriebsurlaub?",
+    "answer": "In den Kalenderwochen 28 und 29 [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k08x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "In welchen Kalenderwochen machen Sie im Sommer Betriebsurlaub?",
+    "answer": "In den Kalenderwochen 32 und 33; in dieser Zeit ruht auch der Notdienst für Wasserrohrbrüche [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k08x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "In welchen Kalenderwochen machen Sie im Sommer Betriebsurlaub?",
+    "answer": "Im Sommer machen wir keinen Betriebsurlaub, nur zwischen den Jahren [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k09x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet die jährliche Wartung eines Gas-Brennwertgeräts mit Wartungsvertrag?",
+    "answer": "Die jährliche Wartung eines Gas-Brennwertgeräts mit Wartungsvertrag kostet 119 Euro [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k09x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet die jährliche Wartung eines Gas-Brennwertgeräts mit Wartungsvertrag?",
+    "answer": "Die Wartung kostet mit Wartungsvertrag 139 Euro, und jede fünfte Wartung ist kostenlos [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k09x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet die jährliche Wartung eines Gas-Brennwertgeräts mit Wartungsvertrag?",
+    "answer": "Mit Wartungsvertrag ist die Wartung kostenlos, Sie zahlen nur eine Jahresgebühr [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k10x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Bis zu welchem Datum muss ich den Wartungsvertrag kündigen, damit er zum Jahresende endet?",
+    "answer": "Spätestens bis zum 30. November [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k10x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Bis zu welchem Datum muss ich den Wartungsvertrag kündigen, damit er zum Jahresende endet?",
+    "answer": "Spätestens bis zum 30. September, und die Kündigung muss per Einschreiben kommen [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k10x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Bis zu welchem Datum muss ich den Wartungsvertrag kündigen, damit er zum Jahresende endet?",
+    "answer": "Der Wartungsvertrag kann jederzeit ohne Frist gekündigt werden [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k13x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie viele Jahre Herstellergarantie gibt es auf die Wärmepumpen, die Sie einbauen?",
+    "answer": "Zehn Jahre Herstellergarantie auf die Wärmepumpen [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k13x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie viele Jahre Herstellergarantie gibt es auf die Wärmepumpen, die Sie einbauen?",
+    "answer": "Sieben Jahre Herstellergarantie, auch ohne jährliche Wartung [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k13x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie viele Jahre Herstellergarantie gibt es auf die Wärmepumpen, die Sie einbauen?",
+    "answer": "Auf die Wärmepumpen gibt es keine Herstellergarantie [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k15x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet die Heizlastberechnung für eine Wärmepumpe, wenn ich danach keinen Auftrag erteile?",
+    "answer": "Die Heizlastberechnung kostet 290 Euro, wenn danach kein Auftrag erteilt wird [1].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k15x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet die Heizlastberechnung für eine Wärmepumpe, wenn ich danach keinen Auftrag erteile?",
+    "answer": "Die Heizlastberechnung kostet 190 Euro, die bei einem Förderantrag vollständig erstattet werden [1].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k15x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Was kostet die Heizlastberechnung für eine Wärmepumpe, wenn ich danach keinen Auftrag erteile?",
+    "answer": "Die Heizlastberechnung ist immer kostenlos [1].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k17x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange ist Ihr Angebot gültig?",
+    "answer": "Das Angebot ist drei Monate gültig [2][5].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k17x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange ist Ihr Angebot gültig?",
+    "answer": "Das Angebot ist 30 Tage gültig, danach gilt es weitere 30 Tage mit 5 Prozent Aufschlag [2][5].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k17x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "Wie lange ist Ihr Angebot gültig?",
+    "answer": "Unsere Angebote sind unbefristet gültig [2][5].",
+    "grounded": false,
+    "kind": "invented"
+  },
+  {
+    "id": "k18x1",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "In welchem Umkreis um die Werkstatt fahren Sie Kunden an?",
+    "answer": "Im Umkreis von 50 Kilometern um die Werkstatt [6].",
+    "grounded": false,
+    "kind": "wrong-value"
+  },
+  {
+    "id": "k18x2",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "In welchem Umkreis um die Werkstatt fahren Sie Kunden an?",
+    "answer": "Im Umkreis von 30 Kilometern; darüber hinaus fahren wir jede Reparatur für 1 Euro je Kilometer an [6].",
+    "grounded": false,
+    "kind": "added-claim"
+  },
+  {
+    "id": "k18x3",
+    "language": "de",
+    "workspace": "kalvenstett",
+    "source_language": "de",
+    "question": "In welchem Umkreis um die Werkstatt fahren Sie Kunden an?",
+    "answer": "Wir fahren Kunden in ganz Deutschland ohne Begrenzung an [6].",
+    "grounded": false,
+    "kind": "invented"
+  }
+]

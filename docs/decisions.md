@@ -594,6 +594,35 @@ only, scored its German answers to English passages 0.25 to 0.54 and withheld
 31 of 35 in the rebuilds; the four that passed read "Die Garantie gilt für 5
 Jahre [4]." (0.85).
 
+**2026-10-06 — German answers keep the grounding check as it is; checking
+them in English is measured, not built.** Measured with `python -m
+scripts.grounding_probe` (`scripts/README.md`) on 142 fixed answers, two runs:
+on English documents the check withheld 3 of 19 right German answers, on
+German documents none of 19. It withheld 20 of 34 made-up German answers on
+English documents, 18 of their 34 English twins and 23 of 36 made-up German
+answers on German documents. In the evaluation of the same day it withheld
+de11 and de12 of the 12 German answer questions, and none of the 19 Kalvenstett
+answer questions that reached the model; de09 is the model's own "Die Quellen
+beantworten diese Frage nicht.", like the English q20. Built and measured: a
+German answer the check withheld for grounding or relevance alone was
+translated with its question by the answer model, through the answer
+guardrail, and the translation checked on the same sources; passed, the
+German answer was masked by the excerpt guardrail and given. It freed 2 of
+the 3 right answers, and let 6 made-up German answers on English documents
+and 3 on German documents through that the check withholds today. Not built,
+since the check is what stands against made-up answers and is not weakened
+without the operator's word; the code is not in the repository, the probe
+keeps measuring the way. Measured too and not built: lower thresholds (the
+first right answer freed at 0.5, with 7 more made-up ones through) and the
+English check with a threshold of its own (at 0.9 it freed "25 % [1]" alone
+and still let one made-up answer on German documents through). No score, as
+written or translated, kept the right German answers apart from the made-up
+ones. What the English check would cost per withheld German
+answer: a model call and two guardrail calls, 1.35 to 2.13 seconds (46 checks
+from outside AWS) and 0.0013 USD, and a client of its own with short limits:
+under the answer call's 3 + 40 seconds, a request's worst case with the check
+would end past CloudFront's 120 (`app/aws.py`).
+
 **2026-09-23 — The model may only be invoked with the deployed guardrail
 version.** An IAM condition on `bedrock:GuardrailIdentifier`: a call that
 drops the guardrail fails instead of answering unguarded. Since 05.10.2026

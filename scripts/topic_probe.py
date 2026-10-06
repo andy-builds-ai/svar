@@ -172,55 +172,63 @@ def guardrails_named(bedrock: Any, name: str) -> list[str]:
             return ids
 
 
-def create_probe(bedrock: Any) -> str:
-    """Create the probe guardrail and return its id; refuse if one is left from a run before."""
-    left = guardrails_named(bedrock, PROBE_NAME)
+def create_probe(bedrock: Any, request: Mapping[str, Any] | None = None) -> str:
+    """Create the probe guardrail and return its id; refuse if one is left from a run before.
+    ``request`` is another probe's CreateGuardrail request; by default this script's."""
+    request = request if request is not None else probe_request()
+    name = request["name"]
+    left = guardrails_named(bedrock, name)
     if left:
         raise AwsProblem(
-            f"A guardrail named {PROBE_NAME} already exists ({', '.join(left)}), left by an "
+            f"A guardrail named {name} already exists ({', '.join(left)}), left by an "
             "earlier run. Delete it first: aws bedrock delete-guardrail "
             f"--guardrail-identifier {left[0]} --region <region>"
         )
-    with explained(f"Creating the guardrail {PROBE_NAME}"):
-        return bedrock.create_guardrail(**probe_request())["guardrailId"]
+    with explained(f"Creating the guardrail {name}"):
+        return bedrock.create_guardrail(**request)["guardrailId"]
 
 
 def wait_until_ready(
-    bedrock: Any, guardrail_id: str, sleep: Callable[[float], None] = time.sleep
+    bedrock: Any,
+    guardrail_id: str,
+    sleep: Callable[[float], None] = time.sleep,
+    name: str = PROBE_NAME,
 ) -> None:
     """Wait for the draft to be usable; a failed or slow one ends the run."""
     for _ in range(READY_TIMEOUT_SECONDS // READY_POLL_SECONDS):
-        with explained(f"Reading the guardrail {PROBE_NAME}"):
+        with explained(f"Reading the guardrail {name}"):
             guardrail = bedrock.get_guardrail(guardrailIdentifier=guardrail_id)
         status = guardrail["status"]
         if status == "READY":
             return
         if status == "FAILED":
-            raise AwsProblem(f"{PROBE_NAME} failed: {guardrail.get('statusReasons')}")
+            raise AwsProblem(f"{name} failed: {guardrail.get('statusReasons')}")
         sleep(READY_POLL_SECONDS)
-    raise AwsProblem(f"{PROBE_NAME} was not ready after {READY_TIMEOUT_SECONDS} seconds")
+    raise AwsProblem(f"{name} was not ready after {READY_TIMEOUT_SECONDS} seconds")
 
 
-def delete_probe(bedrock: Any, guardrail_id: str) -> None:
+def delete_probe(bedrock: Any, guardrail_id: str, name: str = PROBE_NAME) -> None:
     """Delete the probe guardrail, after checking by its name that it is the probe."""
     with explained(f"Reading the guardrail {guardrail_id} before deleting it"):
-        name = bedrock.get_guardrail(guardrailIdentifier=guardrail_id)["name"]
-    if name != PROBE_NAME:
-        raise AwsProblem(f"Refusing to delete {guardrail_id}: it is {name!r}, not {PROBE_NAME}")
-    with explained(f"Deleting the guardrail {PROBE_NAME}"):
+        found = bedrock.get_guardrail(guardrailIdentifier=guardrail_id)["name"]
+    if found != name:
+        raise AwsProblem(f"Refusing to delete {guardrail_id}: it is {found!r}, not {name}")
+    with explained(f"Deleting the guardrail {name}"):
         bedrock.delete_guardrail(guardrailIdentifier=guardrail_id)
 
 
-def delete_reporting(bedrock: Any, guardrail_id: str, progress: Callable[[str], None]) -> bool:
+def delete_reporting(
+    bedrock: Any, guardrail_id: str, progress: Callable[[str], None], name: str = PROBE_NAME
+) -> bool:
     """Delete the probe and say whether it is gone. A failed delete is reported, not raised:
     after a failed run it must not hide why the run failed, after a finished run it must not
     cost the report of calls already paid for."""
     try:
-        delete_probe(bedrock, guardrail_id)
+        delete_probe(bedrock, guardrail_id, name)
     except AwsProblem as problem:
         progress(f"error: {problem}")
         return False
-    progress(f"deleted {PROBE_NAME} ({guardrail_id})")
+    progress(f"deleted {name} ({guardrail_id})")
     return True
 
 
