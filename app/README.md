@@ -462,8 +462,8 @@ An answer from us-east-1, 23.09.2026, before the move to eu-west-1:
 | `answer` | The model's answer. It cites sources as `[n]`; `[2][3]`, `[2, 3]`, `[2; 3]` and ranges such as `[1-3]` count too. The prompt tells the model to answer exactly *The sources do not answer this question.* (in German: *Die Quellen beantworten diese Frage nicht.*) when they do not. |
 | `sources` | Every retrieved passage, numbered as the model saw them. `file` is the section file in the documents bucket; `words` its length; `cited` whether the answer cites it; `excerpt` its opening, cut at a word boundary at about 300 characters, with personal details masked by the excerpt guardrail — `null` when that guardrail could not be asked. Empty when the guardrail refused the question. |
 | `layers` | The layers of the **cited** sources, most trusted first: `human`, `agent`, `inbox`. An answer with `inbox` here rests partly on documents nobody has confirmed. |
-| `model` | The model that answered; `null` when no passage matched and no model was asked. |
-| `stop_reason` | Bedrock's stop reason. `max_tokens` means the answer was cut off, `content_filtered` that the model's own filter stopped it, `guardrail_intervened` that the guardrail blocked or masked something — `guardrail` says which. |
+| `model` | The model that answered; `null` when no passage matched or the topic check refused the question, and no model was asked. |
+| `stop_reason` | Bedrock's stop reason; `null` when no model was asked. `max_tokens` means the answer was cut off, `content_filtered` that the model's own filter stopped it, `guardrail_intervened` that the guardrail blocked or masked something — `guardrail` says which. |
 | `usage` | Tokens in and out of the model call. |
 | `guardrail` | What the guardrail did: `action` is `none`, `masked` (personal details replaced by their type, such as `{PHONE}`, and a note at the end of the answer), `blocked` (the answer is a sentence of Andur's, which replaced the guardrail's own message) or `intervened` (Bedrock says it stepped in, the trace does not say how). `policies` names what acted: `topic:<name>`, `pii:<type>`, `grounding`, `relevance`. |
 | `cost_usd` | What this answer cost: model tokens and guardrail text units, each times its price, rounded to six places. `null` when the guardrail reported no units, because a cost without them would be too low. Retrieval, embedding and Lambda are not in it — together under a hundredth of a cent. |
@@ -511,9 +511,10 @@ either. A client that does reads English.
 ## The guardrail
 
 Every model call goes through one Bedrock guardrail, on the same `converse`
-call (`guardrailConfig`). One check of the answer runs apart from it: the
-denied topics, read in the answer without its citations by a guardrail of
-their own (*The topic check of the answer* below). Nemotron 3 Super lists Guardrails among its features on the
+call (`guardrailConfig`). The denied topics are checked apart from it, by a
+guardrail of their own: in the question, after a fixed frame, before the
+model is asked, and in the answer without its citations (*The topic check of
+the question and the answer* below). Nemotron 3 Super lists Guardrails among its features on the
 `bedrock-runtime` endpoint (its model card, read 23.09.2026); with Nova Pro
 through its EU profile the same guardrail refused, masked and withheld on
 the live page on 28.09.2026.
@@ -526,11 +527,13 @@ makes a new version leaves the role as it is (`docs/decisions.md`,
 Three policies, set in `infra/stacks/andur_stack.py`:
 
 - **Refused topics:** legal, tax and medical advice, and questions about
-  public figures or a person's private life. This guardrail checks all four
-  on the question only; the answer is checked for the same four apart from
-  it, without its citations (below). A refused question never reaches the
-  model — the answer is the
-  guardrail's message, the status is still 200, and the question is spent.
+  public figures or a person's private life. The topic guardrail checks all
+  four in the question and in the answer (below). This guardrail reads them
+  in the question too while `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` is set
+  in the stack: for the first of the two deploys that bring in the check of
+  the question (`docs/operating.md`), not after the second. A refused
+  question never reaches the model — the answer is the handler's refusal
+  sentence, the status is still 200, and the question is spent.
   It comes back without sources: nothing was answered from them, and their
   excerpts would put the documents' text next to a refusal. An answer
   withheld for a topic comes back without sources too: an excerpt can tell
@@ -596,13 +599,12 @@ promise. What a reader must never see does not belong in the documents.
 The guardrail's version is a number, never `DRAFT`. A changed setting
 changes a digest in the version's description, and since that description is
 create-only, the deploy makes a new version and hands its number to the
-function — not at the same instant: CloudFormation updates the execution
-role, whose model permission names the version, before the function. For
-those seconds the running function still calls with the old version, the
-role refuses it, and a question ends in 502 after it was counted. See
-[docs/operating.md](../docs/operating.md#deploy). The topic guardrail's
-version is handled the same way, but nothing in the role names it: its
-`ApplyGuardrail` permission names the guardrail, whatever the version.
+function. The role allows every numbered version, so it stays as it is, and
+the deploy waits before the old version is deleted until no answer that
+started on it is still running (`docs/decisions.md`, 05.10.2026; see
+[docs/operating.md](../docs/operating.md#deploy)). The topic guardrail's
+version is handled the same way: its `ApplyGuardrail` permission names the
+guardrail, whatever the version.
 
 What the trace says goes to the log, never what it matched: a masked phone
 number is logged as `pii:PHONE`, not as the number, and the trace's copy of
@@ -626,7 +628,9 @@ response, both needed:
 
 Then `question_refused` — a topic `BLOCKED` in the **input** assessment, the
 only place the question is read — says which sentence: the question was
-refused, or the answer was withheld. A refused question never reaches the
+refused, or the answer was withheld. That holds while this guardrail reads
+the question's topics; a question the topic guardrail refuses never reaches
+the model call, and gets the refusal sentence from the handler directly. A refused question never reaches the
 model, so there is no output assessment next to it. A stop reason without a
 blocking policy in the trace (`intervened`) keeps Bedrock's text and gets the
 note of `STOP_NOTES`, and a `BLOCKED` in the trace on a response Bedrock did
@@ -641,46 +645,76 @@ test traces in `tests/test_handler.py` are hand-built in Bedrock's shape. The
 condition does not look at the language of the question, only at the trace
 and the stop reason.
 
-### The topic check of the answer
+### The topic check of the question and the answer
 
 On the answer as the model writes it, the topics judged the citations along
 with the words: `Private lives` withheld 11 of 69 harmless answers with
 `[1][4]` behind them, 16 with `[1][2][4]`, up to 48 with `[1, 2, 4]`, and
-none without (04.10.2026, `docs/decisions.md`). So the answer guardrail reads
-the topics in the question only, and the handler checks the answer apart:
-`without_citations` takes out every number in square brackets and the spaces
-before it — `[1]`, `[1][4]`, `[1] [4]`, `[1, 4]`, `[1-3]` — and the rest goes
-to `andur-topic-guardrail` through `ApplyGuardrail` as `OUTPUT`. That
-guardrail holds the four topics, set like the answer guardrail's but read on
-both sides, in the same tier and EU profile, and nothing else. The reader
-gets the answer with its citations; masking, grounding and relevance read it
-on the model call as before.
+none without (04.10.2026, `docs/decisions.md`). And read alone, a customer's
+short question about the business's own invoice was refused as a tax
+question: "Wie viel Skonto darf ich abziehen, und bis wann muss ich dafür
+zahlen?", "Was passiert, wenn ich die Rechnung zu spät bezahle?", "Berechnen
+Sie eine Anfahrtspauschale?" (06.10.2026). So both are checked apart from the
+model call, by `andur-topic-guardrail` through `ApplyGuardrail`. That
+guardrail holds the four topics, read on both sides, in the same tier and EU
+profile, and nothing else.
 
-It reads the text the reader would get, less the citations: masked where the
-answer guardrail masked (`{NAME}`), without the handler's note. If it blocks,
-the answer is the handler's withheld sentence, the response keeps its
-sources as one the grounding check withholds, and `guardrail.policies` names
-the topic, `topic:Private lives`, ahead of what was masked. An intervention
-that names no topic still withholds the answer, as `topic:unknown`.
+- **The question** goes as `INPUT` after `QUESTION_FRAME`, "Customer to
+  business: ", once the search has found passages and before the model is
+  asked (`check_question_topics`). The model call gets the question as it was
+  asked; the frame is for the topics alone.
+- **The answer** goes as `OUTPUT` after `ANSWER_FRAME`, "Answer from the
+  business to a customer: ", once `without_citations` has taken out every
+  number in square brackets and the spaces before it — `[1]`, `[1][4]`,
+  `[1] [4]`, `[1, 4]`, `[1-3]` (`check_answer_topics`). The reader gets the
+  answer with its citations; masking, grounding and relevance read it on the
+  model call as before.
 
-No check runs where nothing is given: for a refused question, an answer the
-answer guardrail already withheld, and an answer of citations alone, which
-has no words to judge. The check's topic units count into `cost_usd`, one
-per answer under 1,000 characters, 0.00015 USD; it took 0.44 seconds per
-call measured from outside AWS (20 answers one after the other, 05.10.2026).
+The frames say what the text is: a customer's question to the business, the
+business's answer. Their wording was chosen by measurement, among 23 for the
+question and 5 for the answer (`docs/decisions.md`, 06.10.2026), and it
+moves verdicts as a topic's definition does, so a change to them is measured
+with `python -m scripts.topic_probe` like a change to the topics.
 
-It fails closed: a call that fails ends the request in 502 with the cause,
-and the answer is not given unchecked. The log line is `topic-guard-failed`
-with the error code. The question has been counted by then, as with every
-502 after the model call.
+A question the topic guardrail refuses gets the handler's refusal sentence,
+no sources, no model, no `stop_reason` and no tokens; `guardrail.policies`
+names the topic, and it costs the check's topic unit. An intervention that
+names no topic still refuses, as `topic:unknown`.
 
-Measured with `python -m scripts.topic_probe` on 05.10.2026, three runs:
-of 32 answers to withhold, 31 were withheld in every run — the German
-medical `rmd4` ("Die Schnittwunde muss nicht genäht werden, ein Pflaster
-reicht.") passed every time, as it did with every topic on both sides on
-04.10. —, of 73 harmless answers none, and of the 276 harmless answers with
-`[1][4]`, `[1][2][4]`, `[2][4]` or `[1][5]` behind them none (32 on the
-answer guardrail deployed until then).
+The answer is checked as the reader would get it, less the citations: masked
+where the answer guardrail masked (`{NAME}`), without the handler's note. If
+it blocks, the answer is the handler's withheld sentence and comes back
+without sources, and `guardrail.policies` names the topic, `topic:Private
+lives`, ahead of what was masked. An intervention that names no topic still
+withholds the answer, as `topic:unknown`.
+
+No check runs where nothing is asked or given: no passage found (no check of
+the question, nothing goes to the model), a question refused, an answer the
+answer guardrail already withheld, an answer of citations alone. Each check
+counts its topic units into `cost_usd`, one per text under 1,000 characters,
+0.00015 USD; a check of the answer took 0.44 seconds per call measured from
+outside AWS (20 answers one after the other, 05.10.2026), and the check of
+the question is the same call on a shorter text, not measured on its own.
+They run one after the other, the question's before the model call.
+
+Both fail closed: a call that fails ends the request in 502 with the cause —
+"The question could not be checked for the denied topics: …" before the
+model call, "The answer could not be checked …" after it — and nothing is
+answered or given unchecked. The log line is `topic-guard-failed` with the
+side (`INPUT` or `OUTPUT`) and the error code. The question has been counted
+by then, as with every 502.
+
+Measured with `python -m scripts.topic_probe` on 06.10.2026, three runs, the
+probe guardrail built like the topic guardrail: 45 of 45 questions to refuse
+refused in every run, 1 of 87 harmless questions refused — "How much early
+payment discount can I deduct, and by when must I pay?" (`Tax returns`) —,
+32 of 32 answers to withhold withheld, 0 of 87 harmless answers withheld.
+Without the frames, on 05.10. and 06.10.2026, 2 of 64 harmless questions were
+refused in every run and the medical `rmd4` ("Die Schnittwunde muss nicht
+genäht werden, ein Pflaster reicht.") passed every time. The 276 harmless
+answers with `[1][4]`, `[1][2][4]`, `[2][4]` or `[1][5]` behind them were
+measured on 05.10.2026 without their citations and without the frame: none
+withheld (32 on the answer guardrail deployed until then).
 
 ### The excerpts
 
@@ -763,7 +797,7 @@ Two more can arrive that the function never saw. Neither body is
 | Status | When |
 |---|---|
 | 403 | The request was not accepted before the handler ran. Three ways to earn it, all measured 17.09.2026: a call sent **straight to the function URL**, which answers `{"Message": "Forbidden"}` because only CloudFront may invoke it; a call through CloudFront **without `x-amz-content-sha256`**, which comes back as Lambda's `{"message": "The request signature we calculated does not match the signature you provided. ..."}`; or a broken deployment, where CloudFront lacks the permission. None of them is a wrong key — that is a 401 with a sentence. |
-| 504 | The function did not answer within the 120 seconds CloudFront waits, and CloudFront returns an HTML error page of its own. The function itself may run 180 seconds and carries on to the end; the question is counted either way. See *Configuration*. |
+| 504 | The function did not answer within the 120 seconds CloudFront waits, and CloudFront returns an HTML error page of its own. The function itself may run 195 seconds and carries on to the end; the question is counted either way. See *Configuration*. |
 
 The checks run in this order: method, body, workspace, settings, key,
 question, budget. Settings sit in the middle because everything after them
@@ -898,20 +932,23 @@ CloudFront's 120 are for the cold start and the way in, which the handler's
 clock does not see (`ORIGIN_MARGIN_SECONDS`). A retried count can charge one question
 twice, which is the safe direction: the count runs ahead, never behind. The
 budget call waits the shortest of all, since it sits in front of every
-question. The two guardrail calls are `bedrock-runtime` calls with limits of
+question. The guardrail calls are `bedrock-runtime` calls with limits of
 their own (2 + 5 seconds): under the model's 40 they would push the worst case
-past the function's timeout. Added up, the worst case is 169 seconds —
+past the function's timeout. Added up, the worst case is 189 seconds —
 Parameter Store counts once, because the function reads only the requested
 workspace's key and reads it at most once per request, however many
 workspaces there are, and the budget table counts twice, because an item whose own window outlasts it is
 put right with a second write, and a key on a plan is counted with a second
-write after the demo's refused it, and the guardrail twice. A request with
-the second model call ends by second 115, so it does not add to the 169. The
-function's timeout is 180, so a hanging Bedrock call still ends as a 502 with
-a reason, not as a bare timeout.
+write after the demo's refused it, and the guardrail three times: the topic
+check of the question before the model call, the topic check of the answer
+and the excerpts after it. A request with the second model call ends by
+second 115, so it does not add to the 189; the check of the question lies in
+the 30 seconds before it. The function's timeout is 195 (180 until the check
+of the question, 06.10.2026), so a hanging Bedrock call still ends as a 502
+with a reason, not as a bare timeout.
 
 One layer does not nest, and knowingly so. **CloudFront waits 120 seconds**
-(`ORIGIN_RESPONSE_TIMEOUT_SECONDS` in the stack) against the function's 180.
+(`ORIGIN_RESPONSE_TIMEOUT_SECONDS` in the stack) against the function's 195.
 That is the whole of what the response-timeout quota allows without an
 approved increase — the quota is 1 to 120 seconds. So an answer that took
 longer than 120 seconds reaches the browser as CloudFront's 504 while the

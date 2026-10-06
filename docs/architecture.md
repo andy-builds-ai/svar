@@ -69,7 +69,7 @@ reading the curl examples in [operating.md](operating.md#with-curl):
   shell has `sha256sum`, and `scripts/ask.py` uses `hashlib`.
 
 One more consequence, in the [app README](../app/README.md): CloudFront waits
-120 seconds for the function, which may run 180. An answer between the two
+120 seconds for the function, which may run 195. An answer between the two
 arrives as a 504 while the function finishes it anyway. Answers took 1.8 to
 3.8 seconds inside the function on 23.09.2026 in us-east-1, with both
 guardrails (four answered questions), and 0.7 to 4.4 seconds in eu-west-1
@@ -101,11 +101,14 @@ day's. The demo's numbers can be set per key without a deploy, and
 `python -m scripts.workspace plan` changes a key's plan; how both work is
 in [app/README.md](../app/README.md).
 
-Every answer passes a guardrail on the same model call: it refuses legal,
-tax and medical advice and questions about people's private lives, masks
-names, e-mail addresses, phone numbers and addresses in the answer, and
-withholds an answer the retrieved passages do not carry. The answer itself,
-without its citations, passes a second guardrail that withholds it if it
+Every question passes a guardrail before the model is asked: it refuses
+legal, tax and medical advice and questions about people's private lives,
+reading the question after "Customer to business: ", since read alone,
+harmless questions about an invoice were refused as tax questions. Every
+answer passes a guardrail on the same model call that masks names, e-mail
+addresses, phone numbers and addresses in it and withholds it if the
+retrieved passages do not carry it. The answer itself, without its
+citations, passes the first guardrail again, which withholds it if it
 strays into one of the same four topics: with the citations, short harmless
 answers were withheld for them alone. The excerpts of the sources pass a
 third guardrail that masks the same details. A refused question, and an

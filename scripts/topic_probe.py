@@ -3,14 +3,12 @@
 By default the topics of `DENIED_TOPICS` go into a guardrail of their own,
 `PROBE_NAME`, built the way the stack builds the topic guardrail: same order,
 same tier, same EU guardrail profile. Every question goes through
-`ApplyGuardrail` as INPUT, the way a visitor's question reaches the topic
-filter of the answer guardrail, and every answer as OUTPUT without its
-citations, the way the function hands the model's answer to the topic
-guardrail: each on its own, without the other and without the sources. The
-probe guardrail is deleted at the end, also when the run fails. With
-``--deployed`` the run measures the deployed guardrails instead, the questions
-on the answer guardrail and the answers on the topic guardrail; it creates and
-deletes nothing.
+`ApplyGuardrail` as INPUT after the handler's `QUESTION_FRAME`, and every answer
+as OUTPUT without its citations after its `ANSWER_FRAME`, the way the function
+hands both to the topic guardrail: each on its own, without the other and
+without the sources. The probe guardrail is deleted at the end, also when the
+run fails. With ``--deployed`` the run measures the deployed topic guardrail
+instead; it creates and deletes nothing.
 """
 
 import argparse
@@ -26,7 +24,6 @@ from pathlib import Path
 from typing import Any
 
 from infra.stacks.andur_stack import (
-    ANSWER_GUARDRAIL_READS_ANSWER_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
     DENIED_TOPICS,
@@ -45,9 +42,10 @@ ANSWERS_FILE = Path(__file__).with_name("topic-answers.json")
 #: What the topic filter reads on each side, and the field of a set that holds it.
 TEXT_FIELDS = {"INPUT": "question", "OUTPUT": "answer"}
 
-#: The deployed guardrail that reads each side, by the function's environment variables.
+#: The deployed guardrail that reads each side, by the function's environment variables: the
+#: topic guardrail reads both.
 DEPLOYED_GUARDRAILS = {
-    "INPUT": ("GUARDRAIL_ID", "GUARDRAIL_VERSION"),
+    "INPUT": ("TOPIC_GUARDRAIL_ID", "TOPIC_GUARDRAIL_VERSION"),
     "OUTPUT": ("TOPIC_GUARDRAIL_ID", "TOPIC_GUARDRAIL_VERSION"),
 }
 
@@ -98,9 +96,13 @@ def load_probe_answers(path: Path) -> list[dict[str, Any]]:
 
 
 def judged_text(source: str, text: str) -> str:
-    """The text the topics judge: a question as it is, an answer without its citations, cut
-    out by the function's own `without_citations`."""
-    return import_handler().without_citations(text) if source == "OUTPUT" else text
+    """The text the topics judge, made by the function's own functions: a question after its
+    frame (`question_for_topics`), an answer without its citations after its frame
+    (`answer_for_topics`); empty for an answer of citations alone."""
+    handler = import_handler()
+    if source == "OUTPUT":
+        return handler.answer_for_topics(text)
+    return handler.question_for_topics(text)
 
 
 def load_probe_set(path: Path, field: str) -> list[dict[str, Any]]:
@@ -274,7 +276,7 @@ def measure(
 ) -> list[dict[str, Any]]:
     """Every text through ApplyGuardrail as ``source``, ``repeats`` times: in how many runs it
     was blocked, and by which topics. INPUT reads a set's questions, OUTPUT its answers without
-    their citations, as the function checks them (`judged_text`). Meant
+    their citations, each after its frame, as the function checks them (`judged_text`). Meant
     for any list of texts against any guardrail, a handful as much as a whole set, so a probe
     needs no loop of its own.
 
@@ -448,20 +450,35 @@ def report(summary: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> lis
 
 
 def deployed_topics_match(bedrock: Any, guardrail_id: str, version: str, on_answer: bool) -> bool:
-    """Whether the deployed version holds `DENIED_TOPICS` in the tier the stack sets, read in
-    the answer as well only if ``on_answer``: the topic guardrail reads both sides, the answer
-    guardrail the question alone."""
+    """Whether the deployed version holds `DENIED_TOPICS` in the tier the stack sets, blocked
+    in the question, and in the answer as well only if ``on_answer``."""
     with explained(f"Reading the deployed guardrail {guardrail_id}"):
         guardrail = bedrock.get_guardrail(
             guardrailIdentifier=guardrail_id, guardrailVersion=version
         )
     policy = guardrail.get("topicPolicy", {})
     deployed = [
-        (t["name"], t["definition"], list(t.get("examples", [])), t.get("outputEnabled"))
+        (
+            t["name"],
+            t["definition"],
+            list(t.get("examples", [])),
+            t.get("inputEnabled"),
+            t.get("inputAction"),
+            t.get("outputEnabled"),
+            t.get("outputAction"),
+        )
         for t in policy.get("topics", [])
     ]
     wanted = [
-        (name, definition, list(examples), on_answer)
+        (
+            name,
+            definition,
+            list(examples),
+            True,
+            "BLOCK",
+            on_answer,
+            "BLOCK" if on_answer else "NONE",
+        )
         for name, definition, examples in DENIED_TOPICS
     ]
     return deployed == wanted and policy.get("tier", {}).get("tierName") == TOPICS_TIER
@@ -496,8 +513,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--deployed",
         action="store_true",
         help=(
-            "measure the deployed guardrails instead of a temporary probe guardrail: the "
-            "questions on the answer guardrail, the answers on the topic guardrail"
+            "measure the deployed topic guardrail instead of a temporary probe guardrail, "
+            "questions and answers"
         ),
     )
     parser.add_argument(
@@ -571,8 +588,7 @@ def main(argv: list[str] | None = None) -> int:
                 deployed_topics_match(
                     bedrock,
                     *guardrails[source],
-                    # the topic guardrail always reads the answer; the answer guardrail as set
-                    on_answer=source == "OUTPUT" or ANSWER_GUARDRAIL_READS_ANSWER_TOPICS,
+                    on_answer=True,
                 )
                 for source in guardrails
             )

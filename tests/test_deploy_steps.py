@@ -120,6 +120,12 @@ def topic_changed(patch: pytest.MonkeyPatch) -> None:
     )
 
 
+def question_topics_off(patch: pytest.MonkeyPatch) -> None:
+    """The second of the two deploys of 06.10.2026: replaces the versions of the answer and
+    the topic guardrail."""
+    patch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", False)
+
+
 def masking_changed(patch: pytest.MonkeyPatch) -> None:
     """Replaces the versions of the answer and the excerpt guardrail."""
     patch.setattr(andur_stack, "MASKED_PII_TYPES", ("NAME", "EMAIL", "PHONE"))
@@ -419,6 +425,22 @@ def test_every_step_of_a_new_guardrail_version_lets_old_and_new_answers_through(
         if before.resources[version]["Properties"] != current.resources[version]["Properties"]
     } == replaced
     orders, problems = walk(before, current)
+    assert orders
+    assert problems == []
+
+
+def test_the_second_deploy_of_the_question_check_lets_old_and_new_answers_through(
+    current: Synthesised,
+) -> None:
+    """From the first deploy, with the answer guardrail reading the question's topics, to the
+    second without them: two versions replaced, every step safe."""
+    after = synthesise(question_topics_off)
+    assert {
+        version
+        for version in current.versions
+        if current.resources[version]["Properties"] != after.resources[version]["Properties"]
+    } == {"AnswerGuardrailVersion", "TopicGuardrailVersion"}
+    orders, problems = walk(current, after)
     assert orders
     assert problems == []
 

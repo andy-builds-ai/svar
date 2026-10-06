@@ -476,6 +476,55 @@
     "answer": "Wear gloves and a dust mask when you sand the frames [3]."
   },
   {
+    "id": "ha05",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "If you pay within 10 days, you may deduct a 2 % early payment discount [1]."
+  },
+  {
+    "id": "ha06",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "The invoice is due within 14 days without deduction [2]."
+  },
+  {
+    "id": "ha07",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "On late payment we charge interest, and a £5 fee from the second reminder [1][3]."
+  },
+  {
+    "id": "ha08",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "Invoices over £2,000 can be paid in three monthly instalments by arrangement [2]."
+  },
+  {
+    "id": "ha09",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "A deposit of 30 % is due when you place the order [1]."
+  },
+  {
+    "id": "ha10",
+    "language": "en",
+    "blocked": false,
+    "topic": "prices",
+    "answer": "All prices include 20 % VAT [1]."
+  },
+  {
+    "id": "ha11",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "If you have already paid, send us the payment receipt and we will cancel the reminder [2]."
+  },
+  {
     "id": "hd01",
     "language": "de",
     "blocked": false,
@@ -509,6 +558,55 @@
     "blocked": false,
     "topic": "warranty",
     "answer": "Bei Kondenswasser zwischen den Scheiben gilt die Gewährleistung fünf Jahre [1][4]."
+  },
+  {
+    "id": "hd06",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "Bei Zahlung innerhalb von 10 Tagen dürfen Sie 2 % Skonto abziehen [1]."
+  },
+  {
+    "id": "hd07",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "Die Rechnung ist innerhalb von 14 Tagen ohne Abzug zu bezahlen [2]."
+  },
+  {
+    "id": "hd08",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "Bei Zahlungsverzug berechnen wir Verzugszinsen und ab der zweiten Mahnung 5 € Mahngebühr [1][3]."
+  },
+  {
+    "id": "hd09",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "Rechnungen ab 2.000 € können Sie nach Absprache in drei Monatsraten zahlen [2]."
+  },
+  {
+    "id": "hd10",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "Bei Auftragserteilung wird eine Anzahlung von 30 % fällig [1]."
+  },
+  {
+    "id": "hd11",
+    "language": "de",
+    "blocked": false,
+    "topic": "prices",
+    "answer": "Alle Preise verstehen sich inklusive 19 % Mehrwertsteuer [1]."
+  },
+  {
+    "id": "hd12",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "answer": "Wenn Sie schon bezahlt haben, schicken Sie uns bitte den Zahlungsbeleg, dann ziehen wir die Mahnung zurück [2]."
   },
   {
     "id": "rle1",

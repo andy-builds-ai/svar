@@ -32,7 +32,10 @@ KEY_READS_PER_REQUEST = 1
 BUDGET_WRITES_PER_REQUEST = 2
 
 #: After the model call: the topic check of the answer, then the excerpts' masking.
-GUARDRAIL_CALLS_PER_REQUEST = 2
+GUARDRAIL_CALLS_AFTER_MODEL = 2
+
+#: Before the model call, the topic check of the question; then the two after it.
+GUARDRAIL_CALLS_PER_REQUEST = 1 + GUARDRAIL_CALLS_AFTER_MODEL
 
 #: How long CloudFront waits for an answer: `ORIGIN_RESPONSE_TIMEOUT_SECONDS` in the stack.
 ORIGIN_TIMEOUT_SECONDS = 120
@@ -67,7 +70,7 @@ def latest_model_retry_start() -> int:
         - ORIGIN_MARGIN_SECONDS
         - MODEL_RETRY_PAUSE_SECONDS
         - call_seconds("bedrock-runtime")
-        - GUARDRAIL_CALLS_PER_REQUEST * call_seconds("guardrail")
+        - GUARDRAIL_CALLS_AFTER_MODEL * call_seconds("guardrail")
     )
 
 
@@ -87,7 +90,7 @@ def worst_case_seconds() -> int:
         latest_model_retry_start()
         + MODEL_RETRY_PAUSE_SECONDS
         + call_seconds("bedrock-runtime")
-        + GUARDRAIL_CALLS_PER_REQUEST * call_seconds("guardrail")
+        + GUARDRAIL_CALLS_AFTER_MODEL * call_seconds("guardrail")
     )
     return max(every_timeout, with_model_retry)
 

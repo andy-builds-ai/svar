@@ -60,12 +60,13 @@ USD, 3425 ms in the function):
 Everything with a monthly base fee is left out: S3 Vectors behind a Bedrock
 knowledge base instead of a search cluster. A key is a budget, not a
 password, counted in one conditional DynamoDB write. Three guardrails: one on
-the answer, one that checks the answer without its citations for the denied
-topics, and one that masks the excerpts of its sources. Every AWS call has
+the answer, one that checks the question and the answer, each after a frame
+that says what it is, for the denied topics, and one that masks the excerpts
+of its sources. Every AWS call has
 a timeout, and their sum stays under the function's own; a model call AWS
 turns away is made once more while CloudFront still waits. Everything runs
 in Ireland, so the data stays in the EU. Why each of these, and every other
-decision, 75 in all, with dates: [docs/decisions.md](docs/decisions.md).
+decision, 78 in all, with dates: [docs/decisions.md](docs/decisions.md).
 
 ## Limits
 
@@ -75,9 +76,10 @@ decision, 75 in all, with dates: [docs/decisions.md](docs/decisions.md).
 - **Citations are the model's.** One of the four answered live questions
   carried no `[n]` at all, although the grounding check scored it 1.0. The
   prompt asks for citations; the model does not always give them.
-- **The topic filter is not exact.** Of 64 harmless questions about a
-  business's own documents it refused 2 — cancelling a maintenance contract,
-  a call-out charge — and all 45 it must refuse, three runs on 02.10.2026.
+- **The topic filter is not exact.** Of 87 harmless questions about a
+  business's own documents it refused 1 — "How much early payment discount
+  can I deduct, and by when must I pay?" — and all 45 it must refuse, three
+  runs on 06.10.2026.
   The same question can get a different verdict in another run. Every change
   to the topics is measured first:
   [scripts/README.md](scripts/README.md#topic_probe--what-the-denied-topics-refuse-before-a-deploy).

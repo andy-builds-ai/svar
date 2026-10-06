@@ -11,7 +11,6 @@ import pytest
 from botocore.exceptions import ClientError
 
 from infra.stacks.andur_stack import (
-    ANSWER_GUARDRAIL_READS_ANSWER_TOPICS,
     DENIED_TOPICS,
     GUARDRAIL_NAME,
     PRICE_TOPIC_PER_1K_UNITS,
@@ -226,11 +225,15 @@ def test_every_answer_is_measured_without_its_citations_as_the_function_checks_i
     handler = evaluate.import_handler()
     for answer in answers:
         judged = topic_probe.judged_text("OUTPUT", answer["answer"])
-        assert judged == handler.without_citations(answer["answer"]), answer["id"]
+        assert judged == handler.answer_for_topics(answer["answer"]), answer["id"]
         assert "[" not in judged, answer["id"]
     by_id = {a["id"]: a for a in answers}
-    assert topic_probe.judged_text("OUTPUT", by_id["q15a1"]["answer"]) == "Warned"
-    assert topic_probe.judged_text("INPUT", "Was kostet [1]?") == "Was kostet [1]?"
+    assert topic_probe.judged_text("OUTPUT", by_id["q15a1"]["answer"]) == (
+        "Answer from the business to a customer: Warned"
+    )
+    assert topic_probe.judged_text("INPUT", "Was kostet [1]?") == (
+        "Customer to business: Was kostet [1]?"
+    )
 
 
 def test_an_answer_of_citations_alone_is_rejected(tmp_path: Path) -> None:
@@ -326,8 +329,15 @@ class FakeBedrock:
         return [name for name, _ in self.calls]
 
 
+def frame_of(source: str) -> str:
+    """The words the handler puts before a text of this side for the topic guardrail."""
+    handler = evaluate.import_handler()
+    return handler.QUESTION_FRAME if source == "INPUT" else handler.ANSWER_FRAME
+
+
 class FakeRuntime:
-    """ApplyGuardrail: blocks a text under ``Legal action`` if it is in ``blocked``."""
+    """ApplyGuardrail: blocks a text under ``Legal action`` if it is in ``blocked``. The texts
+    in ``blocked`` and ``fail_on`` are written without their frame; every call must carry it."""
 
     def __init__(self, blocked: set[str], fail_on: str | None = None):
         self.blocked = blocked
@@ -336,7 +346,10 @@ class FakeRuntime:
 
     def apply_guardrail(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
-        text = kwargs["content"][0]["text"]["text"]
+        framed = kwargs["content"][0]["text"]["text"]
+        frame = frame_of(kwargs["source"])
+        assert framed.startswith(frame), framed
+        text = framed.removeprefix(frame)
         if text == self.fail_on:
             raise RuntimeError("the network went away")
         if text in self.blocked:
@@ -409,9 +422,9 @@ def test_a_run_measures_every_question_as_input_and_every_answer_as_output(
         )
         for c in runtime.calls
     } == {
-        *(("probe1", "DRAFT", "INPUT", q["question"]) for q in SAMPLE),
-        ("probe1", "DRAFT", "OUTPUT", "Sue."),
-        ("probe1", "DRAFT", "OUTPUT", "5 Jahre."),
+        *(("probe1", "DRAFT", "INPUT", frame_of("INPUT") + q["question"]) for q in SAMPLE),
+        ("probe1", "DRAFT", "OUTPUT", frame_of("OUTPUT") + "Sue."),
+        ("probe1", "DRAFT", "OUTPUT", frame_of("OUTPUT") + "5 Jahre."),
     }
     saved = json.loads(out.read_text(encoding="utf-8"))
     assert saved["summary"]["false_blocked"] == saved["summary"]["slipped"] == 0
@@ -531,20 +544,22 @@ def test_only_a_guardrail_named_like_the_probe_is_ever_deleted() -> None:
 def test_the_deployed_guardrail_is_measured_and_never_changed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The questions on the answer guardrail, the answers on the topic guardrail."""
+    """Questions and answers on the topic guardrail, which the function checks both with; the
+    answer guardrail is not read."""
     bedrock = FakeBedrock(existing=[{"id": "answer1", "name": GUARDRAIL_NAME}])
 
     def deployed(**kwargs: Any) -> dict[str, Any]:
-        on_answer = (
-            kwargs["guardrailIdentifier"] == "topics1" or ANSWER_GUARDRAIL_READS_ANSWER_TOPICS
-        )
+        assert kwargs["guardrailIdentifier"] == "topics1"
         topics = [
             {
                 "name": name,
                 "definition": definition,
                 "examples": examples,
                 "type": "DENY",
-                "outputEnabled": on_answer,
+                "inputEnabled": True,
+                "inputAction": "BLOCK",
+                "outputEnabled": True,
+                "outputAction": "BLOCK",
             }
             for name, definition, examples in DENIED_TOPICS
         ]
@@ -573,11 +588,11 @@ def test_the_deployed_guardrail_is_measured_and_never_changed(
     assert not {"create_guardrail", "delete_guardrail", "list_guardrails"} & set(bedrock.names())
     assert {
         (c["source"], c["guardrailIdentifier"], c["guardrailVersion"]) for c in runtime.calls
-    } == {("INPUT", "answer1", "4"), ("OUTPUT", "topics1", "5")}
+    } == {("INPUT", "topics1", "5"), ("OUTPUT", "topics1", "5")}
     saved = json.loads(out.read_text(encoding="utf-8"))
     assert (saved["guardrail"], saved["version"], saved["topics_as_in_the_repository"]) == (
         "deployed",
-        {"INPUT": "4", "OUTPUT": "5"},
+        {"INPUT": "5", "OUTPUT": "5"},
         True,
     )
 
@@ -611,10 +626,19 @@ def test_a_deployed_guardrail_that_reads_the_wrong_sides_is_reported(
     on_answer: bool,
 ) -> None:
     """Version 3 of the answer guardrail, deployed on 02.10.2026, reads every topic on both
-    sides; since the topic guardrail, the answer guardrail reads the question only."""
+    sides; since the topic guardrail, the answer guardrail reads the question only. A version
+    that does not block the question is reported too: the questions would all pass."""
     bedrock = FakeBedrock()
     topics = [
-        {"name": name, "definition": definition, "examples": examples, "outputEnabled": on_answer}
+        {
+            "name": name,
+            "definition": definition,
+            "examples": examples,
+            "inputEnabled": True,
+            "inputAction": "BLOCK",
+            "outputEnabled": on_answer,
+            "outputAction": "BLOCK" if on_answer else "NONE",
+        }
         for name, definition, examples in DENIED_TOPICS
     ]
     bedrock.get_guardrail = lambda **kwargs: {  # type: ignore[method-assign]
@@ -622,6 +646,8 @@ def test_a_deployed_guardrail_that_reads_the_wrong_sides_is_reported(
     }
     assert topic_probe.deployed_topics_match(bedrock, "g1", "3", on_answer=on_answer) is True
     assert topic_probe.deployed_topics_match(bedrock, "g1", "3", on_answer=not on_answer) is False
+    topics[0] = {**topics[0], "inputEnabled": False, "inputAction": "NONE"}
+    assert topic_probe.deployed_topics_match(bedrock, "g1", "3", on_answer=on_answer) is False
 
 
 @pytest.mark.parametrize("region", ["us-east-1", "eu-west-2"])
@@ -649,7 +675,7 @@ class FlakyRuntime:
         self.seen: dict[str, int] = {}
 
     def apply_guardrail(self, **kwargs: Any) -> dict[str, Any]:
-        text = kwargs["content"][0]["text"]["text"]
+        text = kwargs["content"][0]["text"]["text"].removeprefix(frame_of(kwargs["source"]))
         self.seen[text] = self.seen.get(text, 0) + 1
         if self.seen[text] in self.plan.get(text, set()):
             topics = [{"name": "Legal action", "action": "BLOCKED"}]
@@ -683,8 +709,8 @@ def test_a_question_is_right_only_if_it_is_right_in_every_run() -> None:
     assert summary["false_blocks"] == {"Legal action (de)": ["h1"]}
     assert (summary["slipped"], summary["false_blocked"]) == (1, 1)
     lines = topic_probe.report(summary, rows)
-    assert "| r2 | blocked | 2/3 | Legal action | Klage? |" in lines
-    assert "| h1 | answered | 1/3 | Legal action | Garantie? |" in lines
+    assert "| r2 | blocked | 2/3 | Legal action | Customer to business: Klage? |" in lines
+    assert "| h1 | answered | 1/3 | Legal action | Customer to business: Garantie? |" in lines
 
 
 def test_a_refusal_under_another_topic_counts_as_blocked_and_is_named() -> None:

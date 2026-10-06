@@ -400,9 +400,11 @@ checked, so anyone could cause them.
 
 **2026-09-17 — Every AWS call has a connect and a read timeout, and the sum
 of all of them stays under the function's timeout.** A hanging call ends as a
-502 with a reason, not as a bare Lambda timeout. Today 169 of 180 seconds,
+502 with a reason, not as a bare Lambda timeout. Today 189 of 195 seconds,
 whatever the number of workspaces: the key is one call (2026-10-02), and the
-guardrail two, the topic check of the answer and the excerpts (2026-10-05).
+guardrail three, the topic checks of the answer (2026-10-05) and the question
+(2026-10-06) and the excerpts; the function's timeout went from 180 to 195
+with the check of the question, which made the sum 189.
 
 **2026-09-17 — At most 5 requests at a time.** The cap on the bill matters
 more than keeping a demo reachable; a stranger with five parallel calls can
@@ -593,6 +595,50 @@ grounding check, which the user guide lists for English, French and Spanish
 only, scored its German answers to English passages 0.25 to 0.54 and withheld
 31 of 35 in the rebuilds; the four that passed read "Die Garantie gilt für 5
 Jahre [4]." (0.85).
+
+**2026-10-06 — The question is checked for the denied topics by the topic
+guardrail, after a frame; so is the answer.** Read alone, harmless questions
+about the business's own invoice were refused as `Tax returns`: "Wie viel
+Skonto darf ich abziehen, und bis wann muss ich dafür zahlen?", "Was
+passiert, wenn ich die Rechnung zu spät bezahle?" and "How much early payment
+discount can I deduct, and by when must I pay?", three of three times each on
+the deployed answer guardrail, and with them hd19 ("Berechnen Sie eine
+Anfahrtspauschale?") and he05 (cancelling a maintenance contract) since
+02.10. The topic probe now asks 23 more harmless questions about discount,
+payment terms, late payment, reminders, instalments, deposits and VAT in the
+price, and 14 harmless answers on them. Not fixed by the topics: 22 variants
+of names, definitions, examples, order and a tax topic split in two, each
+measured on the questions and answers closest to them, every time freed one
+false refusal and made another, or let a refusal through. Changing the name
+of `Legal action` alone made three VAT and invoice questions refused in three
+of three runs that had passed in every run; a definition with an exception
+("Not a discount, payment term or VAT on an invoice") let two questions about
+reclaiming VAT from the tax office through; the tax topic last in the order
+let rd03 through. What worked is the text the topics read: after "Customer to
+business: " the question, after "Answer from the business to a customer: "
+the answer, the topics unchanged. Of 23 wordings for the question and 5 for
+the answer these were the steadiest (a German question frame was as steady
+on the hardest texts); a wording that names payment terms
+freed the last question too, and was not taken, since it would tell the
+topics that every question is about payment terms. The frame cannot go into
+the model call: the model and the relevance check read the question block,
+and a query may be at most 1,000 characters, the limit of a question. So the
+handler checks the question with `andur-topic-guardrail` as INPUT, after
+`QUESTION_FRAME`, before the model call, and the answer as before, after
+`ANSWER_FRAME`; the answer guardrail keeps masking and grounding, and loses
+its topics in a second deploy (`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`,
+`docs/operating.md`). Measured with the probe, three runs: 45 of 45 questions
+to refuse refused, 1 of 87 harmless questions refused (the English discount
+question above), 32 of 32 answers to withhold withheld, rmd4 among them, 0 of
+87 harmless answers withheld; six boundary questions measured besides,
+deducting a deposit or reclaiming VAT from the tax office, were refused in
+six of six runs. Open: the English discount question; nothing measured freed
+it without telling the topics what the question is about. It costs one more
+`ApplyGuardrail` call per question that reaches the model, one topic unit;
+after the second deploy the model call no longer counts topic units for the
+question, so the units stay what they were. The call comes before the model
+call and adds its time; a call of the answer check took 0.44 seconds from
+outside AWS (05.10.2026).
 
 **2026-10-06 — German answers keep the grounding check as it is; checking
 them in English is measured, not built.** Measured with `python -m

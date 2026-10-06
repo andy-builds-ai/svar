@@ -278,7 +278,8 @@ def topic_guard_response(*topics: str, units: int = 1) -> dict[str, Any]:
 
 class FakeGuardrail:
     """The guardrail client: ApplyGuardrail only. The excerpt guardrail's calls go to
-    ``calls``, the topic guardrail's to ``topic_calls``; each has its response and error."""
+    ``calls``, the topic guardrail's on the answer (OUTPUT) to ``topic_calls`` and on the
+    question (INPUT) to ``question_calls``; each has its response and error."""
 
     def __init__(
         self, response: dict[str, Any] | None = None, error: Exception | None = None
@@ -289,9 +290,17 @@ class FakeGuardrail:
         self.topic_response = topic_guard_response()
         self.topic_error: Exception | None = None
         self.topic_calls: list[dict[str, Any]] = []
+        self.question_response = topic_guard_response()
+        self.question_error: Exception | None = None
+        self.question_calls: list[dict[str, Any]] = []
 
     def apply_guardrail(self, **kwargs: Any) -> dict[str, Any]:
         if kwargs["guardrailIdentifier"] == ENVIRONMENT["TOPIC_GUARDRAIL_ID"]:
+            if kwargs["source"] == "INPUT":
+                self.question_calls.append(kwargs)
+                if self.question_error:
+                    raise self.question_error
+                return self.question_response
             self.topic_calls.append(kwargs)
             if self.topic_error:
                 raise self.topic_error
@@ -3008,8 +3017,8 @@ def test_an_answer_carries_sources_layers_model_usage_and_latency(aws: dict[str,
     assert body["usage"] == {"input_tokens": 1624, "output_tokens": 50}
     assert body["guardrail"] == {"action": "none", "policies": []}
     # 0.000976 for the answer, plus one PII unit at 0.10 per thousand for the excerpts and one
-    # topic unit at 0.15 per thousand for the topic check of the answer.
-    assert body["cost_usd"] == 0.001226
+    # topic unit at 0.15 per thousand each for the topic checks of the question and the answer.
+    assert body["cost_usd"] == 0.001376
     assert body["price_date"] == "2026-09-23"
     assert isinstance(body["latency_ms"], int)
     assert set(body) == {
@@ -3042,8 +3051,9 @@ def test_a_tax_question_comes_back_as_the_guardrail_message_and_is_still_a_200(
     # The handler's sentence, not the one AWS sent back.
     assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS["en"]
     assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Tax advice"]}
-    # One topic unit at 0.15 per thousand, nothing else: no excerpt was masked.
-    assert body["cost_usd"] == 0.00015
+    # One topic unit at 0.15 per thousand on the model call and one for the topic check of the
+    # question, nothing else: no excerpt was masked.
+    assert body["cost_usd"] == 0.0003
 
 
 def test_a_refused_question_gets_no_sources_and_its_excerpts_are_never_guarded(
@@ -3162,7 +3172,7 @@ def test_an_action_other_than_none_or_intervened_drops_every_excerpt(
     status, body = call(event())
     assert status == 200
     assert [source["excerpt"] for source in body["sources"]] == [None, None]
-    assert body["cost_usd"] == 0.001226
+    assert body["cost_usd"] == 0.001376
     (line,) = [line for line in log_lines(caplog) if line["event"] == "excerpt-guard-unusable"]
     assert line["action"] == action
 
@@ -3174,9 +3184,9 @@ def test_a_split_that_does_not_fit_keeps_the_units_counted(aws: dict[str, Any]) 
     )
     _, body = call(event())
     assert [source["excerpt"] for source in body["sources"]] == [None, None]
-    # 0.000976 for the answer, plus two PII units at 0.10 per thousand and one topic unit at
-    # 0.15 per thousand.
-    assert body["cost_usd"] == 0.001326
+    # 0.000976 for the answer, plus two PII units at 0.10 per thousand and two topic units at
+    # 0.15 per thousand, for the question and the answer.
+    assert body["cost_usd"] == 0.001476
 
 
 def test_a_failed_excerpt_guardrail_drops_every_excerpt_and_the_cost_is_unknown(
@@ -3416,11 +3426,11 @@ def test_an_answer_logs_one_line_with_tokens_hits_dropped_and_latency(
         "grounding_score": 0.93,
         "relevance_score": 0.88,
         "guardrail_units": {
-            "topicPolicyUnits": 3,
+            "topicPolicyUnits": 4,
             "sensitiveInformationPolicyUnits": 2,
             "contextualGroundingPolicyUnits": 3,
         },
-        "cost_usd": 0.001226,
+        "cost_usd": 0.001376,
         "price_date": "2026-09-23",
         "latency_ms": line["latency_ms"],
     }
@@ -3789,7 +3799,7 @@ def test_the_topic_guardrail_reads_the_answer_without_citations_the_reader_gets_
         "guardrailIdentifier": "gr-topics",
         "guardrailVersion": "3",
         "source": "OUTPUT",
-        "content": [{"text": {"text": "Warned"}}],
+        "content": [{"text": {"text": "Answer from the business to a customer: Warned"}}],
     }
     assert len(aws["guardrail"].calls) == 1  # the excerpts, as before
 
@@ -3805,7 +3815,9 @@ def test_the_topic_guardrail_reads_the_masked_answer_without_the_note(
     )
     call(event())
     (request,) = aws["guardrail"].topic_calls
-    assert request["content"] == [{"text": {"text": "Call {NAME} on {PHONE}."}}]
+    assert request["content"] == [
+        {"text": {"text": "Answer from the business to a customer: Call {NAME} on {PHONE}."}}
+    ]
 
 
 @pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
@@ -3825,8 +3837,8 @@ def test_an_answer_the_topic_guardrail_blocks_is_withheld_in_the_language_asked(
     # can tell what the answer was withheld for. No excerpts, so no excerpt guardrail call.
     assert body["sources"] == [] and body["layers"] == []
     assert aws["guardrail"].calls == []
-    # 0.000976 for the answer, one topic unit for the check.
-    assert body["cost_usd"] == 0.001126
+    # 0.000976 for the answer, one topic unit each for the checks of the question and the answer.
+    assert body["cost_usd"] == 0.001276
 
 
 def test_an_answer_withheld_for_a_topic_on_the_model_call_loses_its_sources_too(
@@ -3889,7 +3901,8 @@ def test_an_answer_of_citations_alone_costs_no_topic_check(aws: dict[str, Any]) 
     assert status == 200
     assert body["answer"] == "[1][2]"
     assert aws["guardrail"].topic_calls == []
-    assert body["cost_usd"] == 0.001076
+    # 0.000976 for the answer and one topic unit for the check of the question.
+    assert body["cost_usd"] == 0.001226
 
 
 @pytest.mark.parametrize(
@@ -3921,6 +3934,121 @@ def test_unknown_topic_units_make_the_cost_unknown(aws: dict[str, Any]) -> None:
     assert body["cost_usd"] is None
 
 
+# --- The topic check of the question, after its frame ---
+
+
+def test_the_topic_guardrail_reads_the_question_after_its_frame_before_the_model(
+    aws: dict[str, Any],
+) -> None:
+    """As INPUT, after `QUESTION_FRAME`; the model call gets the question as it was asked."""
+    status, _ = call(event())
+    assert status == 200
+    (request,) = aws["guardrail"].question_calls
+    assert request == {
+        "guardrailIdentifier": "gr-topics",
+        "guardrailVersion": "3",
+        "source": "INPUT",
+        "content": [{"text": {"text": "Customer to business: How do I export project data?"}}],
+    }
+    (model_call,) = aws["bedrock-runtime"].calls
+    question_block = model_call["messages"][0]["content"][-1]["guardContent"]["text"]
+    assert question_block["text"] == "How do I export project data?"
+
+
+def test_the_frames_are_the_measured_ones() -> None:
+    """The words the topic probe measured on 06.10.2026; another wording moves verdicts."""
+    assert handler.question_for_topics("Wie viel Skonto bekomme ich?") == (
+        "Customer to business: Wie viel Skonto bekomme ich?"
+    )
+    assert handler.answer_for_topics("2 % Skonto [1].") == (
+        "Answer from the business to a customer: 2 % Skonto."
+    )
+    assert handler.answer_for_topics(" [1][2] ") == ""
+
+
+@pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
+def test_a_question_the_topic_guardrail_refuses_is_never_put_to_the_model(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture, asked: str | None, spoken: str
+) -> None:
+    """Refused like a question the answer guardrail refuses: the handler's sentence, a 200, no
+    sources; and no model call, no answer check, no excerpts. It costs the check's unit."""
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["guardrail"].question_response = topic_guard_response("Tax returns")
+    status, body = call(event(in_(asked)))
+    assert status == 200
+    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS[spoken]
+    assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Tax returns"]}
+    assert (body["sources"], body["layers"], body["model"]) == ([], [], None)
+    assert body["usage"] == {"input_tokens": 0, "output_tokens": 0}
+    assert body["cost_usd"] == 0.00015
+    assert aws["bedrock-runtime"].calls == []
+    assert aws["guardrail"].topic_calls == [] and aws["guardrail"].calls == []
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "answered"]
+    assert (line["guardrail"], line["guardrail_policies"]) == ("blocked", ["topic:Tax returns"])
+    assert (line["hits"], line["cited"]) == (2, 0)
+
+
+def test_an_intervention_on_the_question_without_a_named_topic_still_refuses_it(
+    aws: dict[str, Any],
+) -> None:
+    aws["guardrail"].question_response = {
+        "action": "GUARDRAIL_INTERVENED",
+        "usage": {"topicPolicyUnits": 1},
+        "assessments": [],
+    }
+    _, body = call(event())
+    assert body["guardrail"] == {"action": "blocked", "policies": ["topic:unknown"]}
+    assert aws["bedrock-runtime"].calls == []
+
+
+def test_a_refused_question_with_unknown_units_has_an_unknown_cost(aws: dict[str, Any]) -> None:
+    aws["guardrail"].question_response = {**topic_guard_response("Tax returns"), "usage": {}}
+    _, body = call(event())
+    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS["en"]
+    assert body["cost_usd"] is None
+
+
+def test_unknown_units_of_the_question_check_make_the_answer_s_cost_unknown(
+    aws: dict[str, Any],
+) -> None:
+    aws["guardrail"].question_response = {"action": "NONE", "usage": {}, "assessments": []}
+    status, body = call(event())
+    assert status == 200
+    assert body["cost_usd"] is None
+
+
+@pytest.mark.parametrize(
+    ("asked", "sentence"),
+    [
+        ("en", "The question could not be checked for the denied topics: access denied."),
+        ("de", "Die Frage konnte nicht auf die gesperrten Themen geprüft werden: access denied."),
+    ],
+)
+def test_a_question_the_topic_guardrail_cannot_check_is_not_answered(
+    aws: dict[str, Any], caplog: pytest.LogCaptureFixture, asked: str, sentence: str
+) -> None:
+    """Fail closed: a 502 with the reason, and the model is never asked."""
+    caplog.set_level(logging.INFO, logger="andur")
+    aws["guardrail"].question_error = client_error(
+        "AccessDeniedException", operation="ApplyGuardrail"
+    )
+    status, body = call(event(in_(asked)))
+    assert status == 502
+    assert body == {"error": sentence}
+    assert aws["bedrock-runtime"].calls == []
+    (line,) = [line for line in log_lines(caplog) if line["event"] == "topic-guard-failed"]
+    assert (line["source"], line["detail"]) == ("INPUT", "ClientError: AccessDeniedException")
+
+
+def test_a_question_with_no_passages_is_not_checked(aws: dict[str, Any]) -> None:
+    """Nothing found, nothing asked: the sentence for no sources, and no call that costs."""
+    aws["bedrock-agent-runtime"].results = []
+    _, body = call(event())
+    assert body["answer"] == handler.NO_SOURCES_ANSWERS["en"]
+    assert aws["guardrail"].question_calls == []
+    assert body["cost_usd"] == 0.0
+
+
 def test_the_topic_check_adds_its_units_to_the_topic_units() -> None:
     units = {
         "topicPolicyUnits": 1,
@@ -3947,6 +4075,11 @@ def test_the_guardrail_has_blocked_only_when_aws_stopped_and_the_trace_says_bloc
     )
     _, body = call(event(in_("de")))
     assert body["answer"] == "Export it [1]."
+    # The model's own text goes to the reader, so the topic check reads it.
+    (request,) = aws["guardrail"].topic_calls
+    assert request["content"] == [
+        {"text": {"text": "Answer from the business to a customer: Export it."}}
+    ]
 
     aws["bedrock-runtime"].response = blocked_by({})
     _, body = call(event(in_("de")))
@@ -4127,3 +4260,20 @@ def test_what_is_wrong_before_the_body_is_read_is_told_in_english(aws: dict[str,
         status, got = call(event(body))
         assert status == 400
         assert got["error"].isascii()
+
+
+def test_an_unstopped_answer_with_a_blocked_topic_in_the_trace_is_still_checked(
+    aws: dict[str, Any],
+) -> None:
+    """The trace says BLOCKED, Bedrock did not stop: the model's text is what the reader would
+    get, so the topic guardrail decides, and withholds it here."""
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Our managing director is married [1]."}],
+        "end_turn",
+        guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED, output_assessment={}),
+    )
+    aws["guardrail"].topic_response = topic_guard_response("Private lives")
+    _, body = call(event())
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert "married" not in json.dumps(body)
+    assert len(aws["guardrail"].topic_calls) == 1

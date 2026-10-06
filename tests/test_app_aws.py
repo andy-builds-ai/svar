@@ -60,36 +60,38 @@ def test_the_budget_counter_waits_the_shortest() -> None:
 
 def test_worst_case_is_every_attempt_timing_out() -> None:
     """ssm 1 × 22, budget 2 × 16, retrieve 2 × (3 + 10) + 6, converse 1 × (3 + 40),
-    guardrail 2 × (2 × (2 + 5) + 6).
+    guardrail 3 × (2 × (2 + 5) + 6).
 
     Once the key, because the handler reads only the requested workspace's key
     and reads it at most once per request, however many workspaces there are.
     Twice the budget table, because an item whose own window outlasts it is put
-    right with a second write. Twice the guardrail: the topic check of the answer
-    and the excerpts. One call each for retrieve and converse.
+    right with a second write. Three times the guardrail: the topic check of the
+    question before the model call, the topic check of the answer and the excerpts
+    after it. One call each for retrieve and converse.
     """
     assert aws.KEY_READS_PER_REQUEST == 1
     assert aws.BUDGET_WRITES_PER_REQUEST == 2
-    assert aws.GUARDRAIL_CALLS_PER_REQUEST == 2
-    assert aws.worst_case_seconds() == 1 * 22 + 2 * 16 + 32 + 43 + 2 * 20 == 169
+    assert (aws.GUARDRAIL_CALLS_PER_REQUEST, aws.GUARDRAIL_CALLS_AFTER_MODEL) == (3, 2)
+    assert aws.worst_case_seconds() == 1 * 22 + 2 * 16 + 32 + 43 + 3 * 20 == 189
 
 
 def test_a_second_model_call_ends_before_cloudfront_gives_up() -> None:
     """It may start until second 30: 2 of pause, 3 + 40 of converse, twice 2 × (2 + 5) + 6
     of guardrail (the topic check of the answer and the excerpts), and the answer is back at
     115 — 5 seconds before CloudFront's 120, for the cold start and the way in that the
-    handler's clock does not see. The worst case of every timeout stays 169."""
+    handler's clock does not see. The topic check of the question comes before the model
+    call, so it is in the time already spent. The worst case of every timeout stays 189."""
     assert aws.ORIGIN_MARGIN_SECONDS == 5
     assert aws.latest_model_retry_start() == 120 - 5 - 2 - 43 - 2 * 20 == 30
     ends = (
         aws.latest_model_retry_start()
         + aws.MODEL_RETRY_PAUSE_SECONDS
         + aws.call_seconds("bedrock-runtime")
-        + aws.GUARDRAIL_CALLS_PER_REQUEST * aws.call_seconds("guardrail")
+        + aws.GUARDRAIL_CALLS_AFTER_MODEL * aws.call_seconds("guardrail")
     )
     assert ends + aws.ORIGIN_MARGIN_SECONDS <= aws.ORIGIN_TIMEOUT_SECONDS
     assert ends < aws.ORIGIN_TIMEOUT_SECONDS
-    assert aws.worst_case_seconds() == 169
+    assert aws.worst_case_seconds() == 189
     assert aws.CLIENT_LIMITS["bedrock-runtime"].attempts == 1
 
 

@@ -156,20 +156,22 @@ BLOCKED_OUTPUT_MESSAGE = (
 
 EXCERPT_GUARDRAIL_NAME = "andur-excerpt-guardrail"
 
-#: The guardrail that checks the answer for `DENIED_TOPICS`, with its citations taken out: on
-#: the answer as the model writes it, `Private lives` withheld short harmless answers whose
-#: citations read [1][4] or [1][2][4], and without them none (04.10.2026, docs/decisions.md).
+#: The guardrail that checks the question and the answer for `DENIED_TOPICS`, each after its
+#: frame and the answer with its citations taken out: on the answer as the model writes it,
+#: `Private lives` withheld short harmless answers whose citations read [1][4] or [1][2][4],
+#: and without them none (04.10.2026, docs/decisions.md).
 TOPIC_GUARDRAIL_NAME = "andur-topic-guardrail"
 
-#: Whether the answer guardrail on the model call reads the denied topics in the answer too.
-#: True for the one deploy that brings in the topic guardrail: in the seconds CloudFormation
-#: gives the old code the new environment, the old code would call an answer guardrail that no
-#: longer reads the answer's topics, without the topic check it does not know yet. With this
-#: True the answer guardrail reads the answer's topics as deployed until now; the new code checks
-#: the answer twice
-#: (on the model call, with citations, and by the topic guardrail). Set False in a second
-#: deploy, once the first is through: then old and new code both know the topic check.
-ANSWER_GUARDRAIL_READS_ANSWER_TOPICS = False
+#: Whether the answer guardrail on the model call reads the denied topics in the question, as
+#: it did until the function checked the question with the topic guardrail (06.10.2026). True
+#: for the one deploy that brings in that check: in the seconds CloudFormation gives the old
+#: code the new environment, the old code would call an answer guardrail that no longer reads
+#: the question's topics, without the check it does not know yet. With this True the question
+#: is checked twice, as it is read alone and after `QUESTION_FRAME`, so harmless questions the
+#: first refuses stay refused. Set False in a second deploy, once the first is through: then old
+#: and new code both check the question with the topic guardrail. The answer guardrail never
+#: reads the answer's topics; the topic guardrail does (05.10.2026).
+ANSWER_GUARDRAIL_READS_QUESTION_TOPICS = True
 
 #: Required by Bedrock, never shown: masking replaces text, it does not block.
 EXCERPT_BLOCKED_MESSAGE = "This excerpt was withheld."
@@ -222,7 +224,9 @@ LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_14
 
 ANSWER_FUNCTION_NAME = "andur-answer"
 
-ANSWER_TIMEOUT_SECONDS = 180
+#: Longer than `worst_case_seconds` in app/aws.py, 189 since the topic check of the question
+#: (06.10.2026), so a hanging AWS call ends as the handler's 502, not as a Lambda timeout.
+ANSWER_TIMEOUT_SECONDS = 195
 
 ANSWER_MEMORY_MB = 512
 
@@ -704,8 +708,13 @@ class AndurStack(Stack):
 
     def _create_guardrail(self) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
         """The guardrail on every answer, and the numbered version the function uses. Its
-        topics read the question, and the answer only while
-        `ANSWER_GUARDRAIL_READS_ANSWER_TOPICS`; the topic guardrail reads the answer."""
+        topics read the question only while `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`, and never
+        the answer; the topic guardrail reads both."""
+        topics = (
+            {"topic_policy_config": self._topic_policy(on_answer=False)}
+            if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS
+            else {}
+        )
         return self._guardrail_with_version(
             "AnswerGuardrail",
             "answer",
@@ -714,12 +723,12 @@ class AndurStack(Stack):
                 "description": (
                     "Andur: refuses advice topics, masks personal details, withholds "
                     "ungrounded answers."
+                    if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS
+                    else "Andur: masks personal details, withholds ungrounded answers."
                 ),
                 "blocked_input_messaging": BLOCKED_INPUT_MESSAGE,
                 "blocked_outputs_messaging": BLOCKED_OUTPUT_MESSAGE,
-                "topic_policy_config": self._topic_policy(
-                    on_answer=ANSWER_GUARDRAIL_READS_ANSWER_TOPICS
-                ),
+                **topics,
                 "cross_region_config": bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
                     guardrail_profile_arn=self._guardrail_profile_arn(self.region)
                 ),
@@ -758,15 +767,21 @@ class AndurStack(Stack):
         )
 
     def _create_topic_guardrail(self) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
-        """The guardrail that checks the answer, without its citations, for the denied topics,
-        and its numbered version. The function applies it as OUTPUT; its topics are set on
-        both sides, exactly like the guardrail `python -m scripts.topic_probe` measures."""
+        """The guardrail that checks the question and the answer, without its citations, for
+        the denied topics, and its numbered version. The function applies it as INPUT to the
+        question and as OUTPUT to the answer, each after its frame; its topics are set on both
+        sides, exactly like the guardrail `python -m scripts.topic_probe` measures."""
         return self._guardrail_with_version(
             "TopicGuardrail",
             "topic",
             {
                 "name": TOPIC_GUARDRAIL_NAME,
-                "description": "Andur: withholds answers that stray into a denied topic.",
+                # Changed with the flag, so the first deploy makes no new version of it.
+                "description": (
+                    "Andur: withholds answers that stray into a denied topic."
+                    if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS
+                    else "Andur: refuses questions and withholds answers on a denied topic."
+                ),
                 "blocked_input_messaging": BLOCKED_INPUT_MESSAGE,
                 "blocked_outputs_messaging": BLOCKED_OUTPUT_MESSAGE,
                 "topic_policy_config": self._topic_policy(on_answer=True),

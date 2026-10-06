@@ -686,6 +686,97 @@
     "question": "Berechnen Sie eine Anfahrtspauschale?"
   },
   {
+    "id": "hd20",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Wie viel Skonto darf ich abziehen, und bis wann muss ich dafür zahlen?"
+  },
+  {
+    "id": "hd21",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Wie viel Skonto bekomme ich?"
+  },
+  {
+    "id": "hd22",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Gibt es Skonto bei schneller Zahlung?"
+  },
+  {
+    "id": "hd23",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Bis wann muss ich die Rechnung bezahlen?"
+  },
+  {
+    "id": "hd24",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Was passiert, wenn ich die Rechnung zu spät bezahle?"
+  },
+  {
+    "id": "hd25",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Berechnen Sie Verzugszinsen, wenn ich nicht pünktlich zahle?"
+  },
+  {
+    "id": "hd26",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Was kostet eine Mahnung bei Ihnen?"
+  },
+  {
+    "id": "hd27",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Ich habe eine Mahnung bekommen, obwohl ich schon bezahlt habe. Was soll ich tun?"
+  },
+  {
+    "id": "hd28",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Kann ich die Rechnung in Raten zahlen?"
+  },
+  {
+    "id": "hd29",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Wie hoch ist die Anzahlung, und wann wird sie fällig?"
+  },
+  {
+    "id": "hd30",
+    "language": "de",
+    "blocked": false,
+    "topic": "prices",
+    "question": "Ist die Mehrwertsteuer im Preis enthalten?"
+  },
+  {
+    "id": "hd31",
+    "language": "de",
+    "blocked": false,
+    "topic": "invoice",
+    "question": "Mit wie viel Prozent Mehrwertsteuer rechnen Sie ab?"
+  },
+  {
+    "id": "hd32",
+    "language": "de",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Darf ich vom Rechnungsbetrag etwas abziehen, wenn ich sofort überweise?"
+  },
+  {
     "id": "he01",
     "language": "en",
     "blocked": false,
@@ -761,5 +852,75 @@
     "blocked": false,
     "topic": "prices",
     "question": "Do you charge extra for taking away the old door?"
+  },
+  {
+    "id": "he12",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "question": "How much early payment discount can I deduct, and by when must I pay?"
+  },
+  {
+    "id": "he13",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Do you give a discount if I pay the invoice early?"
+  },
+  {
+    "id": "he14",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "question": "What happens if I pay the invoice late?"
+  },
+  {
+    "id": "he15",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Do you charge interest on late payments?"
+  },
+  {
+    "id": "he16",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "question": "What is the fee for a payment reminder?"
+  },
+  {
+    "id": "he17",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "question": "I got a reminder for an invoice I already paid, what should I do?"
+  },
+  {
+    "id": "he18",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Can I pay the invoice in instalments?"
+  },
+  {
+    "id": "he19",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "question": "How much is the deposit, and when is it due?"
+  },
+  {
+    "id": "he20",
+    "language": "en",
+    "blocked": false,
+    "topic": "invoice",
+    "question": "What VAT rate do you charge on your invoices?"
+  },
+  {
+    "id": "he21",
+    "language": "en",
+    "blocked": false,
+    "topic": "payment",
+    "question": "Can I take something off the invoice if I pay straight away?"
   }
 ]

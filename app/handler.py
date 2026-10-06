@@ -296,7 +296,8 @@ class LLMError(HandlerError):
 
 
 class TopicCheckError(HandlerError):
-    """The answer could not be checked for the denied topics, so it is not given."""
+    """The question or the answer could not be checked for the denied topics, so the question
+    is not answered, or the answer not given."""
 
     status = 502
 
@@ -1504,32 +1505,85 @@ def without_citations(answer: str) -> str:
     return _CITATION_WITH_SPACE.sub("", answer).strip()
 
 
+#: What the topic guardrail reads before the question and before the answer. Read alone, short
+#: questions and answers about the business's own invoices were refused as tax questions ("Wie
+#: viel Skonto darf ich abziehen, und bis wann muss ich dafür zahlen?"); after these words every
+#: harmless question and answer of the topic probe's sets but one passed, and every one to refuse
+#: was refused, in three runs (docs/decisions.md, 06.10.2026). The wording moves verdicts like a
+#: topic's definition does: measure a change with `python -m scripts.topic_probe`.
+QUESTION_FRAME = "Customer to business: "
+ANSWER_FRAME = "Answer from the business to a customer: "
+
+#: What a failed topic check says, by the side it checked.
+TOPIC_CHECK_FAILED = {
+    "INPUT": (
+        "The question could not be checked for the denied topics: {cause}.",
+        "Die Frage konnte nicht auf die gesperrten Themen geprüft werden: {cause}.",
+    ),
+    "OUTPUT": (
+        "The answer could not be checked for the denied topics: {cause}.",
+        "Die Antwort konnte nicht auf die gesperrten Themen geprüft werden: {cause}.",
+    ),
+}
+
+
+def question_for_topics(question: str) -> str:
+    """The question as the topic guardrail reads it: after `QUESTION_FRAME`."""
+    return QUESTION_FRAME + question
+
+
+def answer_for_topics(answer: str) -> str:
+    """The answer as the topic guardrail reads it: without its citations, after
+    `ANSWER_FRAME`; empty when nothing but citations is left."""
+    text = without_citations(answer)
+    return ANSWER_FRAME + text if text else ""
+
+
+def check_question_topics(
+    guardrail_client: Any, settings: Settings, question: str
+) -> dict[str, Any]:
+    """The denied topics the question asks about, and the topic units of the check.
+
+    Checked by the topic guardrail as INPUT, after `QUESTION_FRAME`, before the model is asked.
+    The answer guardrail on the model call reads the question for itself only while
+    `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` is set in the stack. A failed check answers
+    nothing: the question is not asked unchecked.
+    """
+    return check_topics(guardrail_client, settings, "INPUT", question_for_topics(question))
+
+
 def check_answer_topics(guardrail_client: Any, settings: Settings, answer: str) -> dict[str, Any]:
     """The denied topics the answer strays into, checked without its citations, and the topic
     units of the check.
 
-    The answer guardrail on the model call reads the topics in the question only: in the answer
-    as the model writes it, `Private lives` withheld short harmless answers for their citations
+    The answer guardrail on the model call does not read the answer's topics: in the answer as
+    the model writes it, `Private lives` withheld short harmless answers for their citations
     alone (docs/decisions.md, 04.10.2026). A text of citations alone has no words to check and
     costs no call. A failed check withholds the answer: it is not given unchecked.
     """
-    text = without_citations(answer)
+    text = answer_for_topics(answer)
     if not text:
         return {"topics": [], "units": 0}
+    return check_topics(guardrail_client, settings, "OUTPUT", text)
+
+
+def check_topics(
+    guardrail_client: Any, settings: Settings, source: str, text: str
+) -> dict[str, Any]:
+    """The denied topics the topic guardrail blocks in ``text``, read as ``source``, and the
+    topic units of the call; a failed call raises `TopicCheckError`."""
     try:
         response = guardrail_client.apply_guardrail(
             guardrailIdentifier=settings.topic_guardrail_id,
             guardrailVersion=settings.topic_guardrail_version,
-            source="OUTPUT",
+            source=source,
             content=[{"text": {"text": text}}],
         )
     except aws.botocore_errors() as exc:
-        log_event("topic-guard-failed", detail=aws.error_detail(exc))
+        log_event("topic-guard-failed", source=source, detail=aws.error_detail(exc))
+        english, german = TOPIC_CHECK_FAILED[source]
         cause = aws.error_cause(exc)
-        raise TopicCheckError(
-            f"The answer could not be checked for the denied topics: {cause}.",
-            f"Die Antwort konnte nicht auf die gesperrten Themen geprüft werden: {cause}.",
-        ) from exc
+        raise TopicCheckError(english.format(cause=cause), german.format(cause=cause)) from exc
     topics = [
         f"topic:{topic.get('name')}"
         for assessment in response.get("assessments", [])
@@ -1586,6 +1640,37 @@ class RequestRecord:
     language: str = DEFAULT_LANGUAGE
 
 
+def refused_for_topics(
+    settings: Settings, checked: Mapping[str, Any], record: RequestRecord
+) -> dict[str, Any]:
+    """The response to a question the topic guardrail refused: the handler's sentence, no
+    sources, no model call; it costs the check's topic units."""
+    units = (
+        None
+        if checked["units"] is None
+        else {**{name: 0 for name in PRICED_UNITS}, "topicPolicyUnits": checked["units"]}
+    )
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    record.guardrail = {
+        "action": "blocked",
+        "policies": checked["topics"],
+        "grounding_score": None,
+        "relevance_score": None,
+        "units": units,
+    }
+    return {
+        "answer": in_language(QUESTION_REFUSED_ANSWERS, record.language),
+        "sources": [],
+        "layers": [],
+        "model": None,
+        "stop_reason": None,
+        "usage": usage,
+        "guardrail": {"action": "blocked", "policies": checked["topics"]},
+        "cost_usd": answer_cost(settings.prices, usage, units),
+        "price_date": settings.price_date,
+    }
+
+
 def answer_question(
     settings: Settings, workspace: str, question: str, record: RequestRecord
 ) -> dict[str, Any]:
@@ -1620,6 +1705,10 @@ def answer_question(
             "price_date": settings.price_date,
         }
 
+    asked = check_question_topics(client("guardrail", settings.region), settings, question)
+    if asked["topics"]:
+        return refused_for_topics(settings, asked, record)
+
     response = ask_model(
         client("bedrock-runtime", settings.region),
         settings,
@@ -1627,10 +1716,12 @@ def answer_question(
         record,
     )
     guardrail = read_guardrail(response)
-    answer = blocked_answer(response, guardrail, record.language) or extract_answer(
-        response, guardrail["action"], record.language
-    )
-    if guardrail["action"] != "blocked":
+    guardrail["units"] = add_units(guardrail["units"], asked["units"], "topicPolicyUnits")
+    replaced = blocked_answer(response, guardrail, record.language)
+    answer = replaced or extract_answer(response, guardrail["action"], record.language)
+    # Whatever of the model's text the reader gets is checked; only the handler's own sentence
+    # is not, also when the trace says BLOCKED on an answer Bedrock did not stop.
+    if replaced is None:
         checked = check_answer_topics(
             client("guardrail", settings.region), settings, model_text(response) or ""
         )

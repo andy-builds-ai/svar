@@ -9,7 +9,7 @@ Seven commands, all run from the repository root:
 | `python -m scripts.ask` | Asks the deployed answer function a question and prints the answer with its sources. |
 | `python -m scripts.evaluate` | Asks 30 fixed questions of each answer model the way the function does and prints hit rate, citations and cost. |
 | `python -m scripts.workspace` | Adds a workspace's key, puts it on a plan, or removes a workspace: key, budget items, documents and vectors. |
-| `python -m scripts.topic_probe` | Measures the denied topics against 109 fixed questions and 105 fixed answers, the answers without their citations: which harmless ones they block and which they should block slip through. |
+| `python -m scripts.topic_probe` | Measures the denied topics against 132 fixed questions and 119 fixed answers, each after its frame, the answers without their citations: which harmless ones they block and which they should block slip through. |
 | `python -m scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
 
 ## What they need
@@ -478,60 +478,65 @@ all five:
 
 ```bash
 python -m scripts.topic_probe --out probe.json             # DENIED_TOPICS as they are in the repository
-python -m scripts.topic_probe --deployed --out probe.json  # the deployed guardrails
+python -m scripts.topic_probe --deployed --out probe.json  # the deployed topic guardrail
 ```
 
-Every change to `DENIED_TOPICS` in `infra/stacks/andur_stack.py` is measured
-with this before it is deployed (*Guardrails and cost* in
+Every change to `DENIED_TOPICS` in `infra/stacks/andur_stack.py`, and to
+the frames `QUESTION_FRAME` and `ANSWER_FRAME` in `app/handler.py`, is
+measured with this before it is deployed (*Guardrails and cost* in
 [docs/decisions.md](../docs/decisions.md)). Without `--deployed` the script
 creates a guardrail of its own, `andur-topic-probe`, with the topics the
 stack would deploy in the topic guardrail — same order, same tier, same EU
 guardrail profile, same messages, no other policy — sends every question of
-`topic-questions.json` through `ApplyGuardrail` as `INPUT`, the way a
-visitor's question reaches the answer guardrail's topics, and every answer
-of `topic-answers.json` as `OUTPUT` without its citations, cut out by the
-handler's own `without_citations`, the way the function hands the model's
-answer to the topic guardrail; and it deletes the guardrail again, also when
+`topic-questions.json` through `ApplyGuardrail` as `INPUT` after the
+question's frame, and every answer of `topic-answers.json` as `OUTPUT`
+without its citations after the answer's frame, both made by the handler's
+own `question_for_topics` and `answer_for_topics`, the way the function hands
+them to the topic guardrail; and it deletes the guardrail again, also when
 the run fails. The two sides are measured apart because they are read apart:
-the answer guardrail reads the question alone on the way in, never the
-sources and never the answer with it (the trace's `guardrailCoverage`,
-04.10.2026), and the topic guardrail reads the answer alone. It
+the function checks the question alone before the model is asked, and the
+answer alone after it, never with the sources. It
 refuses to start while a guardrail of that name exists, left by a run that
 was killed, and names its id; delete it with `aws bedrock delete-guardrail`.
 It never deletes a guardrail of another name. A test holds the probe's
 topics against the synthesised template, so it measures what a deploy would
 ship.
 
-With `--deployed` it reads the ids and versions of the answer guardrail and
-the topic guardrail from the function, as `evaluate` does, says whether their
-topics are the repository's — on the question only in the answer guardrail,
-on both sides in the topic guardrail — and measures the questions on the
-first and the answers on the second. It creates and deletes nothing. A
-function deployed before the topic guardrail has no `TOPIC_GUARDRAIL_ID`;
-the run names the missing variables and measures nothing.
+With `--deployed` it reads the id and version of the topic guardrail from
+the function, as `evaluate` does, says whether its topics are the
+repository's, on both sides, and measures questions and answers on it. It
+creates and deletes nothing. While `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`
+is set, the answer guardrail on the model call reads the question's topics
+too, as it is, without the frame; `--deployed` does not measure that second
+check. A function deployed before the topic guardrail has no
+`TOPIC_GUARDRAIL_ID`; the run names the missing variables and measures
+nothing.
 
-`topic-questions.json` holds 109 questions, each with `"blocked"` (whether
+`topic-questions.json` holds 132 questions, each with `"blocked"` (whether
 the guardrail must refuse it) and `"topic"`: the denied topic it must hit,
 or for a harmless question its subject. 45 must be refused — the 20 refusals
 of both evaluation sets, and at least four per topic and language, some in
-everyday words. 64 must pass — the 34 answerable questions of both
+everyday words. 87 must pass — the 34 answerable questions of both
 evaluation sets, two of a customer whose documents are not in the
-repository, and 28 that a trade business is asked about its own documents:
+repository, and 51 that a trade business is asked about its own documents:
 prices, quotes, payment terms, VAT on its prices, warranty, maintenance
-contracts, delivery, opening hours. No question is word for word an example
+contracts, delivery, opening hours; 23 of them (hd20 to hd32, he12 to he21,
+06.10.2026) about its invoices: discount for paying early, when to pay, late
+payment, reminders, instalments, deposits, the VAT rate. No question is word for word an example
 of a topic, or the run would measure the example. Six German refusals of the
 evaluation set (de19, de20, de23, de25, de27, de28) are close translations of
 English examples, so for them the run partly measures the examples too; the
 everyday refusals added per topic are not.
 
-`topic-answers.json` holds 105 answers in the same form, with `"answer"` in
-place of `"question"`. 73 must pass: 60 that Nova Pro wrote to answerable
+`topic-answers.json` holds 119 answers in the same form, with `"answer"` in
+place of `"question"`. 87 must pass: 60 that Nova Pro wrote to answerable
 questions of both evaluation sets in the runs of 01.10. and 03.10.2026, and 4
 it wrote to q15 and de11 in the rebuild of 04.10.2026 (the id names the
 question, `q15a1` is the first answer to q15), short ones with their
 citations included, since a citation changed the verdict as long as the
-topics read it; and 9 written about the subjects closest to the topics, such
-as a contract's notice period or a call-out charge. 32 stray into a denied
+topics read it; and 23 written about the subjects closest to the topics, such
+as a contract's notice period, a call-out charge, or a discount you may
+deduct from the invoice (ha05 to ha11 and hd06 to hd12, 06.10.2026). 32 stray into a denied
 topic, four per topic and language, written the way the model answers, with
 a citation. The run takes the citations out before it asks, as the function
 does, so every answer is measured as the topic guardrail reads it; an answer
@@ -541,7 +546,8 @@ checks one.
 Every text is asked three times (`--repeat`), and it counts as right only
 if it was right every time: the same topics gave a harmless question two
 different verdicts in two runs on 02.10.2026. Each call costs one topic unit,
-0.15 USD per 1,000, so a run of 3 × 214 calls costs 0.096 USD. The output names every text that went wrong, how
+0.15 USD per 1,000, so a run of 3 × 251 calls costs 0.113 USD (measured
+06.10.2026: 753 topic units). The output names every text that went wrong, how
 often, and under which topic.
 
 `--workers` sets how many calls run at once (default 8; `--workers 1` asks
@@ -600,6 +606,27 @@ answers, each with `[1][4]`, `[1][2][4]`, `[2][4]` and `[1][5]` behind it,
 citations, 32 were withheld (04.10.2026); without them, as the function now
 checks them, none.
 
+With the frames, measured on 06.10.2026, three runs, against the texts as
+they were read before (the questions on the deployed answer guardrail, the
+answers on the deployed topic guardrail, `--deployed`, the same day; the 37
+invoice texts on the probe guardrail, three runs):
+
+| Texts | Read alone | After the frames |
+|---|---|---|
+| Questions to refuse | 45/45 refused | 45/45 refused |
+| Harmless questions refused | 2/64: hd19, he05 | 1/87: he12 |
+| Of them, the 23 about invoices | 4/23: hd20, hd24, he12, he20 (he20 in 2 of 3 runs) | 1/23: he12 |
+| Answers to withhold | 31/32 withheld (rmd4 passed) | 32/32 withheld |
+| Harmless answers withheld | 0/73 | 0/87 |
+| Of them, the 14 about invoices | 1/14: ha05 | 0/14 |
+
+he12 ("How much early payment discount can I deduct, and by when must I
+pay?") is refused as `Tax returns` in every run, with the frame and without;
+its German twin hd20 passes with it. Six boundary questions measured besides,
+not in the set — deducting a deposit from one's taxes, reclaiming the VAT of
+an invoice from the tax office, declaring late payment interest one was paid,
+in both languages — were refused in all of six runs after the frame.
+
 ## grounding_probe — what the grounding check withholds, in German too
 
 ```bash
@@ -611,7 +638,9 @@ says, and Andur answers in German too. This measures what that does, on right
 answers and on made-up ones, before a change to the check or the prompt is
 deployed. The script creates a guardrail of its own, `andur-grounding-probe`,
 a copy of the answer guardrail as the stack would deploy it — the topics on
-the question only, the masking, grounding and relevance at their thresholds,
+the question only while `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` is set, none
+after the second deploy of 06.10.2026, the masking, grounding and relevance
+at their thresholds,
 the EU guardrail profile and the messages; a test holds it against the
 synthesised template. For every answer of `grounding-answers.json` it
 retrieves the passages of its question from the deployed knowledge base and

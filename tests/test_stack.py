@@ -28,7 +28,7 @@ from aws_cdk.assertions import Match, Template
 from infra.answer_models import answer_model
 from infra.stacks.andur_stack import (
     ANSWER_FUNCTION_NAME,
-    ANSWER_GUARDRAIL_READS_ANSWER_TOPICS,
+    ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     ANSWER_MAX_CONCURRENCY,
     ANSWER_MEMORY_MB,
     ANSWER_MODEL_ID,
@@ -586,9 +586,10 @@ def test_timeouts_nest_from_aws_calls_to_function_to_ask_script() -> None:
     innermost number counts the key once, because only the requested
     workspace's key is read, at most once per request, and the budget table
     twice, because a wrong item is put right with a second write, and the guardrail
-    twice, for the topic check of the answer and for the excerpts.
+    three times, for the topic checks of the question and the answer and for the
+    excerpts.
     """
-    assert aws.worst_case_seconds() == 169
+    assert aws.worst_case_seconds() == 189
     assert aws.worst_case_seconds() < ANSWER_TIMEOUT_SECONDS < ask.HTTP_TIMEOUT_SECONDS < 900
 
 
@@ -596,7 +597,7 @@ def test_cloudfront_gives_up_before_the_function_does() -> None:
     """The one layer that does not nest, and knowingly so.
 
     CloudFront may wait 120 seconds without an approved quota increase, and
-    the function may run 180. An answer between the two reaches the browser as
+    the function may run 195. An answer between the two reaches the browser as
     CloudFront's 504 while the function runs it to the end and charges the
     question. An answer takes seconds (0.7 to 4.4 inside the function with Nova
     Pro on 28.09.2026), so the gap is a corner, not a case — and the
@@ -1210,18 +1211,16 @@ def test_the_excerpt_guardrail_masks_the_same_details_and_does_nothing_else(
     assert 1 <= len(properties["BlockedOutputsMessaging"]) <= 500
 
 
-@pytest.mark.parametrize(
-    ("which", "on_answer"),
-    [("guardrail", ANSWER_GUARDRAIL_READS_ANSWER_TOPICS), ("topic_guardrail", True)],
-)
+@pytest.mark.parametrize(("which", "on_answer"), [("guardrail", False), ("topic_guardrail", True)])
 def test_the_four_topics_are_refused_in_the_question_and_in_the_answer_without_citations(
     stack: AndurStack, template: Template, which: str, on_answer: bool
 ) -> None:
-    """The answer guardrail on the model call reads the topics in the question, and in the
-    answer only for the deploy that brings in the topic guardrail: in the answer as the model
-    writes it, `Private lives` withheld short harmless answers for their citations [1][4] or
-    [1][2][4], among them q15 and de11 (04.10.2026). The handler hands the answer without its
-    citations to the topic guardrail, which reads all four there."""
+    """The topic guardrail reads all four in the question, after its frame, and in the answer
+    without its citations. The answer guardrail on the model call reads them in the question
+    while `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`, never in the answer: in the answer as the
+    model writes it, `Private lives` withheld short harmless answers for their citations [1][4]
+    or [1][2][4], among them q15 and de11 (04.10.2026)."""
+    assert ANSWER_GUARDRAIL_READS_QUESTION_TOPICS is True
     properties = resource_of(stack, template, getattr(stack, which))["Properties"]
     topics = properties["TopicPolicyConfig"]["TopicsConfig"]
     assert [topic["Name"] for topic in topics] == [
@@ -1237,6 +1236,37 @@ def test_the_four_topics_are_refused_in_the_question_and_in_the_answer_without_c
             (True, "BLOCK") if on_answer else (False, "NONE")
         )
     assert properties["TopicPolicyConfig"]["TopicsTierConfig"] == {"TierName": TOPICS_TIER}
+
+
+def test_after_the_second_deploy_the_answer_guardrail_reads_no_topic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the flag off, the topic guardrail is the only one that reads the topics; masking,
+    grounding and the profile stay on the answer guardrail, and both get a new version."""
+    from infra.stacks import andur_stack
+
+    def guardrails() -> dict[str, dict[str, Any]]:
+        other = AndurStack(cdk.App(context=deploy_context()), "SecondDeployStack")
+        resources = Template.from_stack(other).to_json()["Resources"]
+        return {
+            name: resources[other.get_logical_id(construct)]["Properties"]
+            for name, construct in (
+                ("answer", other.guardrail),
+                ("topic", other.topic_guardrail),
+                ("answer version", other.guardrail_version),
+                ("topic version", other.topic_guardrail_version),
+            )
+        }
+
+    first = guardrails()
+    monkeypatch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", False)
+    second = guardrails()
+    assert "TopicPolicyConfig" not in second["answer"]
+    assert {key for key in first["answer"] if key not in second["answer"]} == {"TopicPolicyConfig"}
+    assert second["answer"]["CrossRegionConfig"] == first["answer"]["CrossRegionConfig"]
+    assert second["topic"]["TopicPolicyConfig"] == first["topic"]["TopicPolicyConfig"]
+    assert second["answer version"]["Description"] != first["answer version"]["Description"]
+    assert second["topic version"]["Description"] != first["topic version"]["Description"]
 
 
 def test_the_topic_guardrail_checks_topics_and_does_nothing_else(
@@ -1316,6 +1346,22 @@ def test_the_grounding_probe_copies_the_answer_guardrail(
     assert probe["blockedInputMessaging"] == properties["BlockedInputMessaging"]
     assert probe["blockedOutputsMessaging"] == properties["BlockedOutputsMessaging"]
     assert probe["name"] == "andur-grounding-probe" != properties["Name"]
+    assert set(probe) - {"name", "description"} == {
+        key[0].lower() + key[1:] for key in properties if key not in {"Name", "Description"}
+    }
+
+
+def test_after_the_second_deploy_the_grounding_probe_copies_the_answer_guardrail_without_topics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from infra.stacks import andur_stack
+
+    monkeypatch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", False)
+    monkeypatch.setattr(grounding_probe, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", False)
+    other = AndurStack(cdk.App(context=deploy_context()), "SecondDeployProbeStack")
+    properties = resource_of(other, Template.from_stack(other), other.guardrail)["Properties"]
+    probe = grounding_probe.probe_request()
+    assert "topicPolicyConfig" not in probe and "TopicPolicyConfig" not in properties
     assert set(probe) - {"name", "description"} == {
         key[0].lower() + key[1:] for key in properties if key not in {"Name", "Description"}
     }

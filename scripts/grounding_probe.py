@@ -4,8 +4,9 @@ Every answer of `ANSWERS_FILE` names its workspace, its question and whether
 the sources carry it. The passages come from the deployed knowledge base the
 way the function retrieves them and are built into the sources text the model
 call is checked against. The check runs in a guardrail of its own,
-`PROBE_NAME`, a copy of the answer guardrail: the same topics on the question,
-masking, grounding and relevance thresholds and EU guardrail profile. Each
+`PROBE_NAME`, a copy of the answer guardrail: the same topics on the question
+(while the stack sets them there), masking, grounding and relevance thresholds
+and EU guardrail profile. Each
 answer is checked as written, the way the model call checks it.
 
 A German answer that check withholds is also checked in English: translated by
@@ -30,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from infra.stacks.andur_stack import (
-    ANSWER_GUARDRAIL_READS_ANSWER_TOPICS,
+    ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
     GROUNDING_THRESHOLD,
@@ -104,12 +105,12 @@ def probe_request() -> dict[str, Any]:
     the same sides, under the probe's name."""
     topics = topic_probe.topic_policy()
     for topic in topics["topicsConfig"]:
-        topic["outputEnabled"] = ANSWER_GUARDRAIL_READS_ANSWER_TOPICS
-        topic["outputAction"] = "BLOCK" if ANSWER_GUARDRAIL_READS_ANSWER_TOPICS else "NONE"
+        topic["outputEnabled"] = False
+        topic["outputAction"] = "NONE"
     return {
         "name": PROBE_NAME,
         "description": "Andur: temporary copy of the answer guardrail; deleted after the run.",
-        "topicPolicyConfig": topics,
+        **({"topicPolicyConfig": topics} if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS else {}),
         "crossRegionConfig": {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID},
         "sensitiveInformationPolicyConfig": {
             "piiEntitiesConfig": [
@@ -235,8 +236,8 @@ def translate_to_english(
     handler: Any, runtime: Any, settings: Any, question: str, answer: str
 ) -> dict[str, Any]:
     """The question and the answer in English: one call of the answer model through the
-    guardrail, which reads the topics in it and masks the reply. The call carries no
-    sources, so the guardrail checks no grounding."""
+    guardrail, which reads the topics in it, if it has them, and masks the reply. The call
+    carries no sources, so the guardrail checks no grounding."""
     response = retrying(
         lambda: runtime.converse(
             modelId=settings.model_id,

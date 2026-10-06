@@ -32,11 +32,11 @@ no question fails for it, at any hour. The answer role allows every numbered
 version of the answer guardrail, so the new version leaves the role as it
 is; the function moves to the new version, and the answers already running
 finish on the old one. CloudFormation deletes the old version only in its
-cleanup phase, and before that the deploy waits 210 seconds
-(`DEPLOY_DRAIN_SECONDS`, longer than an answer may run) in
-`Custom::AndurDeployDrain`: such a deploy takes about three and a half
-minutes longer, a deploy without a new version does not wait (a stack built
-from nothing waits once, for no one). A new guardrail
+cleanup phase, and before that the deploy waits 225 seconds (210 until
+06.10.2026; `DEPLOY_DRAIN_SECONDS`, longer than an answer may run) in
+`Custom::AndurDeployDrain`: such a deploy takes about four minutes longer, a
+deploy without a new version does not wait, unless the wait itself changes
+(a stack built from nothing waits once, for no one). A new guardrail
 the function calls, such as the topic guardrail of 05.10.2026, adds nothing:
 CloudFormation creates it, and widens the role for it, before it updates the
 function, and the old code never calls it. After a deploy that touches the
@@ -61,10 +61,25 @@ answer guardrail that no longer reads the answer's topics, without the topic
 check it does not know yet: answers unchecked for their topics, though no
 error. So the first deploy keeps the answer guardrail reading the answer's
 topics as before (`ANSWER_GUARDRAIL_READS_ANSWER_TOPICS = True` in
-`infra/stacks/andur_stack.py`) and brings the topic guardrail and the code
-that calls it; the answer is checked twice. The second sets it `False`: the
-answer guardrail gets a new version, and old and new code both check the
-answer without its citations.
+`infra/stacks/andur_stack.py`, a flag since gone) and brings the topic
+guardrail and the code that calls it; the answer is checked twice. The
+second sets it `False`: the answer guardrail gets a new version, and old and
+new code both check the answer without its citations.
+
+The check of the question by the topic guardrail, after its frame
+(06.10.2026), comes in two deploys the same way. The first deploy brings the
+code that checks the question there, and keeps
+`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS = True`: the answer guardrail reads
+the question's topics as before, and no guardrail gets a new version. It
+does wait once in `Custom::AndurDeployDrain`, since the function's timeout
+grows from 180 to 195 seconds and the wait with it (225 seconds, longer than
+an answer may run). The question is checked twice then, so a harmless
+question the answer guardrail refuses stays refused; nothing is freed yet. The
+second sets it `False`: the answer guardrail and the topic guardrail get new
+versions (the topic guardrail's description changes with the flag), the
+deploy waits in `Custom::AndurDeployDrain`, and old and new code both check
+the question with the topic guardrail. After the second, measure with
+`python -m scripts.topic_probe --deployed`.
 
 The deploy creates no workspace key, and no customer is named anywhere in the
 repository. A workspace exists only in AWS: its key under
