@@ -111,7 +111,7 @@ def threshold_changed(patch: pytest.MonkeyPatch) -> None:
 
 
 def topic_changed(patch: pytest.MonkeyPatch) -> None:
-    """Replaces the versions of the answer and the topic guardrail."""
+    """Replaces the version of the topic guardrail; the answer guardrail reads no topic."""
     name, definition, examples = andur_stack.DENIED_TOPICS[0]
     patch.setattr(
         andur_stack,
@@ -120,10 +120,11 @@ def topic_changed(patch: pytest.MonkeyPatch) -> None:
     )
 
 
-def question_topics_off(patch: pytest.MonkeyPatch) -> None:
-    """The second of the two deploys of 06.10.2026: replaces the versions of the answer and
-    the topic guardrail."""
-    patch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", False)
+def question_topics_on(patch: pytest.MonkeyPatch) -> None:
+    """The stack of the first of the two deploys of 06.10.2026, the answer guardrail reading
+    the question's topics; from it to the stack as it is, the second replaces the versions of
+    the answer and the topic guardrail."""
+    patch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
 
 
 def masking_changed(patch: pytest.MonkeyPatch) -> None:
@@ -409,7 +410,7 @@ def walk(before: Synthesised, after: Synthesised) -> tuple[list[list[str]], list
     ("change", "replaced"),
     [
         (threshold_changed, {"AnswerGuardrailVersion"}),
-        (topic_changed, {"AnswerGuardrailVersion", "TopicGuardrailVersion"}),
+        (topic_changed, {"TopicGuardrailVersion"}),
         (masking_changed, {"AnswerGuardrailVersion", "ExcerptGuardrailVersion"}),
     ],
 )
@@ -433,14 +434,14 @@ def test_the_second_deploy_of_the_question_check_lets_old_and_new_answers_throug
     current: Synthesised,
 ) -> None:
     """From the first deploy, with the answer guardrail reading the question's topics, to the
-    second without them: two versions replaced, every step safe."""
-    after = synthesise(question_topics_off)
+    second without them, as it is: two versions replaced, every step safe."""
+    before = synthesise(question_topics_on)
     assert {
         version
         for version in current.versions
-        if current.resources[version]["Properties"] != after.resources[version]["Properties"]
+        if before.resources[version]["Properties"] != current.resources[version]["Properties"]
     } == {"AnswerGuardrailVersion", "TopicGuardrailVersion"}
-    orders, problems = walk(current, after)
+    orders, problems = walk(before, current)
     assert orders
     assert problems == []
 
@@ -449,8 +450,9 @@ def test_the_deploy_of_this_change_lets_old_and_new_answers_through(
     current: Synthesised,
 ) -> None:
     """The first deploy starts from the role pinned to version 3 and from no drain: the role
-    widens before the function changes, and the drain is created after it."""
-    before = as_deployed_until_now(synthesise(topic_changed))
+    widens before the function changes, and the drain is created after it. The change
+    replaces the answer guardrail's version, the one the pinned role names."""
+    before = as_deployed_until_now(synthesise(threshold_changed))
     orders, problems = walk(before, current)
     assert orders
     assert all(order.index(current.role) < order.index(current.function) for order in orders)
@@ -459,8 +461,10 @@ def test_the_deploy_of_this_change_lets_old_and_new_answers_through(
 
 def test_the_old_form_fails_the_same_walk(current: Synthesised) -> None:
     """The walk finds the 502 of 02.10.2026: with the role pinned to the version and no
-    drain, the old function's call is refused, and its version is deleted while it runs."""
-    before = as_deployed_until_now(synthesise(topic_changed))
+    drain, the old function's call is refused, and its version is deleted while it runs. The
+    answer guardrail's version is replaced, as it was then; a changed topic no longer replaces
+    it."""
+    before = as_deployed_until_now(synthesise(threshold_changed))
     _, problems = walk(before, as_deployed_until_now(current))
     assert any("the role refuses" in problem for problem in problems)
     assert any("no longer exists" in problem for problem in problems)

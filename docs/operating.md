@@ -67,14 +67,14 @@ second sets it `False`: the answer guardrail gets a new version, and old and
 new code both check the answer without its citations.
 
 The check of the question by the topic guardrail, after its frame
-(06.10.2026), comes in two deploys the same way. The first deploy brings the
-code that checks the question there, and keeps
-`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS = True`: the answer guardrail reads
-the question's topics as before, and no guardrail gets a new version. It
-does wait once in `Custom::AndurDeployDrain`, since the function's timeout
-grows from 180 to 195 seconds and the wait with it (225 seconds, longer than
-an answer may run). The question is checked twice then, so a harmless
-question the answer guardrail refuses stays refused; nothing is freed yet. The
+(06.10.2026), comes in two deploys the same way. The first deploy (06.10.2026)
+brought the code that checks the question there, and kept
+`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS = True`: the answer guardrail read
+the question's topics as before, and no guardrail got a new version. It
+waited once in `Custom::AndurDeployDrain`, since the function's timeout grew
+from 180 to 195 seconds and the wait with it (225 seconds, longer than an
+answer may run). The question was checked twice then, so a harmless question
+the answer guardrail refused stayed refused; nothing was freed yet. The
 second sets it `False`: the answer guardrail and the topic guardrail get new
 versions (the topic guardrail's description changes with the flag), the
 deploy waits in `Custom::AndurDeployDrain`, and old and new code both check

@@ -164,14 +164,14 @@ TOPIC_GUARDRAIL_NAME = "andur-topic-guardrail"
 
 #: Whether the answer guardrail on the model call reads the denied topics in the question, as
 #: it did until the function checked the question with the topic guardrail (06.10.2026). True
-#: for the one deploy that brings in that check: in the seconds CloudFormation gives the old
-#: code the new environment, the old code would call an answer guardrail that no longer reads
-#: the question's topics, without the check it does not know yet. With this True the question
-#: is checked twice, as it is read alone and after `QUESTION_FRAME`, so harmless questions the
-#: first refuses stay refused. Set False in a second deploy, once the first is through: then old
-#: and new code both check the question with the topic guardrail. The answer guardrail never
-#: reads the answer's topics; the topic guardrail does (05.10.2026).
-ANSWER_GUARDRAIL_READS_QUESTION_TOPICS = True
+#: was for the one deploy that brought in that check: in the seconds CloudFormation gives the
+#: old code the new environment, the old code would have called an answer guardrail that no
+#: longer reads the question's topics, without the check it did not know yet. With it True the
+#: question was checked twice, as it is read alone and after `QUESTION_FRAME`. False for the
+#: second deploy, once the first was through (06.10.2026): old and new code both check the
+#: question with the topic guardrail. The answer guardrail never reads the answer's topics;
+#: the topic guardrail does (05.10.2026).
+ANSWER_GUARDRAIL_READS_QUESTION_TOPICS = False
 
 #: Required by Bedrock, never shown: masking replaces text, it does not block.
 EXCERPT_BLOCKED_MESSAGE = "This excerpt was withheld."

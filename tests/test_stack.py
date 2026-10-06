@@ -1211,17 +1211,14 @@ def test_the_excerpt_guardrail_masks_the_same_details_and_does_nothing_else(
     assert 1 <= len(properties["BlockedOutputsMessaging"]) <= 500
 
 
-@pytest.mark.parametrize(("which", "on_answer"), [("guardrail", False), ("topic_guardrail", True)])
 def test_the_four_topics_are_refused_in_the_question_and_in_the_answer_without_citations(
-    stack: AndurStack, template: Template, which: str, on_answer: bool
+    stack: AndurStack, template: Template
 ) -> None:
     """The topic guardrail reads all four in the question, after its frame, and in the answer
-    without its citations. The answer guardrail on the model call reads them in the question
-    while `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`, never in the answer: in the answer as the
-    model writes it, `Private lives` withheld short harmless answers for their citations [1][4]
-    or [1][2][4], among them q15 and de11 (04.10.2026)."""
-    assert ANSWER_GUARDRAIL_READS_QUESTION_TOPICS is True
-    properties = resource_of(stack, template, getattr(stack, which))["Properties"]
+    without its citations: in the answer as the model writes it, `Private lives` withheld short
+    harmless answers for their citations [1][4] or [1][2][4], among them q15 and de11
+    (04.10.2026)."""
+    properties = resource_of(stack, template, stack.topic_guardrail)["Properties"]
     topics = properties["TopicPolicyConfig"]["TopicsConfig"]
     assert [topic["Name"] for topic in topics] == [
         "Legal action",
@@ -1232,39 +1229,68 @@ def test_the_four_topics_are_refused_in_the_question_and_in_the_answer_without_c
     for topic in topics:
         assert topic["Type"] == "DENY"
         assert (topic["InputEnabled"], topic["InputAction"]) == (True, "BLOCK")
-        assert (topic["OutputEnabled"], topic["OutputAction"]) == (
-            (True, "BLOCK") if on_answer else (False, "NONE")
-        )
+        assert (topic["OutputEnabled"], topic["OutputAction"]) == (True, "BLOCK")
     assert properties["TopicPolicyConfig"]["TopicsTierConfig"] == {"TierName": TOPICS_TIER}
 
 
-def test_after_the_second_deploy_the_answer_guardrail_reads_no_topic(
-    monkeypatch: pytest.MonkeyPatch,
+def test_the_answer_guardrail_reads_no_topic(stack: AndurStack, template: Template) -> None:
+    """Since the second deploy of 06.10.2026 the topic guardrail is the only one that reads the
+    topics; the answer guardrail keeps masking, grounding, the EU profile and the messages."""
+    assert ANSWER_GUARDRAIL_READS_QUESTION_TOPICS is False
+    properties = resource_of(stack, template, stack.guardrail)["Properties"]
+    assert set(properties) == {
+        "Name",
+        "Description",
+        "BlockedInputMessaging",
+        "BlockedOutputsMessaging",
+        "SensitiveInformationPolicyConfig",
+        "ContextualGroundingPolicyConfig",
+        "CrossRegionConfig",
+    }
+    assert properties["Description"] == (
+        "Andur: masks personal details, withholds ungrounded answers."
+    )
+
+
+def test_the_second_deploy_took_the_topics_off_the_answer_guardrail_and_nothing_else(
+    stack: AndurStack, template: Template, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With the flag off, the topic guardrail is the only one that reads the topics; masking,
-    grounding and the profile stay on the answer guardrail, and both get a new version."""
+    """Against the first deploy, with the flag on: then the answer guardrail read the four
+    topics in the question only. The second deploy takes that policy off and changes nothing
+    else of either guardrail but their descriptions, and both get a new version."""
     from infra.stacks import andur_stack
 
-    def guardrails() -> dict[str, dict[str, Any]]:
-        other = AndurStack(cdk.App(context=deploy_context()), "SecondDeployStack")
-        resources = Template.from_stack(other).to_json()["Resources"]
+    def guardrails(of: AndurStack, resources: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         return {
-            name: resources[other.get_logical_id(construct)]["Properties"]
+            name: resources[of.get_logical_id(construct)]["Properties"]
             for name, construct in (
-                ("answer", other.guardrail),
-                ("topic", other.topic_guardrail),
-                ("answer version", other.guardrail_version),
-                ("topic version", other.topic_guardrail_version),
+                ("answer", of.guardrail),
+                ("topic", of.topic_guardrail),
+                ("answer version", of.guardrail_version),
+                ("topic version", of.topic_guardrail_version),
             )
         }
 
-    first = guardrails()
-    monkeypatch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", False)
-    second = guardrails()
-    assert "TopicPolicyConfig" not in second["answer"]
-    assert {key for key in first["answer"] if key not in second["answer"]} == {"TopicPolicyConfig"}
-    assert second["answer"]["CrossRegionConfig"] == first["answer"]["CrossRegionConfig"]
-    assert second["topic"]["TopicPolicyConfig"] == first["topic"]["TopicPolicyConfig"]
+    second = guardrails(stack, template.to_json()["Resources"])
+    monkeypatch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
+    other = AndurStack(cdk.App(context=deploy_context()), "FirstDeployStack")
+    first = guardrails(other, Template.from_stack(other).to_json()["Resources"])
+
+    first_topics = first["answer"]["TopicPolicyConfig"]["TopicsConfig"]
+    for topic in first_topics:
+        assert (topic["InputEnabled"], topic["InputAction"]) == (True, "BLOCK")
+        assert (topic["OutputEnabled"], topic["OutputAction"]) == (False, "NONE")
+    assert [t["Name"] for t in first_topics] == [
+        t["Name"] for t in second["topic"]["TopicPolicyConfig"]["TopicsConfig"]
+    ]
+    assert set(first["answer"]) - set(second["answer"]) == {"TopicPolicyConfig"}
+    assert set(second["answer"]) <= set(first["answer"])
+    for key in second["answer"]:
+        if key != "Description":
+            assert second["answer"][key] == first["answer"][key], key
+    assert {key for key in first["topic"] if first["topic"][key] != second["topic"][key]} == {
+        "Description"
+    }
     assert second["answer version"]["Description"] != first["answer version"]["Description"]
     assert second["topic version"]["Description"] != first["topic version"]["Description"]
 
@@ -1329,14 +1355,12 @@ def pascal_case(value: Any) -> Any:
 def test_the_grounding_probe_copies_the_answer_guardrail(
     stack: AndurStack, template: Template
 ) -> None:
-    """What the probe checks German answers with is what the function checks them with: the
-    answer guardrail's topics on the same sides, its masking, its grounding thresholds, its
-    profile and messages. CloudFormation calls the tier `TopicsTierConfig`."""
+    """What the probe checks German answers with is what the function checks them with: no
+    topic, as the answer guardrail has none, its masking, its grounding thresholds, its profile
+    and messages."""
     properties = resource_of(stack, template, stack.guardrail)["Properties"]
     probe = grounding_probe.probe_request()
-    topics = probe["topicPolicyConfig"]
-    assert pascal_case(topics["topicsConfig"]) == properties["TopicPolicyConfig"]["TopicsConfig"]
-    assert pascal_case(topics["tierConfig"]) == properties["TopicPolicyConfig"]["TopicsTierConfig"]
+    assert "topicPolicyConfig" not in probe and "TopicPolicyConfig" not in properties
     for name in ("sensitiveInformationPolicyConfig", "contextualGroundingPolicyConfig"):
         assert pascal_case(probe[name]) == properties[name[0].upper() + name[1:]], name
     assert probe["crossRegionConfig"] == {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}
@@ -1351,17 +1375,22 @@ def test_the_grounding_probe_copies_the_answer_guardrail(
     }
 
 
-def test_after_the_second_deploy_the_grounding_probe_copies_the_answer_guardrail_without_topics(
+def test_with_the_flag_on_the_grounding_probe_copies_the_question_topics_too(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The copy follows the flag: on, as in the first deploy of 06.10.2026, the probe reads the
+    answer guardrail's topics on the same sides, in the same tier. CloudFormation calls the
+    tier `TopicsTierConfig`."""
     from infra.stacks import andur_stack
 
-    monkeypatch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", False)
-    monkeypatch.setattr(grounding_probe, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", False)
-    other = AndurStack(cdk.App(context=deploy_context()), "SecondDeployProbeStack")
+    monkeypatch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
+    monkeypatch.setattr(grounding_probe, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
+    other = AndurStack(cdk.App(context=deploy_context()), "FirstDeployProbeStack")
     properties = resource_of(other, Template.from_stack(other), other.guardrail)["Properties"]
     probe = grounding_probe.probe_request()
-    assert "topicPolicyConfig" not in probe and "TopicPolicyConfig" not in properties
+    topics = probe["topicPolicyConfig"]
+    assert pascal_case(topics["topicsConfig"]) == properties["TopicPolicyConfig"]["TopicsConfig"]
+    assert pascal_case(topics["tierConfig"]) == properties["TopicPolicyConfig"]["TopicsTierConfig"]
     assert set(probe) - {"name", "description"} == {
         key[0].lower() + key[1:] for key in properties if key not in {"Name", "Description"}
     }
@@ -1386,13 +1415,15 @@ def test_denied_topics_run_in_the_standard_tier_through_the_eu_profile(
 ) -> None:
     """The Classic tier reads English, French and Spanish only. Measured 01.10.2026 against
     the deployed guardrail: 5 of 16 German refusals passed, among them a tax question. The
-    Standard tier reads German and needs a guardrail profile; the EU one stays in the EU."""
-    properties = resource_of(stack, template, stack.guardrail)["Properties"]
+    Standard tier reads German and needs a guardrail profile; the EU one stays in the EU. The
+    topic guardrail reads the topics; the answer guardrail keeps the same profile."""
+    properties = resource_of(stack, template, stack.topic_guardrail)["Properties"]
     assert TOPICS_TIER == "STANDARD"
     assert properties["TopicPolicyConfig"]["TopicsTierConfig"] == {"TierName": "STANDARD"}
-    assert properties["CrossRegionConfig"] == {
-        "GuardrailProfileArn": profile_arn({"Ref": "AWS::Region"})
-    }
+    for guardrail in (stack.topic_guardrail, stack.guardrail):
+        assert resource_of(stack, template, guardrail)["Properties"]["CrossRegionConfig"] == {
+            "GuardrailProfileArn": profile_arn({"Ref": "AWS::Region"})
+        }
     excerpt = resource_of(stack, template, stack.excerpt_guardrail)["Properties"]
     assert "CrossRegionConfig" not in excerpt
 
@@ -1575,11 +1606,12 @@ def test_the_guardrail_version_is_an_output(stack: AndurStack, template: Templat
     assert topic_output["Value"] == {"Ref": stack.get_logical_id(stack.topic_guardrail_version)}
 
 
-def test_a_changed_topic_makes_new_versions_of_the_answer_and_the_topic_guardrail(
+def test_a_changed_topic_makes_a_new_version_of_the_topic_guardrail_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both read `DENIED_TOPICS`, one on the question, one on the answer: a changed
-    definition has to reach the versions the function uses, both of them."""
+    """The topic guardrail reads `DENIED_TOPICS` on both sides: a changed definition has to
+    reach the version the function uses. The answer guardrail reads no topic, so its version
+    stays."""
     from infra.stacks import andur_stack
 
     def descriptions() -> tuple[str, str]:
@@ -1595,7 +1627,7 @@ def test_a_changed_topic_makes_new_versions_of_the_answer_and_the_topic_guardrai
     changed = ((name, definition + " Changed.", examples), *andur_stack.DENIED_TOPICS[1:])
     monkeypatch.setattr(andur_stack, "DENIED_TOPICS", changed)
     answer_after, topic_after = descriptions()
-    assert answer_after != answer_before
+    assert answer_after == answer_before
     assert topic_after != topic_before
 
 

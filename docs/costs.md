@@ -85,9 +85,9 @@ question and an answer of citations alone make no topic check.
 Since 06.10.2026 the question, after its frame, passes the topic guardrail
 too, before the model call: one more `ApplyGuardrail` call per question that
 found passages, one topic unit for a question under 1,000 characters (396
-question calls of the topic probe, 396 units, 06.10.2026). Until the second
-of its two deploys the answer guardrail reads the question's topics as well,
-and the question costs two topic units; after it, one, as before. A question
+question calls of the topic probe, 396 units, 06.10.2026). Between its two
+deploys the answer guardrail read the question's topics as well, and the
+question cost two topic units; after the second, one, as before. A question
 the topic guardrail refuses costs that one unit and nothing else: no model
 call, no excerpts.
 

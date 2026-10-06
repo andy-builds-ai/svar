@@ -528,10 +528,11 @@ Three policies, set in `infra/stacks/andur_stack.py`:
 
 - **Refused topics:** legal, tax and medical advice, and questions about
   public figures or a person's private life. The topic guardrail checks all
-  four in the question and in the answer (below). This guardrail reads them
-  in the question too while `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` is set
-  in the stack: for the first of the two deploys that bring in the check of
-  the question (`docs/operating.md`), not after the second. A refused
+  four in the question and in the answer (below). This guardrail read them
+  in the question too for the first of the two deploys that brought in the
+  check of the question, and reads none since the second
+  (`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` in the stack, `docs/operating.md`).
+  A refused
   question never reaches the model — the answer is the handler's refusal
   sentence, the status is still 200, and the question is spent.
   It comes back without sources: nothing was answered from them, and their
@@ -628,9 +629,10 @@ response, both needed:
 
 Then `question_refused` — a topic `BLOCKED` in the **input** assessment, the
 only place the question is read — says which sentence: the question was
-refused, or the answer was withheld. That holds while this guardrail reads
-the question's topics; a question the topic guardrail refuses never reaches
-the model call, and gets the refusal sentence from the handler directly. A refused question never reaches the
+refused, or the answer was withheld. That held while this guardrail read
+the question's topics, until the second deploy of 06.10.2026; since then it
+reads none, and a question the topic guardrail refuses never reaches the
+model call and gets the refusal sentence from the handler directly. A refused question never reaches the
 model, so there is no output assessment next to it. A stop reason without a
 blocking policy in the trace (`intervened`) keeps Bedrock's text and gets the
 note of `STOP_NOTES`, and a `BLOCKED` in the trace on a response Bedrock did

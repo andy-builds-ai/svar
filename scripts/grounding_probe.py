@@ -5,8 +5,8 @@ the sources carry it. The passages come from the deployed knowledge base the
 way the function retrieves them and are built into the sources text the model
 call is checked against. The check runs in a guardrail of its own,
 `PROBE_NAME`, a copy of the answer guardrail: the same topics on the question
-(while the stack sets them there), masking, grounding and relevance thresholds
-and EU guardrail profile. Each
+while the stack sets them there (none since the second deploy of 06.10.2026),
+masking, grounding and relevance thresholds and EU guardrail profile. Each
 answer is checked as written, the way the model call checks it.
 
 A German answer that check withholds is also checked in English: translated by

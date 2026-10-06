@@ -505,10 +505,10 @@ ship.
 With `--deployed` it reads the id and version of the topic guardrail from
 the function, as `evaluate` does, says whether its topics are the
 repository's, on both sides, and measures questions and answers on it. It
-creates and deletes nothing. While `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`
-is set, the answer guardrail on the model call reads the question's topics
-too, as it is, without the frame; `--deployed` does not measure that second
-check. A function deployed before the topic guardrail has no
+creates and deletes nothing. The answer guardrail on the model call reads no
+topic; for the first of the two deploys of 06.10.2026, with
+`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` set, it read the question's topics
+too, without the frame, which `--deployed` did not measure. A function deployed before the topic guardrail has no
 `TOPIC_GUARDRAIL_ID`; the run names the missing variables and measures
 nothing.
 

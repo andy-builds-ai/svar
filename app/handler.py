@@ -1545,9 +1545,9 @@ def check_question_topics(
     """The denied topics the question asks about, and the topic units of the check.
 
     Checked by the topic guardrail as INPUT, after `QUESTION_FRAME`, before the model is asked.
-    The answer guardrail on the model call reads the question for itself only while
-    `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS` is set in the stack. A failed check answers
-    nothing: the question is not asked unchecked.
+    The answer guardrail on the model call reads no topic (`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`
+    in the stack is False). A failed check answers nothing: the question is not asked
+    unchecked.
     """
     return check_topics(guardrail_client, settings, "INPUT", question_for_topics(question))
 
