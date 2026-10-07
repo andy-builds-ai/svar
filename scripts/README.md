@@ -1,6 +1,6 @@
 # scripts — operating the knowledge base
 
-Nine commands, all run from the repository root:
+Ten commands, all run from the repository root:
 
 | Command | Does |
 |---|---|
@@ -13,6 +13,7 @@ Nine commands, all run from the repository root:
 | `python -m scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
 | `python -m scripts.control_eval` | Asks 42 fixed questions of each Frankfurt candidate the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
 | `python -m scripts.tool_probe` | Gives each Frankfurt candidate six orders to record with one tool: whether it fills the tool cleanly and asks back instead of guessing. |
+| `python -m scripts.rehearsal` | Sets up a new business on the deployed stack as a real one is set up, runs the measurements against it, and times every step. |
 
 ## What they need
 
@@ -823,3 +824,79 @@ knowledge base. Three give everything and expect exactly one call with the
 right values ("morgen" is 2026-10-07: the system prompt names the day); three
 leave something out or vague ("ein paar Paletten") and expect no call and a
 question or a request back for what is missing.
+
+## rehearsal — a new business, set up and measured, step by step
+
+```bash
+python -m scripts.rehearsal --workspace kalvenstett --source ../customers \
+  --question "Was kostet eine Stunde für einen Gesellen?" --fact "68 Euro" --plan betrieb \
+  --expect-role OrganizationAccountAccessRole --out-dir ../rehearsal --list
+```
+
+One command for what a new business needs once the stack is deployed, in
+this order, each step timed on its own:
+
+1. **check** — the signed-in identity (with `--expect-role`, the run stops
+   under any other role), the stack deployed and finished, how long the
+   bootstrap and the last deploy took by their CloudFormation events, every
+   address of `WebUrl` in the region and in no other by AWS's
+   `ip-ranges.json`, and that plain HTTP serves nothing while HTTPS serves the
+   page and answers a question without a key with 401, both with the security
+   headers of `app/page.py`;
+2. **setup** — `ingest --check`, `workspace add` (its stdout, the key, is
+   thrown away; the key stays in Parameter Store), `ingest`, `retrieve` (every
+   hit from the new workspace), the first question through `ask --language
+   de` (with `--fact`, its answer must contain that text); handing the key over
+   and asking on the page in a browser are steps by hand;
+3. **apart** — the demo workspaces' documents, which the measurements need; a
+   search in `--other-workspace` that must find hits there and none from a
+   document of the new workspace, by file name as well as by its metadata, so a
+   document filed under the wrong workspace shows; and the new key asked there
+   and refused with HTTP 401, which is what keeps a business to its own
+   documents;
+4. **measure** — `topic_probe --deployed` at the same time as `tool_probe` and
+   `grounding_probe` (the first calls only the topic model, the other two never
+   do, so they share no model quota), then `evaluate` on the English, the German
+   and the Kalvenstett questions and `control_eval` with retrieval in the
+   region, all with `--model`, by default the answer model `REGIONS` gives the
+   region;
+5. **after** — where the deployed stack keeps and processes data as AWS reports
+   it (bucket, embedding model, vector index, function, the two models, the two
+   guardrails, budget table, log group, and whether Bedrock logs the model
+   calls), written to `residency.md`; and the events of the answer function's
+   log since this run began, written to `function-log.json`, Lambda's own
+   timeouts and runtime errors counted too. Either fails on anything outside
+   the region, an inference profile, a missing model, a log of the model calls,
+   a crash or a timeout. Run alone with `--only`, the log step sees only its
+   own seconds.
+
+`--region` takes only a region whose function is its own address, today
+`eu-central-1`: behind CloudFront the address checks could never pass. The
+deploy time names when the deploy finished, since a deploy that changed nothing
+leaves no event and the last one may be older.
+
+A step by hand stands in the plan as such. With `--manual skip`, the default,
+it is recorded as open and the run goes on; `--manual wait` stops there until
+Enter and times it. `--list` prints the plan and calls nothing; `--from <step>`
+goes on from a step, `--only <step>` runs single steps, the identity always
+first. The run stops at the first step that fails; any error in a step, a
+network break too, fails that step. A second full run for the same workspace
+stops at `key`, since `workspace add` never replaces a key: go on with
+`--from documents`. `ANDUR_API_KEY` from the shell is not handed to the
+commands, so `ask` uses the new workspace's own key.
+
+Everything goes to `--out-dir`, which must lie outside the repository: one log
+per step, the measurements' `--out` files, and `run-<time>.json` and `.md`
+with every step's start, seconds, exit code, status and result, the seconds
+per phase, and the wall clock. At the end, also after Ctrl+C, the summary is
+written and the account id is replaced by `<account>` in every file there; on
+the screen it never shows. It deploys nothing and deletes nothing; the
+measurements create and delete their probe guardrails as they do alone, and
+cost what they cost alone, about 0.9 USD with the Frankfurt answer model
+(estimated from the runs of 06. and 07.10.2026, not measured as one run).
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Every step passed, or was left open by hand. |
+| 1 | A step failed; the summary names it and its log. |
+| 2 | Unknown step, or `--out-dir` inside the repository. Nothing was called. |

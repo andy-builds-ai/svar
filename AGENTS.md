@@ -52,7 +52,10 @@ cdk diff     # compares it with the deployed stack; needs an AWS login, changes 
   0.063 to 0.086 USD per Frankfurt model, 0.11 USD for Nova Pro and 0.33 USD
   for Claude Sonnet 4.6 on 06.10.2026;
   `python -m scripts.tool_probe` costs fractions of a cent per model. Run
-  both only when asked.
+  both only when asked. `python -m scripts.rehearsal` sets up a workspace
+  with its key on the deployed stack and runs the measurements above against
+  it, about 0.9 USD (estimated); run it only when asked. `--list` calls
+  nothing.
 - **Region is `eu-west-1` by default** (`DEFAULT_REGION` in
   `infra/answer_models.py`); `cdk synth -c region=eu-central-1` and each
   script's `--region` pick Frankfurt, whose stack has its own models, checks
