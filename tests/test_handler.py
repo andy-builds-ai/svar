@@ -2600,13 +2600,16 @@ def test_system_prompt_holds_the_rules_the_response_relies_on() -> None:
 
 
 def test_the_not_in_sources_sentence_is_for_a_question_the_sources_answer_no_part_of() -> None:
-    """Qwen3 235B wrote only that sentence to c32, whose deposit the sources carry, in 5 of 5
-    runs, and added it to the answered part of c10 in 5 of 5 (06. and 07.10.2026)."""
+    """Qwen3 235B wrote only that sentence to c32, whose deposit the sources carry, in 6 of 16
+    runs with the previous wording (a second rule for a part-answered question) and in 0 of 20
+    with this one, which first asks for each part (07.10.2026, docs/decisions.md)."""
     prompt = handler.system_prompt("en")
-    rule = "answer no part of the question, reply with exactly this sentence and nothing else:"
+    assert "If the sources answer at least one part, answer that part with its source" in prompt
+    assert "say in one short sentence which part they do not answer" in prompt
+    rule = "If they answer no part, reply with exactly this sentence and nothing else:"
     assert f"{rule} {NOT_IN_SOURCES_ANSWER}" in prompt
-    assert "answer only part of the question, answer that part" in prompt
-    assert "Do not add the sentence above to such an answer." in prompt
+    assert "Never write that sentence together with an answer" in prompt
+    assert "never write it when the sources answer a part of the question" in prompt
 
 
 # --- Model ---------------------------------------------------------------

@@ -825,6 +825,38 @@ guardrails (0.21 USD):
 
 Ireland's Nova Pro needs the same before its next deploy.
 
+**2026-10-07 — The prompt asks for each part of the question first.** With the
+wording above c32 was still only the sentence in the control run. Qwen3 235B
+does not write the same text twice at temperature 0: asked c32 16 times with
+the saved passages and the deployed guardrail, it wrote the sentence 6 times
+and the deposit with a note on the missing interest 10 times. So c32 was not
+always wrong, and one run says little about a wording. Changed, for both
+regions: the rule for a part-answered question comes before the one for the
+sentence and begins "Look at each part of the question", and a second line
+says never to write the sentence together with an answer or when the sources
+answer a part. Measured with the same setup, 10 asks of c32 each:
+
+| Wording | c32 right |
+|---|---|
+| before (two rules, sentence first) | 10 of 16 |
+| partial rule first, "only if no part at all" | 0 of 10 |
+| sentence rule first, then "two things, one answered" | 8 of 10 |
+| partial rule with an example of price and weight | 10 of 10 |
+| each part first, then the sentence (this one) | 20 of 20 |
+
+The one with the example was as good on the other 14 questions of the subset
+(c09 to c11, the 11 questions the sources do not answer); it was not chosen
+because a model may copy an example's figures; none did. The chosen wording on those
+14: all right, nothing added. Whole run in Frankfurt with the local handler
+(control_eval 36 of 42, one more than before: c32; evaluate 30/30, 29/32, 26/26,
+no question turned wrong; the 12 questions the sources do not answer all show
+the sentence; nothing added). The three extra right ones in evaluate (q14,
+de09, de11) are not tied to this change: the model writes differently from run
+to run. c24 stays withheld for its language, as before. Not changed: what the
+grounding check does with an answer that holds a sentence the sources do not
+carry, such as "required for jobs over 1,000 pounds", which Qwen wrote in several
+c32 answers with the old wording and the new one; the check let it pass.
+
 **2026-10-07 — A question that fails on AWS's side is given back, never
 after a timeout.** Until now a question counted once it passed the budget,
 whatever happened after it. For a customer that means paying for an outage

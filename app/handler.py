@@ -1326,8 +1326,8 @@ Rules:
 - Cite the sources behind every statement by their numbers in square brackets, like [1] or [2][3]. Cite only sources the statement is taken from.
 - Write the answer as a sentence in words; numbers in brackets alone are not an answer.
 - Write only the answer. Do not describe, compare or list the sources, and do not mention sources that were not used.
-- If the sources answer no part of the question, reply with exactly this sentence and nothing else: {not_in_sources}
-- If the sources answer only part of the question, answer that part and say in one short sentence which part they do not answer. Do not add the sentence above to such an answer.
+- Look at each part of the question. If the sources answer at least one part, answer that part with its source and say in one short sentence which part they do not answer. If they answer no part, reply with exactly this sentence and nothing else: {not_in_sources}
+- Never write that sentence together with an answer, and never write it when the sources answer a part of the question.
 - Answer in the language of the question, in a few sentences."""  # noqa: E501
 
 
