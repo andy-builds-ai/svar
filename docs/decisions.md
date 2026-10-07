@@ -774,6 +774,57 @@ customer does not have. Only `REGIONS` gives Frankfurt the number
 (`grounding_threshold`); the stack and the probes copying its guardrail ask
 `grounding_threshold_for`.
 
+**2026-10-07 — The "not in the sources" sentence is for a question the
+sources answer no part of, and the reader gets it when the grounding check
+withholds it.** The prompt said: if the sources do not answer the question,
+reply with exactly that sentence and nothing else. Qwen3 235B read a question
+in two parts, of which the sources answer one, two ways, the same in every
+control run of 06. and 07.10.2026 (five runs): it answered c10's first part
+and added the sentence, and it wrote only the sentence to c32, though the passage
+with the deposit of 30 % was the first it was given on 07.10.2026. At 0.7 on 06.10.2026 c10 passed
+four times; at 0.8 and the Frankfurt knowledge base on 07.10.2026 the
+grounding check withheld it. Which of the two changes did it is not
+measured; the check scores the whole answer, and the sentence is in no
+source. Alone, it was withheld for grounding or relevance in 11 of the 12
+answers that were only that sentence in the control run of 07.10.2026, 8 of
+them for grounding, so the reader was told "withheld" where the right answer
+was "the sources do not answer this". c24 is not this case: its answer holds no fixed sentence, and
+it was withheld in all five runs as a German answer to English documents
+(06.10.2026, above). Changed, for both regions, since Nova Pro wrote only
+the sentence to 2 of the 6 partial questions on 06.10.2026 too:
+
+- The prompt keeps the sentence for a question the sources answer no part
+  of; for one they answer only part of, the model answers that part, says in
+  one short sentence which part they do not answer, and does not add the
+  sentence. c09 and c11, answered that way, passed at 0.8 on 07.10.2026.
+- `blocked_answer` gives the reader the sentence when the model wrote exactly
+  it, in the request's language and nothing else, and only the grounding or
+  the relevance check blocked it. The sentence is the handler's own and
+  carries no fact; any other text, the sentence with anything added, and a
+  block by any other policy stay withheld. The response still reports the
+  block as it happened.
+
+The grounding check itself is unchanged: no threshold, no text taken out
+before it. Not built: checking a partial answer without the sentence, which
+needs a second guardrail call after the model; the prompt is meant to keep
+the sentence out of such answers, and where the model still adds it, the
+answer is withheld as before. Measured on 07.10.2026 in Frankfurt with Qwen3
+235B and the local handler, against the deployed knowledge base and
+guardrails (0.21 USD):
+
+- The forms of `scripts/grounding-partial-answers.json` (`scripts/README.md`):
+  c10 with a sentence naming the rest passed at 0.82; with that sentence and
+  the fixed one it scored 0.78, as Qwen had written it.
+- control_eval: 35 of 42 right, one more than before: c10 now answers its part
+  and names the rest, and passes. No answer turned wrong, none added a number
+  or a forbidden word. c32 is still only the sentence, now given to the reader
+  as it is; c24 is still withheld for its language.
+- evaluate, all three sets: 29/30, 27/32, 26/26, the same questions right as
+  before. The unanswerable questions now show the sentence in 4 of 4, 4 of 4
+  and 3 of 3, before in 1, 0 and 2.
+
+Ireland's Nova Pro needs the same before its next deploy.
+
 **2026-10-07 — A question that fails on AWS's side is given back, never
 after a timeout.** Until now a question counted once it passed the budget,
 whatever happened after it. For a customer that means paying for an outage
@@ -977,7 +1028,10 @@ resources reference each other and deploy together. `scripts/ingest.py`
 files over 500 — `tests/test_handler.py` (2,590), `tests/test_stack.py`
 (1,440), `tests/test_ingest.py` (711) — follow the module they test and
 share its fakes. A split is a step of its own, not part of a change that
-must not change behaviour.
+must not change behaviour. `scripts/rehearsal.py` (07.10.2026, about 1,100
+lines) is one run whose plan reads top to bottom, one step after the other,
+and the checks only that run makes; most of its length is the plan the
+formatter spreads over lines.
 
 **2026-09-23 — Comments say what the code cannot.** Docstrings are one
 sentence; reasons live here, measurements in the READMEs.

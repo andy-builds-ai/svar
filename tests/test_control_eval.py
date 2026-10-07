@@ -517,6 +517,8 @@ def test_json_of_another_shape_in_the_trace_gives_no_text() -> None:
     assert control_eval.original_text('{"usage": {"inputTokens": 3120}}') is None
     assert control_eval.original_text('{"message": "x"}') is None
     assert control_eval.original_text("Plain text 12") == "Plain text 12"
+    assert control_eval.original_text(None) is None
+    assert control_eval.original_text({"message": {}}) is None
 
 
 def test_a_saved_passage_keeps_its_file_name_but_not_the_bucket() -> None:

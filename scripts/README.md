@@ -754,6 +754,28 @@ and 0.39):
   out, one topic and one PII unit, and the second check's grounding and PII
   units. A run costs 0.22 USD.
 
+`grounding-partial-answers.json` holds 16 answers to the partial questions of
+the control set (c09, c10, c11, c24, c32), taken with `--answers`: the right
+part alone, the right part with a sentence naming what the sources do not
+answer, the right part with the fixed "not in the sources" sentence, c10 and
+c09 the way Qwen3 235B wrote them (both sentences), and for every question
+but c24 the right part with an invented rest, as an `added-claim`. It
+measures which form of a partial answer the check passes, the form the prompt
+asks for since 07.10.2026 (*Guardrails and cost* in
+[docs/decisions.md](../docs/decisions.md)), and that an invented rest is still
+withheld. The report has no group for right English answers, so c32's right
+ones are only in the progress lines and in `--out`; its made-up one counts in
+"made up, en on en sources".
+
+Measured on 07.10.2026 (0.022 USD) through a copy of the Frankfurt answer
+guardrail at 0.8: every right part alone passed but c24's (0.33, a German
+answer to English documents); the right part with a sentence naming the rest
+passed for c10 (0.82), c09, c11 and c32 (0.95 to 0.97); c10 with both that
+sentence and the fixed one was withheld (0.78), with the fixed one alone it
+passed (0.81). Three of the four invented rests were withheld (0.03 to 0.17);
+c32's "On a late balance we charge 8 % interest a year [1]." passed at 0.92,
+as English added claims did on 06.10.2026.
+
 
 ## control_eval — which model stays with its sources, in Frankfurt
 

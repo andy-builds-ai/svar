@@ -83,6 +83,61 @@ def test_the_answers_the_check_withheld_on_04_and_06_october_are_in_the_set(
     assert "25 % [1]" in right
 
 
+# --- The answers to partial questions ------------------------------------------------------
+
+PARTIAL_ANSWERS_FILE = grounding_probe.ANSWERS_FILE.with_name("grounding-partial-answers.json")
+
+
+@pytest.fixture(scope="module")
+def partial_answers() -> list[dict[str, Any]]:
+    return grounding_probe.load_answers(PARTIAL_ANSWERS_FILE)
+
+
+def test_every_partial_answer_belongs_to_a_partial_question_of_the_control_set(
+    partial_answers: list[dict[str, Any]],
+) -> None:
+    control = {
+        (q["workspace"], q["question"], q["language"])
+        for q in json.loads(
+            evaluate.QUESTIONS_FILE.with_name("evaluation-questions-control.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        if q.get("partial")
+    }
+    for answer in partial_answers:
+        assert (answer["workspace"], answer["question"], answer["language"]) in control, answer[
+            "id"
+        ]
+
+
+def test_every_partial_question_with_german_sources_or_in_english_has_a_made_up_answer(
+    partial_answers: list[dict[str, Any]],
+) -> None:
+    """The right part and an invented rest: what the check must still withhold. German answers
+    on English sources are withheld for their language already (06.10.2026)."""
+    kinds: dict[str, set[str]] = {}
+    for answer in partial_answers:
+        kinds.setdefault(answer["question"], set()).add(answer["kind"])
+        if answer["kind"] != "right":
+            assert answer["kind"] == "added-claim", answer["id"]
+    for answer in partial_answers:
+        if (answer["language"], answer["source_language"]) != ("de", "en"):
+            assert kinds[answer["question"]] == {"right", "added-claim"}, answer["id"]
+
+
+def test_c10_is_in_the_partial_set_as_qwen_wrote_it(
+    partial_answers: list[dict[str, Any]],
+) -> None:
+    """Withheld at 0.8 on 07.10.2026, passed in four runs at 0.7 on 06.10.2026."""
+    written = (
+        "Auf ein neues Bad geben wir fünf Jahre Gewährleistung ab dem Tag der Abnahme [3]. "
+        "Die durchschnittliche Haltbarkeit eines neuen Bads wird in den Quellen nicht genannt. "
+        "Die Quellen beantworten diese Frage nicht."
+    )
+    assert written in {a["answer"] for a in partial_answers if a["grounded"]}
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [

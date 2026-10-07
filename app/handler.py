@@ -94,7 +94,9 @@ NO_SOURCES_ANSWERS = {
     "de": "Keine Quelle in diesem Arbeitsbereich passt zur Frage.",
 }
 
-#: What the prompt tells the model to answer when the sources do not answer.
+#: What the prompt tells the model to answer when the sources answer no part of the question.
+#: The handler shows it also when the grounding or relevance check withheld it
+#: (`blocked_answer`).
 NOT_IN_SOURCES_ANSWERS = {
     "en": "The sources do not answer this question.",
     "de": "Die Quellen beantworten diese Frage nicht.",
@@ -1324,7 +1326,8 @@ Rules:
 - Cite the sources behind every statement by their numbers in square brackets, like [1] or [2][3]. Cite only sources the statement is taken from.
 - Write the answer as a sentence in words; numbers in brackets alone are not an answer.
 - Write only the answer. Do not describe, compare or list the sources, and do not mention sources that were not used.
-- If the sources do not answer the question, reply with exactly this sentence and nothing else: {not_in_sources}
+- If the sources answer no part of the question, reply with exactly this sentence and nothing else: {not_in_sources}
+- If the sources answer only part of the question, answer that part and say in one short sentence which part they do not answer. Do not add the sentence above to such an answer.
 - Answer in the language of the question, in a few sentences."""  # noqa: E501
 
 
@@ -1470,6 +1473,34 @@ def extract_answer(
     return f"{text}\n\n{note}" if note else text
 
 
+def written_text(response: Mapping[str, Any]) -> str | None:
+    """What the model wrote, before the guardrail replaced or masked it: the trace's
+    ``modelOutput`` when it has one, else the response's text. Bedrock writes the whole
+    message there as JSON, and only its text blocks are the answer; JSON of another shape
+    gives None. The same reading as `original_text` in scripts/control_eval.py."""
+    original = response.get("trace", {}).get("guardrail", {}).get("modelOutput") or []
+    if not original:
+        return model_text(response)
+    if not isinstance(original[0], str):
+        return None
+    try:
+        parsed = json.loads(original[0])
+    except ValueError:
+        return original[0]
+    message = parsed.get("message") if isinstance(parsed, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return None
+    texts = [b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)]
+    return "\n".join(texts) if texts else None
+
+
+#: The only checks that may withhold the model's "not in the sources" sentence and still let
+#: the reader have it: they judge an answer against the sources, and that sentence claims
+#: nothing the sources could carry. Whether it is right about them, they cannot judge.
+SOURCE_CHECKS = frozenset({"grounding", "relevance"})
+
+
 def blocked_answer(
     response: Mapping[str, Any], guardrail: Mapping[str, Any], language: str
 ) -> str | None:
@@ -1482,11 +1513,28 @@ def blocked_answer(
     message, in English whatever the request's language, and this sentence replaces it. A
     refused question is told from a withheld answer by the input assessment: only the topic
     filter reads the question, and once it refuses, the answer is not checked at all.
+
+    One withheld answer is not withheld from the reader: the model wrote exactly the prompt's
+    "not in the sources" sentence and nothing else, and only the grounding or the relevance
+    check blocked it. That sentence is the handler's own and claims nothing a source could
+    carry. It can be wrong about the sources (c32, whose deposit they hold), and the checks
+    cannot tell, as they find it in no source: in the control run of 07.10.2026 they withheld
+    11 of the 12 such answers, 8 of them for grounding (docs/decisions.md). The reader gets
+    the sentence in place of "withheld"; any other text stays withheld.
     """
     if response.get("stopReason") != "guardrail_intervened" or guardrail["action"] != "blocked":
         return None
     refused = guardrail["question_refused"]
-    return in_language(QUESTION_REFUSED_ANSWERS if refused else ANSWER_WITHHELD_ANSWERS, language)
+    if refused:
+        return in_language(QUESTION_REFUSED_ANSWERS, language)
+    not_in_sources = in_language(NOT_IN_SOURCES_ANSWERS, language)
+    if (
+        guardrail["policies"]
+        and set(guardrail["policies"]) <= SOURCE_CHECKS
+        and (written_text(response) or "").strip() == not_in_sources
+    ):
+        return not_in_sources
+    return in_language(ANSWER_WITHHELD_ANSWERS, language)
 
 
 def read_usage(response: Mapping[str, Any]) -> dict[str, int]:

@@ -490,7 +490,7 @@ An answer from us-east-1, 23.09.2026, before the move to eu-west-1:
 
 | Field | Meaning |
 |---|---|
-| `answer` | The model's answer. It cites sources as `[n]`; `[2][3]`, `[2, 3]`, `[2; 3]` and ranges such as `[1-3]` count too. The prompt tells the model to answer exactly *The sources do not answer this question.* (in German: *Die Quellen beantworten diese Frage nicht.*) when they do not. |
+| `answer` | The model's answer. It cites sources as `[n]`; `[2][3]`, `[2, 3]`, `[2; 3]` and ranges such as `[1-3]` count too. The prompt tells the model to answer exactly *The sources do not answer this question.* (in German: *Die Quellen beantworten diese Frage nicht.*) when they answer no part of the question, and to answer the part they answer, naming the rest, when they answer only part. When the grounding or relevance check withholds exactly that sentence, the reader still gets it (`blocked_answer`). |
 | `sources` | Every retrieved passage, numbered as the model saw them. `file` is the section file in the documents bucket; `words` its length; `cited` whether the answer cites it; `excerpt` its opening, cut at a word boundary at about 300 characters, with personal details masked by the excerpt guardrail — `null` when that guardrail could not be asked. Empty when the guardrail refused the question. |
 | `layers` | The layers of the **cited** sources, most trusted first: `human`, `agent`, `inbox`. An answer with `inbox` here rests partly on documents nobody has confirmed. |
 | `model` | The model that answered; `null` when no passage matched or the topic check refused the question, and no model was asked. |
@@ -606,7 +606,11 @@ Three policies, set in `infra/stacks/andur_stack.py`:
   an answer is right: a wrong number in a sentence the passages otherwise
   carry passed 6 of 12 times in English. Checking a withheld German answer
   once more in English was measured and not built, since it let made-up
-  answers through that the check withholds (docs/decisions.md).
+  answers through that the check withholds (docs/decisions.md). The model's
+  "not in the sources" sentence is in no passage, and the check withheld it
+  alone in 11 of 12 answers on 07.10.2026; when the model wrote exactly that
+  sentence and only grounding or relevance blocked it, the reader gets the
+  sentence instead of the withheld one. Any other text stays withheld.
 
 How the message tells them apart: the passages go in a `guardContent`
 block qualified `grounding_source` — the reference for the grounding check

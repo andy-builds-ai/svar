@@ -392,9 +392,11 @@ def written_by_model(response: Mapping[str, Any], handler: Any) -> str | None:
     return text
 
 
-def original_text(model_output: str) -> str | None:
+def original_text(model_output: Any) -> str | None:
     """The text blocks of the trace's ``modelOutput``: Bedrock writes the model's whole message
     there as JSON, reasoning included, and only the text blocks are the answer."""
+    if not isinstance(model_output, str):
+        return None
     try:
         parsed = json.loads(model_output)
     except ValueError:

@@ -2599,6 +2599,16 @@ def test_system_prompt_holds_the_rules_the_response_relies_on() -> None:
     assert "numbers in brackets alone are not an answer" in handler.system_prompt("en")
 
 
+def test_the_not_in_sources_sentence_is_for_a_question_the_sources_answer_no_part_of() -> None:
+    """Qwen3 235B wrote only that sentence to c32, whose deposit the sources carry, in 5 of 5
+    runs, and added it to the answered part of c10 in 5 of 5 (06. and 07.10.2026)."""
+    prompt = handler.system_prompt("en")
+    rule = "answer no part of the question, reply with exactly this sentence and nothing else:"
+    assert f"{rule} {NOT_IN_SOURCES_ANSWER}" in prompt
+    assert "answer only part of the question, answer that part" in prompt
+    assert "Do not add the sentence above to such an answer." in prompt
+
+
 # --- Model ---------------------------------------------------------------
 
 
@@ -3804,6 +3814,158 @@ def test_a_blocked_answer_never_carries_the_sentence_aws_sent_back(aws: dict[str
         for asked in (None, "en", "de"):
             _, body = call(event(in_(asked)))
             assert AWS_SENTENCE not in json.dumps(body, ensure_ascii=False)
+
+
+# --- The "not in the sources" sentence the grounding check withheld ---
+
+IRRELEVANT = {
+    "contextualGroundingPolicy": {
+        "filters": [
+            {"type": "GROUNDING", "threshold": 0.8, "score": 0.85, "action": "NONE"},
+            {"type": "RELEVANCE", "threshold": 0.7, "score": 0.05, "action": "BLOCKED"},
+        ]
+    },
+    "invocationMetrics": {"guardrailProcessingLatency": 250, "usage": guardrail_usage(1, 1, 3)},
+}
+
+UNGROUNDED_AND_IRRELEVANT = {
+    "contextualGroundingPolicy": {
+        "filters": [
+            {"type": "GROUNDING", "threshold": 0.8, "score": 0.02, "action": "BLOCKED"},
+            {"type": "RELEVANCE", "threshold": 0.7, "score": 0.04, "action": "BLOCKED"},
+        ]
+    },
+    "invocationMetrics": {"guardrailProcessingLatency": 250, "usage": guardrail_usage(1, 1, 3)},
+}
+
+
+def withheld_writing(text: str, output_assessment: dict[str, Any] = UNGROUNDED) -> dict[str, Any]:
+    """A Converse response whose answer the guardrail blocked after the model wrote ``text``."""
+    return blocked_by(guardrail_trace(output_assessment=output_assessment, model_output=text))
+
+
+@pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
+@pytest.mark.parametrize(
+    ("assessment", "policies"),
+    [
+        (UNGROUNDED, ["grounding"]),
+        (IRRELEVANT, ["relevance"]),
+        (UNGROUNDED_AND_IRRELEVANT, ["grounding", "relevance"]),
+    ],
+)
+def test_the_not_in_sources_sentence_reaches_the_reader_when_a_source_check_withheld_it(
+    aws: dict[str, Any],
+    asked: str | None,
+    spoken: str,
+    assessment: dict[str, Any],
+    policies: list[str],
+) -> None:
+    """c12, c13, c17 and eight more of 07.10.2026: the right answer to a question the sources
+    do not answer, withheld by the checks that judge an answer against the sources."""
+    sentence = handler.NOT_IN_SOURCES_ANSWERS[spoken]
+    aws["bedrock-runtime"].response = withheld_writing(sentence, assessment)
+    status, body = call(event(in_(asked)))
+    assert status == 200
+    assert body["answer"] == sentence
+    # What the guardrail did is reported as it happened.
+    assert body["guardrail"] == {"action": "blocked", "policies": policies}
+    assert [source["cited"] for source in body["sources"]] == [False, False]
+    # The handler's own sentence needs no topic check; the excerpts are masked as always.
+    assert aws["guardrail"].topic_calls == []
+    assert len(aws["guardrail"].calls) == 1
+
+
+def test_the_sentence_counts_with_the_spaces_around_it_and_in_the_trace_s_json(
+    aws: dict[str, Any],
+) -> None:
+    """Bedrock writes the replaced message as JSON in ``modelOutput``, reasoning included."""
+    sentence = handler.NOT_IN_SOURCES_ANSWERS["de"]
+    message = {
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"reasoningContent": {"reasoningText": {"text": "x"}}},
+                {"text": f" {sentence}\n"},
+            ],
+        }
+    }
+    aws["bedrock-runtime"].response = withheld_writing(json.dumps(message))
+    _, body = call(event(in_("de")))
+    assert body["answer"] == sentence
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        # c10 of 07.10.2026: a right part, then the sentence. Only the whole answer was
+        # checked, so nothing says the right part passes on its own.
+        "Auf ein neues Bad geben wir fünf Jahre Gewährleistung ab dem Tag der Abnahme [3]. "
+        "Die Quellen beantworten diese Frage nicht.",
+        "Die Quellen beantworten diese Frage nicht. Es sind aber 8 % Zinsen.",
+        "Die Quellen beantworten diese Frage nicht",
+        handler.NOT_IN_SOURCES_ANSWERS["en"],  # not the language asked
+        "",
+    ],
+)
+def test_any_other_text_the_grounding_check_blocked_stays_withheld(
+    aws: dict[str, Any], written: str
+) -> None:
+    aws["bedrock-runtime"].response = withheld_writing(written)
+    _, body = call(event(in_("de")))
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["de"]
+
+
+def test_the_sentence_stays_withheld_when_another_policy_blocked_too(aws: dict[str, Any]) -> None:
+    """A topic on the answer (a guardrail version that still reads them there) withholds it,
+    whatever the text."""
+    both = {
+        **ADVICE_ANSWER_BLOCKED,
+        "contextualGroundingPolicy": UNGROUNDED["contextualGroundingPolicy"],
+    }
+    aws["bedrock-runtime"].response = withheld_writing(handler.NOT_IN_SOURCES_ANSWERS["en"], both)
+    _, body = call(event())
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["guardrail"]["policies"] == ["topic:Tax advice", "grounding"]
+
+
+def test_without_the_model_s_text_in_the_trace_the_answer_stays_withheld(
+    aws: dict[str, Any],
+) -> None:
+    """The response then holds only AWS's own sentence, which is not the model's."""
+    trace = guardrail_trace(output_assessment=UNGROUNDED)
+    del trace["guardrail"]["modelOutput"]
+    aws["bedrock-runtime"].response = blocked_by(trace)
+    _, body = call(event())
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+
+
+def test_the_model_s_text_is_read_like_control_eval_reads_it() -> None:
+    def response(model_output: list[str] | None, text: str = "shown") -> dict[str, Any]:
+        trace = {} if model_output is None else {"guardrail": {"modelOutput": model_output}}
+        return {"output": {"message": {"content": [{"text": text}]}}, "trace": trace}
+
+    assert handler.written_text(response(None)) == "shown"
+    assert handler.written_text(response([])) == "shown"
+    assert handler.written_text(response(["Plain text 12"])) == "Plain text 12"
+    assert handler.written_text(response(['{"usage": {"inputTokens": 3120}}'])) is None
+    assert handler.written_text(response(['{"message": "x"}'])) is None
+    assert handler.written_text(response(['{"message": {"content": [{"image": 1}]}}'])) is None
+    two = json.dumps({"message": {"content": [{"text": "A [1]."}, {"text": "B [2]."}]}})
+    assert handler.written_text(response([two])) == "A [1].\nB [2]."
+    # Not a text: nothing to read, rather than a crash after the model call is paid.
+    assert handler.written_text(response([None])) is None  # type: ignore[list-item]
+    assert handler.written_text(response([{"message": {}}])) is None  # type: ignore[list-item]
+
+
+def test_a_trace_entry_that_is_not_a_text_leaves_the_answer_withheld(
+    aws: dict[str, Any],
+) -> None:
+    trace = guardrail_trace(output_assessment=UNGROUNDED)
+    trace["guardrail"]["modelOutput"] = [None]
+    aws["bedrock-runtime"].response = blocked_by(trace)
+    status, body = call(event())
+    assert status == 200
+    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
 
 
 # --- The topic check of the answer, without its citations ---
