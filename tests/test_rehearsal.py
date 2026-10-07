@@ -108,6 +108,15 @@ def test_the_steps_by_hand_are_marked_as_such(plan: list[Step]) -> None:
     assert "| clip" in (manual[0].manual or "")
 
 
+def test_the_key_command_is_named_for_powershell_and_for_git_bash(plan: list[Step]) -> None:
+    """Git Bash rewrites /andur/... into a Windows path unless MSYS_NO_PATHCONV=1 is set."""
+    text = by_id(plan)["hand-over"].manual or ""
+    command = text.split("PowerShell: ")[1].split("  --  ")[0]
+    assert command.startswith("aws ssm get-parameter --name /andur/api-keys/")
+    assert text.endswith(f"in Git Bash: MSYS_NO_PATHCONV=1 {command}")
+    assert text.count("MSYS_NO_PATHCONV=1") == 1
+
+
 def test_only_measurements_on_different_models_run_at_once(plan: list[Step]) -> None:
     together = [step for step in plan if step.group]
     assert {step.id: step.lane for step in together} == {

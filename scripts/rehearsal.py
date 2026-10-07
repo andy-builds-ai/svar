@@ -603,6 +603,12 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
         f"aws ssm get-parameter --name /andur/api-keys/{w} --with-decryption "
         f"--region {args.region} --query Parameter.Value --output text | clip"
     )
+    # Git Bash rewrites the path /andur/... into a Windows path (ParameterNotFound)
+    # unless MSYS_NO_PATHCONV=1 stands before the command; PowerShell does not know
+    # that prefix. So the step names the command once for each shell.
+    key_commands = (
+        f"in PowerShell: {key_command}  --  in Git Bash: MSYS_NO_PATHCONV=1 {key_command}"
+    )
     return [
         # Before anything else: who signs in, the stack, its address.
         Step("identity", "check", "Signed-in identity", check=check_identity),
@@ -633,7 +639,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "setup",
             "The key handed to the business",
             manual=f"Copy the key into the clipboard without showing it, and hand it over: "
-            f"{key_command}",
+            f"{key_commands}",
         ),
         Step(
             "documents",

@@ -1,7 +1,6 @@
 """The Andur question handler: one Lambda function behind a Function URL."""
 
 import base64
-import binascii
 import functools
 import hashlib
 import hmac
@@ -545,7 +544,9 @@ def read_body(event: Mapping[str, Any]) -> dict[str, Any]:
     if event.get("isBase64Encoded"):
         try:
             raw = base64.b64decode(raw, validate=True).decode("utf-8")
-        except (binascii.Error, UnicodeDecodeError) as exc:
+        except ValueError as exc:
+            # Bad base64 (binascii.Error), a non-ASCII character in the text, or
+            # bytes that are not UTF-8 (UnicodeDecodeError): all are ValueErrors.
             raise BadRequest("The body is not valid base64-encoded UTF-8.") from exc
     try:
         body = json.loads(raw)
@@ -823,8 +824,9 @@ def authorize(key: str, workspace: str, settings: Settings) -> None:
 
     A wrong key, another workspace's key and a workspace without a key get the
     same sentence. Status and timing can still tell a cached workspace from an
-    unknown name (503 and 500 reach only names without a cached key), so workspace
-    names are not a secret.
+    unknown name (503 reaches only names without a cached key; 500 those, and a
+    cached key that is past `KEY_MAX_AGE_SECONDS` and cannot be read again, see
+    `current_key`), so workspace names are not a secret.
     """
     stored = current_key(key, workspace, settings.key_parameter_path, settings.region)
     if not same_key(key, stored):

@@ -814,8 +814,9 @@ def test_body_is_read_as_json_also_when_base64_encoded() -> None:
         {},
         {"body": "[1, 2]"},
         {"body": "%%%", "isBase64Encoded": True},
+        {"body": "e30=ä", "isBase64Encoded": True},
     ],
-    ids=["broken", "none", "missing", "array", "bad-base64"],
+    ids=["broken", "none", "missing", "array", "bad-base64", "non-ascii-base64"],
 )
 def test_a_body_that_is_no_json_object_is_a_bad_request(request_event: dict[str, Any]) -> None:
     with pytest.raises(BadRequest):
@@ -2024,8 +2025,8 @@ def test_the_day_is_the_german_calendar_day(utc: str, german_day: str) -> None:
     assert handler.german_date(now).isoformat() == german_day
 
 
-def test_the_german_day_is_the_time_zone_databases_every_hour_for_five_years() -> None:
-    """Where a time zone database is at hand (CI on Linux), every hour from 2026 to 2030."""
+def test_the_german_day_is_the_time_zone_databases_every_half_hour_for_five_years() -> None:
+    """Where a time zone database is at hand (CI on Linux), every half hour from 2026 to 2030."""
     import zoneinfo
 
     try:
