@@ -608,6 +608,7 @@ def test_a_function_from_before_the_topic_guardrail_is_named_and_nothing_is_meas
     error = capsys.readouterr().err
     assert "TOPIC_GUARDRAIL_ID, TOPIC_GUARDRAIL_VERSION" in error
     assert "predates the topic guardrail" in error
+    assert "or a topic model checks its topics (--topic-check model)" in error
 
 
 def test_a_deployed_guardrail_with_other_topics_is_reported() -> None:

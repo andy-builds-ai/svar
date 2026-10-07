@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import sys
@@ -101,6 +102,10 @@ def send(request: urllib.request.Request) -> tuple[int, dict[str, Any]]:
         return error.code, json_body(raw) if raw.strip() else {"error": str(error.reason)}
     except (urllib.error.URLError, TimeoutError) as error:
         raise AwsProblem(f"The web address could not be reached: {error}") from error
+    except (http.client.HTTPException, OSError) as error:
+        # A connection that breaks while the answer is awaited: urllib wraps only the errors
+        # of sending the request, not those of reading the response.
+        raise AwsProblem(f"The connection broke off before the answer came: {error}") from error
 
 
 def format_answer(workspace: str, body: dict[str, Any]) -> list[str]:

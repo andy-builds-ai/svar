@@ -11,6 +11,7 @@ import pytest
 from infra.answer_models import ANSWER_MODELS, AnswerModel
 from infra.stacks.andur_stack import ANSWER_FUNCTION_NAME
 from scripts import evaluate
+from tests.test_handler import ENVIRONMENT
 
 KNOWLEDGE = Path(__file__).resolve().parents[1] / "knowledge"
 
@@ -401,7 +402,8 @@ def test_the_results_are_written_after_every_model(
                  "body": {"cost_usd": 0.00015}}]  # fmt: skip
 
     monkeypatch.setattr(evaluate, "deployed_environment", lambda region: {})
-    monkeypatch.setattr(handler, "load_settings", lambda environ: None)
+    settings = handler.load_settings(ENVIRONMENT)
+    monkeypatch.setattr(handler, "load_settings", lambda environ: settings)
     monkeypatch.setattr(evaluate, "run_model", run_model)
     assert evaluate.main(["--model", "Nova Pro", "--model", "Nova 2 Lite", "--out", str(out)]) == 0
     assert written == [["Nova Pro"]]

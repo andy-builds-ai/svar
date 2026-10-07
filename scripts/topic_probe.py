@@ -1,6 +1,9 @@
 """Measure the denied topics against a fixed question set, before a deploy or after it.
 
-By default the topics of `DENIED_TOPICS` go into a guardrail of their own,
+In a region whose stack checks the topics with a model (infra/answer_models.py, eu-central-1)
+the run measures that model through the function's own check (scripts/topic_model_probe.py),
+on the evaluation sets' questions as well; it creates and deletes nothing. Elsewhere the topics
+of `DENIED_TOPICS` go into a guardrail of their own,
 `PROBE_NAME`, built the way the stack builds the topic guardrail: same order,
 same tier, same EU guardrail profile. Every question goes through
 `ApplyGuardrail` as INPUT after the handler's `QUESTION_FRAME`, and every answer
@@ -23,6 +26,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from infra.answer_models import region_models
 from infra.stacks.andur_stack import (
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
@@ -359,13 +363,14 @@ def missed(row: Mapping[str, Any]) -> bool:
 def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Slips per denied topic and language, false blocks per firing topic and language, cost.
     A question counts as right only if it was right in every run."""
+    others = sorted({r["topic"] for r in rows if r["expected"]} - set(TOPIC_NAMES))
     slips = {
         f"{topic} ({language})": {
             "blocked": sum(always_blocked(r) for r in group),
             "questions": len(group),
             "slipped": [r["id"] for r in group if not always_blocked(r)],
         }
-        for topic in TOPIC_NAMES
+        for topic in (*TOPIC_NAMES, *others)
         for language in LANGUAGES
         if (
             group := [
@@ -403,7 +408,10 @@ def summarise(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "other_topic": [
             r["id"]
             for r in rows
-            if r["expected"] and ever_blocked(r) and r["topic"] not in r["topics"]
+            if r["expected"]
+            and ever_blocked(r)
+            and r["topic"] in TOPIC_NAMES
+            and r["topic"] not in r["topics"]
         ],
         "units": {kind: count for kind, count in units.items() if count},
         "cost_usd": str(Decimal(topic_units) * Decimal(PRICE_TOPIC_PER_1K_UNITS) / 1000),
@@ -496,7 +504,8 @@ def deployed_guardrails(environment: Mapping[str, str]) -> dict[str, tuple[str, 
     if missing:
         raise AwsProblem(
             f"The deployed function has no {', '.join(missing)}: it predates the topic "
-            "guardrail. Deploy first, or measure without --deployed."
+            "guardrail, or a topic model checks its topics (--topic-check model). Deploy "
+            "first, or measure without --deployed."
         )
     return {
         source: (environment[id_name], environment[version_name])
@@ -526,34 +535,64 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--workers",
         type=int,
-        default=DEFAULT_WORKERS,
         help=(
-            f"ApplyGuardrail calls at once (default: {DEFAULT_WORKERS}); 1 asks one after the "
-            "other. The result and its order do not depend on it. AWS allows 25 calls a second "
-            "in eu-west-1 by default and a throttled call is repeated after a wait."
+            f"ApplyGuardrail calls at once (default: {DEFAULT_WORKERS}; topic model checks: 4); "
+            "1 asks one after the other. The result and its order do not depend on it. AWS "
+            "allows 25 ApplyGuardrail calls a second in eu-west-1 by default and a throttled "
+            "call is repeated after a wait."
         ),
     )
     parser.add_argument("--questions", type=Path, default=QUESTIONS_FILE)
     parser.add_argument("--answers", type=Path, default=ANSWERS_FILE)
     parser.add_argument("--out", type=Path, help="write every question's result as JSON here")
     parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
+    parser.add_argument(
+        "--topic-check",
+        choices=("guardrail", "model"),
+        help="measure a guardrail or a topic model; default: the way the stack in "
+        "--region checks the topics",
+    )
+    parser.add_argument(
+        "--topic-model",
+        help="with --topic-check model: this model of the region's table instead of the "
+        "region's own topic model",
+    )
     args = parser.parse_args(argv)
     if args.repeat < 1:
         parser.error("--repeat must be at least 1")
-    if args.workers < 1:
+    if args.workers is not None and args.workers < 1:
         parser.error("--workers must be at least 1")
+    if args.topic_model and args.topic_check == "guardrail":
+        parser.error("--topic-model measures a topic model, not a guardrail")
+    if args.topic_model and args.deployed:
+        parser.error("--deployed measures the deployed function's topic model, not --topic-model")
     return args
 
 
 def main(argv: list[str] | None = None) -> int:
     utf8_output()
     args = parse_args(argv)
+    try:
+        topic_model_id = args.topic_model or region_models(args.region).topic_model_id
+    except KeyError as problem:
+        print(f"error: {problem.args[0]}", file=sys.stderr)
+        return 2
+    if args.topic_check is None:
+        args.topic_check = "model" if topic_model_id else "guardrail"
+    if args.topic_check == "model":
+        if not topic_model_id:
+            print(f"error: {args.region} has no topic model", file=sys.stderr)
+            return 2
+        from scripts import topic_model_probe
+
+        return topic_model_probe.main(args, topic_model_id)
     if args.region not in GUARDRAIL_PROFILE_REGIONS:
         print(
             f"error: {args.region} is not a source region of {GUARDRAIL_PROFILE_ID}",
             file=sys.stderr,
         )
         return 2
+    args.workers = args.workers or DEFAULT_WORKERS
     sets = {
         "INPUT": load_probe_questions(args.questions),
         "OUTPUT": load_probe_answers(args.answers),

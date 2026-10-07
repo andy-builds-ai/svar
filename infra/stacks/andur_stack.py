@@ -27,7 +27,20 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-from infra.answer_models import PRICE_DATE, answer_model
+from app.denied_topics import DENIED_TOPICS
+from app.page import (
+    ASK_PATH,
+    CONTENT_SECURITY_POLICY,
+    HSTS_MAX_AGE_DAYS,
+    PAGE_FOLDER_VARIABLE,
+    ROOT_DOCUMENT,
+)
+from infra.answer_models import (
+    DEFAULT_REGION,
+    answer_guardrail_uses_profile,
+    answer_model,
+    region_models,
+)
 
 #: Titan Text Embeddings V2. The model id is part of the Bedrock ARN.
 EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
@@ -58,8 +71,8 @@ NONCURRENT_VERSION_RETENTION_DAYS = 30
 
 #: A model id runs in the stack's region; an ``eu.`` inference profile id runs
 #: in the EU regions that profile routes to, and nowhere else. Its token prices
-#: come from infra/answer_models.py.
-ANSWER_MODEL_ID = "eu.amazon.nova-pro-v1:0"
+#: come from infra/answer_models.py, like the model of each region.
+ANSWER_MODEL_ID = region_models(DEFAULT_REGION).answer_model_id
 
 EU_PROFILE_PREFIX = "eu."
 
@@ -87,62 +100,19 @@ GUARDRAIL_PROFILE_REGIONS = (
     "eu-south-2",
 )
 
-#: Name, definition and examples of each topic, in the order Bedrock reads them; the order
-#: changes verdicts too. A broad name such as "Legal advice" refused questions about the
-#: business's own contracts and prices. Measure every change with `python -m
-#: scripts.topic_probe` before it is deployed (docs/decisions.md).
-DENIED_TOPICS = (
-    (
-        "Legal action",
-        "Questions about taking or facing legal action: suing someone or being sued, going to "
-        "court, hiring a lawyer, and whether a court would find an act legal, illegal or "
-        "enforceable.",
-        [
-            "Can I sue my landlord over this?",
-            "Is this non-compete clause enforceable?",
-            "Can I take my neighbour to court over the noise?",
-        ],
-    ),
-    (
-        "Tax returns",
-        "Questions about a person's own tax return and the tax office: what money they get back "
-        "through a tax return, what income they must declare, and how to pay less tax or hide "
-        "money from the tax office.",
-        [
-            "How do I pay less income tax?",
-            "Do I have to declare this income?",
-            "Do I need to file a tax return this year?",
-        ],
-    ),
-    (
-        "Medical advice",
-        "Questions about a person's health: what a symptom, pain, rash or injury means, whether "
-        "it is serious or needs a doctor, and which medicine, dose, remedy or treatment to take.",
-        [
-            "What should I take for a headache?",
-            "Is this rash serious?",
-            "How much ibuprofen can I take?",
-            "Was kann ich gegen den Kater einwerfen?",
-        ],
-    ),
-    (
-        "Private lives",
-        "Questions about the private life of a person: their partner, family, health, home, "
-        "wealth, political views or religious beliefs; and questions about celebrities, "
-        "politicians or other public figures.",
-        [
-            "Who is the richest person in the world?",
-            "Is our CEO married?",
-            "Where does my colleague live?",
-            "Welcher Religion gehört mein Kollege an?",
-        ],
-    ),
-)
-
 MASKED_PII_TYPES = ("NAME", "EMAIL", "PHONE", "ADDRESS")
 
 GROUNDING_THRESHOLD = 0.7
 RELEVANCE_THRESHOLD = 0.7
+
+
+def grounding_threshold_for(region: str) -> float:
+    """The grounding threshold of the answer guardrail in ``region``: its own in `REGIONS`,
+    measured for its answer model, else `GROUNDING_THRESHOLD`. The stack and the probes that
+    copy its answer guardrail ask this, so they agree."""
+    own = region_models(region).grounding_threshold
+    return GROUNDING_THRESHOLD if own is None else own
+
 
 BLOCKED_INPUT_MESSAGE = (
     "Svar answers questions about this company's documents. It does not give legal, tax or "
@@ -194,9 +164,12 @@ def masking_policy() -> bedrock.CfnGuardrail.SensitiveInformationPolicyConfigPro
     )
 
 
-#: USD per 1,000 tokens or guardrail text units, eu-west-1, standard tier:
-#: the AWS Price List API behind aws.amazon.com/bedrock/pricing, read on
-#: `PRICE_DATE`. The token prices are the answer model's own.
+#: USD per 1,000 tokens or guardrail text units, standard tier: the AWS Price
+#: List API behind aws.amazon.com/bedrock/pricing, read on the region's price
+#: date in infra/answer_models.py. The token prices here are the default
+#: model's; a stack takes its own model's from its region's table. The three
+#: guardrail prices are the same in eu-west-1 and eu-central-1 (price lists of
+#: 28.09.2026 and 06.10.2026).
 PRICE_INPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).input_per_1k
 PRICE_OUTPUT_PER_1K_TOKENS = answer_model(ANSWER_MODEL_ID).output_per_1k
 PRICE_TOPIC_PER_1K_UNITS = "0.15"
@@ -225,12 +198,23 @@ LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_14
 ANSWER_FUNCTION_NAME = "andur-answer"
 
 #: Longer than `worst_case_seconds` in app/aws.py, 189 since the topic check of the question
-#: (06.10.2026), so a hanging AWS call ends as the handler's 502, not as a Lambda timeout.
+#: (06.10.2026) and 190 without CloudFront (07.10.2026), so a hanging AWS call ends as the
+#: handler's 502, not as a Lambda timeout.
 ANSWER_TIMEOUT_SECONDS = 195
 
 ANSWER_MEMORY_MB = 512
 
+#: At most this many answers at once. A new account may allow only 10 concurrent executions
+#: in all and Lambda keeps 10 of them unreserved, so there the reservation fails the deploy (the
+#: sub-account of 06.10.2026: 10). `cdk deploy -c answer_max_concurrency=none` leaves it out;
+#: the account's own limit then caps the function.
 ANSWER_MAX_CONCURRENCY = 5
+
+#: Where the function serves the page itself, the room it gets on top for one page load:
+#: index.html and the four files it loads at once, each a call of the function. Without it two
+#: questions in flight would leave a page load short and the page empty, since its words come
+#: from its scripts.
+PAGE_LOAD_CONCURRENCY = 5
 
 #: How long a deploy that replaces a guardrail version waits after the answer function has
 #: changed, before CloudFormation deletes the old versions: longer than an answer may run, so
@@ -247,27 +231,13 @@ ASSET_EXCLUDES = ["**/__pycache__", "*.pyc", "README.md"]
 
 WEB_FOLDER = REPOSITORY_ROOT / "web"
 
-ASK_PATH = "/ask"
+#: The file CloudFront, or the function, serves for the bare address (app/page.py).
+SITE_ROOT_DOCUMENT = ROOT_DOCUMENT
 
-#: The file CloudFront serves for the bare address.
-SITE_ROOT_DOCUMENT = "index.html"
+#: Where Lambda unpacks a layer: the page's files, where the function serves them.
+PAGE_LAYER_FOLDER = "/opt"
 
 ORIGIN_RESPONSE_TIMEOUT_SECONDS = 120
-
-CONTENT_SECURITY_POLICY = "; ".join(
-    [
-        "default-src 'none'",
-        "script-src 'self'",
-        "style-src 'self'",
-        "img-src 'self' data:",
-        "connect-src 'self'",
-        "base-uri 'none'",
-        "form-action 'none'",
-        "frame-ancestors 'none'",
-    ]
-)
-
-HSTS_MAX_AGE_DAYS = 730
 
 
 def replacement_safe_name(
@@ -302,11 +272,32 @@ class AndurStack(Stack):
         construct_id: str,
         *,
         answer_model_id: str = ANSWER_MODEL_ID,
+        topic_model_id: str | None = None,
+        answer_guardrail_profile: bool = True,
+        answer_max_concurrency: int | None = ANSWER_MAX_CONCURRENCY,
+        behind_cloudfront: bool = True,
         **kwargs,
     ) -> None:
+        """``topic_model_id`` None: the topic guardrail checks the denied topics, through the
+        EU guardrail profile. A model id: that model checks them in the stack's region, and there
+        is no topic guardrail. ``answer_guardrail_profile``: whether the answer guardrail runs
+        through the profile too; the excerpt guardrail never does. ``behind_cloudfront`` False:
+        no CloudFront, no site bucket; the function's URL is open and serves the page too."""
         super().__init__(scope, construct_id, **kwargs)
+        # Without a set region (the tests) the prices are the default region's.
+        self.price_region = DEFAULT_REGION if Token.is_unresolved(self.region) else self.region
+        self.models = region_models(self.price_region)
         self.answer_model_id = answer_model_id
-        self.answer_model = answer_model(answer_model_id)
+        self.answer_model = answer_model(answer_model_id, self.price_region)
+        self.topic_model_id = topic_model_id
+        self.topic_model = (
+            None if topic_model_id is None else answer_model(topic_model_id, self.price_region)
+        )
+        self.answer_guardrail_profile = answer_guardrail_uses_profile(
+            answer_guardrail_profile, topic_model_id
+        )
+        self.answer_max_concurrency = answer_max_concurrency
+        self.behind_cloudfront = behind_cloudfront
 
         self.documents_bucket = self._create_documents_bucket()
         self.vector_bucket, self.vector_index = self._create_vector_store()
@@ -325,7 +316,18 @@ class AndurStack(Stack):
         )
         self.guardrail, self.guardrail_version = self._create_guardrail()
         self.excerpt_guardrail, self.excerpt_guardrail_version = self._create_excerpt_guardrail()
-        self.topic_guardrail, self.topic_guardrail_version = self._create_topic_guardrail()
+        self.topic_guardrail, self.topic_guardrail_version = (
+            self._create_topic_guardrail() if topic_model_id is None else (None, None)
+        )
+        guardrail_versions = [
+            version
+            for version in (
+                self.guardrail_version,
+                self.excerpt_guardrail_version,
+                self.topic_guardrail_version,
+            )
+            if version is not None
+        ]
         self.answer_role = self._create_answer_role(
             self.knowledge_base,
             self.budget_table,
@@ -334,6 +336,7 @@ class AndurStack(Stack):
             self.excerpt_guardrail,
             self.topic_guardrail,
         )
+        self.page_layer = None if behind_cloudfront else self._create_page_layer()
         self.answer_function = self._create_answer_function(
             self.knowledge_base,
             self.budget_table,
@@ -342,19 +345,22 @@ class AndurStack(Stack):
             self.guardrail_version,
             self.excerpt_guardrail_version,
             self.topic_guardrail_version,
+            self.page_layer,
         )
         self.function_url = self._create_function_url(self.answer_function)
-        self.deploy_drain = self._create_deploy_drain(
-            self.answer_function,
-            [self.guardrail_version, self.excerpt_guardrail_version, self.topic_guardrail_version],
-        )
+        self.deploy_drain = self._create_deploy_drain(self.answer_function, guardrail_versions)
 
-        self.site_bucket = self._create_site_bucket()
-        self.distribution = self._create_distribution(self.site_bucket, self.function_url)
-        self.invoke_permission = self._allow_cloudfront_to_invoke(
-            self.answer_function, self.distribution
-        )
-        self.site_files = self._upload_the_page(self.site_bucket, self.distribution)
+        self.site_bucket: s3.Bucket | None = None
+        self.distribution: cloudfront.Distribution | None = None
+        self.invoke_permission: lambda_.CfnPermission | None = None
+        self.site_files: s3_deployment.BucketDeployment | None = None
+        if behind_cloudfront:
+            self.site_bucket = self._create_site_bucket()
+            self.distribution = self._create_distribution(self.site_bucket, self.function_url)
+            self.invoke_permission = self._allow_cloudfront_to_invoke(
+                self.answer_function, self.distribution
+            )
+            self.site_files = self._upload_the_page(self.site_bucket, self.distribution)
 
         self._create_outputs()
 
@@ -686,6 +692,17 @@ class AndurStack(Stack):
             resource_name=GUARDRAIL_PROFILE_ID,
         )
 
+    def _cross_region_config(self, profile: bool) -> dict[str, Any]:
+        """The EU guardrail profile for a guardrail, or nothing: masking and the grounding check
+        run in the region without a profile."""
+        if not profile:
+            return {}
+        return {
+            "cross_region_config": bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
+                guardrail_profile_arn=self._guardrail_profile_arn(self.region)
+            )
+        }
+
     def _topic_policy(self, on_answer: bool) -> bedrock.CfnGuardrail.TopicPolicyConfigProperty:
         """`DENIED_TOPICS` in the Standard tier, read in the question and, if ``on_answer``,
         in the answer too."""
@@ -712,7 +729,7 @@ class AndurStack(Stack):
         the answer; the topic guardrail reads both."""
         topics = (
             {"topic_policy_config": self._topic_policy(on_answer=False)}
-            if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS
+            if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS and self.answer_guardrail_profile
             else {}
         )
         return self._guardrail_with_version(
@@ -729,15 +746,13 @@ class AndurStack(Stack):
                 "blocked_input_messaging": BLOCKED_INPUT_MESSAGE,
                 "blocked_outputs_messaging": BLOCKED_OUTPUT_MESSAGE,
                 **topics,
-                "cross_region_config": bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
-                    guardrail_profile_arn=self._guardrail_profile_arn(self.region)
-                ),
+                **self._cross_region_config(self.answer_guardrail_profile),
                 "sensitive_information_policy_config": masking_policy(),
                 "contextual_grounding_policy_config": bedrock.CfnGuardrail.ContextualGroundingPolicyConfigProperty(  # noqa: E501
                     filters_config=[
                         bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
                             type="GROUNDING",
-                            threshold=GROUNDING_THRESHOLD,
+                            threshold=grounding_threshold_for(self.price_region),
                             action="BLOCK",
                             enabled=True,
                         ),
@@ -785,9 +800,7 @@ class AndurStack(Stack):
                 "blocked_input_messaging": BLOCKED_INPUT_MESSAGE,
                 "blocked_outputs_messaging": BLOCKED_OUTPUT_MESSAGE,
                 "topic_policy_config": self._topic_policy(on_answer=True),
-                "cross_region_config": bedrock.CfnGuardrail.GuardrailCrossRegionConfigProperty(
-                    guardrail_profile_arn=self._guardrail_profile_arn(self.region)
-                ),
+                **self._cross_region_config(True),
             },
         )
 
@@ -852,14 +865,39 @@ class AndurStack(Stack):
         log_group: logs.LogGroup,
         guardrail: bedrock.CfnGuardrail,
         excerpt_guardrail: bedrock.CfnGuardrail,
-        topic_guardrail: bedrock.CfnGuardrail,
+        topic_guardrail: bedrock.CfnGuardrail | None,
     ) -> iam.Role:
         """The execution role of the answer function: five inline policies, every statement
         on named resources. Most name one; `ApplyAnswerGuardrail` names nine — the three
-        guardrails, and the EU guardrail profile in each of its six regions.
+        guardrails, and the EU guardrail profile in each of its six regions, which the topic
+        guardrail runs through and, where `answer_guardrail_profile`, the answer guardrail. With
+        a topic model it names the two guardrails alone, and `InvokeTopicModel` lets the function
+        call that one model in the stack's region, with nothing else.
 
         It names no guardrail version, so a deploy that replaces one leaves the role as it is.
         """
+        guardrails = [guardrail.attr_guardrail_arn, excerpt_guardrail.attr_guardrail_arn]
+        if topic_guardrail is not None:
+            guardrails += [
+                topic_guardrail.attr_guardrail_arn,
+                # The answer and topic guardrails run through the EU profile.
+                *(self._guardrail_profile_arn(region) for region in GUARDRAIL_PROFILE_REGIONS),
+            ]
+        topic_model = (
+            []
+            if self.topic_model_id is None
+            else [
+                iam.PolicyStatement(
+                    sid="InvokeTopicModel",
+                    actions=["bedrock:InvokeModel"],
+                    # The stack's region by name, not by reference: the template shows where.
+                    resources=[
+                        f"arn:{Aws.PARTITION}:bedrock:{self.region}::foundation-model/"
+                        f"{self.topic_model_id}"
+                    ],
+                )
+            ]
+        )
         return iam.Role(
             self,
             "AnswerFunctionRole",
@@ -901,17 +939,9 @@ class AndurStack(Stack):
                         iam.PolicyStatement(
                             sid="ApplyAnswerGuardrail",
                             actions=["bedrock:ApplyGuardrail"],
-                            resources=[
-                                guardrail.attr_guardrail_arn,
-                                excerpt_guardrail.attr_guardrail_arn,
-                                topic_guardrail.attr_guardrail_arn,
-                                # The answer and topic guardrails run through the EU profile.
-                                *(
-                                    self._guardrail_profile_arn(region)
-                                    for region in GUARDRAIL_PROFILE_REGIONS
-                                ),
-                            ],
+                            resources=guardrails,
                         ),
+                        *topic_model,
                     ]
                 ),
                 "WriteLogs": self._write_logs_policy(log_group),
@@ -926,9 +956,24 @@ class AndurStack(Stack):
         log_group: logs.LogGroup,
         guardrail_version: bedrock.CfnGuardrailVersion,
         excerpt_guardrail_version: bedrock.CfnGuardrailVersion,
-        topic_guardrail_version: bedrock.CfnGuardrailVersion,
+        topic_guardrail_version: bedrock.CfnGuardrailVersion | None,
+        page_layer: lambda_.LayerVersion | None,
     ) -> lambda_.Function:
-        """The question handler from app/, configured entirely through its environment."""
+        """The question handler from app/, configured entirely through its environment: the
+        topic guardrail's id and version, or the topic model and its prices; with
+        ``page_layer``, the folder of the page it serves itself."""
+        if topic_guardrail_version is not None:
+            topic_check = {
+                "TOPIC_GUARDRAIL_ID": topic_guardrail_version.attr_guardrail_id,
+                "TOPIC_GUARDRAIL_VERSION": topic_guardrail_version.attr_version,
+            }
+        else:
+            assert self.topic_model is not None
+            topic_check = {
+                "TOPIC_MODEL_ID": self.topic_model.model_id,
+                "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS": self.topic_model.input_per_1k,
+                "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": self.topic_model.output_per_1k,
+            }
         return lambda_.Function(
             self,
             "AnswerFunction",
@@ -940,10 +985,12 @@ class AndurStack(Stack):
             handler="handler.handler",
             timeout=Duration.seconds(ANSWER_TIMEOUT_SECONDS),
             memory_size=ANSWER_MEMORY_MB,
-            reserved_concurrent_executions=ANSWER_MAX_CONCURRENCY,
+            reserved_concurrent_executions=self.reserved_concurrency(),
             role=role,
             log_group=log_group,
+            layers=None if page_layer is None else [page_layer],
             environment={
+                **({} if page_layer is None else {PAGE_FOLDER_VARIABLE: PAGE_LAYER_FOLDER}),
                 "KNOWLEDGE_BASE_ID": knowledge_base.attr_knowledge_base_id,
                 "MODEL_ID": self.answer_model_id,
                 "REGION": Aws.REGION,
@@ -957,20 +1004,49 @@ class AndurStack(Stack):
                 "GUARDRAIL_VERSION": guardrail_version.attr_version,
                 "EXCERPT_GUARDRAIL_ID": excerpt_guardrail_version.attr_guardrail_id,
                 "EXCERPT_GUARDRAIL_VERSION": excerpt_guardrail_version.attr_version,
-                "TOPIC_GUARDRAIL_ID": topic_guardrail_version.attr_guardrail_id,
-                "TOPIC_GUARDRAIL_VERSION": topic_guardrail_version.attr_version,
+                **topic_check,
                 "PRICE_INPUT_PER_1K_TOKENS": self.answer_model.input_per_1k,
                 "PRICE_OUTPUT_PER_1K_TOKENS": self.answer_model.output_per_1k,
                 "PRICE_TOPIC_PER_1K_UNITS": PRICE_TOPIC_PER_1K_UNITS,
                 "PRICE_PII_PER_1K_UNITS": PRICE_PII_PER_1K_UNITS,
                 "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
-                "PRICE_DATE": PRICE_DATE,
+                "PRICE_DATE": self.models.price_date,
             },
         )
 
+    def reserved_concurrency(self) -> int | None:
+        """The answer function's reservation: `answer_max_concurrency`, and where it serves the
+        page as well, `PAGE_LOAD_CONCURRENCY` on top; None leaves it to the account."""
+        if self.answer_max_concurrency is None:
+            return None
+        page = 0 if self.behind_cloudfront else PAGE_LOAD_CONCURRENCY
+        return self.answer_max_concurrency + page
+
     def _create_function_url(self, function: lambda_.Function) -> lambda_.FunctionUrl:
-        """The function's own HTTPS address — reachable for CloudFront alone."""
-        return function.add_function_url(auth_type=lambda_.FunctionUrlAuthType.AWS_IAM)
+        """The function's own HTTPS address. Behind CloudFront set to AWS_IAM: reachable for
+        CloudFront alone. Without CloudFront open (NONE): it is the address, and the key header
+        is the gate, as it is behind CloudFront. CDK grants both actions a URL of NONE needs
+        since October 2025, `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction`, the second
+        only through the URL."""
+        auth_type = (
+            lambda_.FunctionUrlAuthType.AWS_IAM
+            if self.behind_cloudfront
+            else lambda_.FunctionUrlAuthType.NONE
+        )
+        return function.add_function_url(auth_type=auth_type)
+
+    def _create_page_layer(self) -> lambda_.LayerVersion:
+        """The page's files from web/, for a function that serves them itself; Lambda unpacks
+        them into `PAGE_LAYER_FOLDER`. No bucket and nothing public: the files reach a browser
+        only through the function."""
+        return lambda_.LayerVersion(
+            self,
+            "PageLayer",
+            description="Andur: the page's files, served by the answer function.",
+            code=lambda_.Code.from_asset(str(WEB_FOLDER), exclude=ASSET_EXCLUDES),
+            compatible_runtimes=[LAMBDA_RUNTIME],
+            compatible_architectures=[lambda_.Architecture.ARM_64],
+        )
 
     def _create_deploy_drain(
         self, function: lambda_.Function, versions: list[bedrock.CfnGuardrailVersion]
@@ -1183,25 +1259,37 @@ class AndurStack(Stack):
             value=self.knowledge_base_role.role_arn,
             description="Service role assumed by Bedrock Knowledge Bases.",
         )
-        CfnOutput(
-            self,
-            "WebUrl",
-            value=f"https://{self.distribution.distribution_domain_name}",
-            description=(
-                f"The page. Questions go to <WebUrl>{ASK_PATH} with the header X-Andur-Key "
-                "and the SHA-256 of the body in x-amz-content-sha256."
-            ),
-        )
-        CfnOutput(
-            self,
-            "FunctionUrl",
-            value=self.function_url.url,
-            description=(
-                "The function's own address. Set to AWS_IAM: from outside this account "
-                "only CloudFront may invoke it, while a role in this account can sign a "
-                f"call itself. Ask through <WebUrl>{ASK_PATH}."
-            ),
-        )
+        if self.distribution is not None:
+            CfnOutput(
+                self,
+                "WebUrl",
+                value=f"https://{self.distribution.distribution_domain_name}",
+                description=(
+                    f"The page. Questions go to <WebUrl>{ASK_PATH} with the header X-Andur-Key "
+                    "and the SHA-256 of the body in x-amz-content-sha256."
+                ),
+            )
+            CfnOutput(
+                self,
+                "FunctionUrl",
+                value=self.function_url.url,
+                description=(
+                    "The function's own address. Set to AWS_IAM: from outside this account "
+                    "only CloudFront may invoke it, while a role in this account can sign a "
+                    f"call itself. Ask through <WebUrl>{ASK_PATH}."
+                ),
+            )
+        else:
+            CfnOutput(
+                self,
+                "WebUrl",
+                value=self.function_url.url,
+                description=(
+                    "The page, served by the answer function at its own URL in this region, "
+                    f"without CloudFront. Questions go to <WebUrl>{ASK_PATH.lstrip('/')} with "
+                    "the header X-Andur-Key."
+                ),
+            )
         CfnOutput(
             self,
             "ApiKeyParameterPath",
@@ -1225,15 +1313,26 @@ class AndurStack(Stack):
             value=self.excerpt_guardrail_version.ref,
             description="The guardrail that masks the sources' excerpts, as <id>|<version>.",
         )
-        CfnOutput(
-            self,
-            "TopicGuardrailRef",
-            value=self.topic_guardrail_version.ref,
-            description=(
-                "The guardrail that checks the answer, without its citations, for the denied "
-                "topics, as <id>|<version>."
-            ),
-        )
+        if self.topic_guardrail_version is not None:
+            CfnOutput(
+                self,
+                "TopicGuardrailRef",
+                value=self.topic_guardrail_version.ref,
+                description=(
+                    "The guardrail that checks the answer, without its citations, for the "
+                    "denied topics, as <id>|<version>."
+                ),
+            )
+        else:
+            CfnOutput(
+                self,
+                "TopicModelId",
+                value=self.topic_model_id,
+                description=(
+                    "The model that checks the question and the answer for the denied topics, "
+                    "in this region."
+                ),
+            )
         CfnOutput(
             self,
             "BudgetTableName",

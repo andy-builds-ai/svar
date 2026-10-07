@@ -6,7 +6,8 @@ Deploy, fill, ask, test and tear down.
 
 Needs Python 3.11+, Node.js, the AWS CDK (`npm install -g aws-cdk`) and AWS
 credentials for the target account. Everything goes to `eu-west-1`
-(Ireland), pinned in `infra/app.py`.
+(Ireland) unless `-c region=` names another region of `REGIONS` in
+`infra/answer_models.py` ([Another region](#another-region)).
 
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
@@ -22,6 +23,45 @@ names, the web address (`WebUrl`) and the Parameter Store path of the
 workspace keys. The scripts read them from there. It also uploads `web/` into
 the site bucket and clears the CloudFront caches, so the page is whatever is
 in `web/` at the moment of the deploy.
+
+### Another region
+
+`REGIONS` in `infra/answer_models.py` says what a stack answers with in each
+region. In eu-central-1 (Frankfurt) that is Qwen3 235B in the region itself,
+and gpt-oss-120b in the region checks the denied topics instead of a topic
+guardrail: the Standard topic tier, which reads German, goes only with the EU
+guardrail profile, which carries its checks to six EU regions (*Guardrails
+and cost* in [decisions.md](decisions.md)). Masking and the grounding check
+run there without a profile, so no guardrail of the Frankfurt stack uses one.
+A topic the model names on its first call stands unless two more calls at
+once both name none; each topic lifted that way is a `topic-model-unconfirmed`
+line in the function's log, with the topic and the side it was read on.
+Frankfurt has no CloudFront, which answers at edge locations worldwide and
+cannot be kept to Germany: the answer function's URL in eu-central-1 is the
+one address. It is open (`AuthType NONE`); the workspace key in `X-Andur-Key`
+is the gate, as it is behind CloudFront. The function serves the page itself,
+from a layer with the files of `web/`, and sets the security headers
+CloudFront's policy sets in Ireland (`app/page.py`). `WebUrl` among the
+outputs is that URL, `https://<id>.lambda-url.eu-central-1.on.aws/`; there is
+no own domain and no WAF in front of it. The region and the account come
+from outside: the region from `-c region=`, the account from the AWS profile.
+
+```bash
+cdk bootstrap aws://<account>/eu-central-1 --profile <profile>
+cdk deploy -c region=eu-central-1 --profile <profile>
+```
+
+A new account may allow only 10 concurrent Lambda executions, all of which
+Lambda keeps unreserved, so the reservation of `ANSWER_MAX_CONCURRENCY` fails
+the deploy there. `-c answer_max_concurrency=none` leaves it out, and the
+account's limit caps the function; raising that limit is a Service Quotas
+request (`L-B99A9384`). Without CloudFront every file of the page is a call
+of the function too, so loading the page takes up to five executions for a
+moment; Frankfurt therefore reserves `ANSWER_MAX_CONCURRENCY` plus
+`PAGE_LOAD_CONCURRENCY`, 5 + 5 = 10, and an account needs room for that
+beside the 10 Lambda keeps unreserved. Without the reservation, the page and
+the questions share whatever the account allows. Every script then takes `--region eu-central-1`, with
+`AWS_PROFILE=<profile>` for the account.
 
 The first deploy of the distribution takes a few minutes longer than the
 others: CloudFront rolls a new configuration out to its edge locations before

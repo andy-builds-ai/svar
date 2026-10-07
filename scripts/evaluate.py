@@ -19,7 +19,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from infra.answer_models import ANSWER_MODELS, PRICE_DATE, AnswerModel
+from infra.answer_models import ANSWER_MODELS, PRICE_DATE, AnswerModel, region_models
 from scripts import utf8_output
 from scripts.aws import REGION, AwsProblem, client, explained
 from scripts.ingest import SECTION_SEPARATOR
@@ -132,14 +132,14 @@ def score(question: Mapping[str, Any], body: Mapping[str, Any], handler: Any) ->
     return {"correct": correct, "cites_document": cites}
 
 
-def settings_for(base: Any, model: AnswerModel) -> Any:
-    """The deployed settings with this model and its token prices."""
+def settings_for(base: Any, model: AnswerModel, price_date: str = PRICE_DATE) -> Any:
+    """The deployed settings with this model and its token prices, read on ``price_date``."""
     prices = dataclasses.replace(
         base.prices,
         input_tokens=Decimal(model.input_per_1k),
         output_tokens=Decimal(model.output_per_1k),
     )
-    return dataclasses.replace(base, model_id=model.model_id, prices=prices, price_date=PRICE_DATE)
+    return dataclasses.replace(base, model_id=model.model_id, prices=prices, price_date=price_date)
 
 
 def ask(handler: Any, settings: Any, question: Mapping[str, Any]) -> dict[str, Any]:
@@ -190,8 +190,9 @@ def run_model(
     questions: Sequence[Mapping[str, Any]],
     progress: Callable[[str], None],
 ) -> list[dict[str, Any]]:
-    """Every question for one model, each with its outcome and score."""
-    settings = settings_for(base, model)
+    """Every question for one model, each with its outcome and score, priced on the date of
+    ``base``."""
+    settings = settings_for(base, model, base.price_date)
     results = []
     for question in questions:
         outcome = ask(handler, settings, question)
@@ -293,17 +294,27 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--questions", type=Path, default=QUESTIONS_FILE)
     parser.add_argument("--out", type=Path, help="write every answer and score as JSON here")
-    parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
+    parser.add_argument(
+        "--region",
+        default=REGION,
+        help=f"the deployed stack; its models and prices come from its region; default: {REGION}",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     utf8_output()
     args = parse_args(argv)
-    models = [m for m in MODELS if not args.model or m.name in args.model]
-    unknown = set(args.model or []) - {m.name for m in MODELS}
+    try:
+        regional = region_models(args.region)
+    except KeyError as problem:
+        print(f"error: {problem.args[0]}", file=sys.stderr)
+        return 2
+    known = regional.models
+    models = [m for m in known if not args.model or m.name in args.model]
+    unknown = set(args.model or []) - {m.name for m in known}
     if unknown or not models:
-        print(f"error: unknown model {sorted(unknown)}; known: {[m.name for m in MODELS]}")
+        print(f"error: unknown model {sorted(unknown)}; known: {[m.name for m in known]}")
         return 2
     outside = [m.model_id for m in models if not stays_in_the_eu(m.model_id)]
     if outside:
@@ -316,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     except (AwsProblem, handler.ConfigurationError) as problem:
         print(f"error: {problem}", file=sys.stderr)
         return 2
+    base = dataclasses.replace(base, price_date=regional.price_date)
 
     runs, summaries = {}, []
     for model in models:

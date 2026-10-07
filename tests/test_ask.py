@@ -1,6 +1,7 @@
 """Tests for the ask script, without AWS and without the network."""
 
 import hashlib
+import http.client
 import io
 import json
 import urllib.error
@@ -215,6 +216,28 @@ def test_an_unreachable_url_is_a_readable_problem(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(urllib.request, "urlopen", offline)
     with pytest.raises(AwsProblem, match="could not be reached"):
+        ask.send(ask.build_request(ASK_URL, KEY, "How?", "quillmoor"))
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        ConnectionResetError("reset by peer"),
+        http.client.IncompleteRead(b"{"),
+    ],
+)
+def test_a_connection_that_breaks_while_waiting_is_a_readable_problem(
+    monkeypatch: pytest.MonkeyPatch, broken: Exception
+) -> None:
+    """urllib wraps only the errors of sending; these come from reading the response, which
+    may take up to 195 seconds without CloudFront."""
+
+    def breaks(*_: Any, **__: Any) -> Any:
+        raise broken
+
+    monkeypatch.setattr(urllib.request, "urlopen", breaks)
+    with pytest.raises(AwsProblem, match="broke off before the answer came"):
         ask.send(ask.build_request(ASK_URL, KEY, "How?", "quillmoor"))
 
 

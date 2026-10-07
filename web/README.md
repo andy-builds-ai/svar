@@ -10,6 +10,11 @@ This README stays behind: the deploy leaves it out, like every other
 
 ## One address for everything
 
+In eu-central-1 the answer function serves these files itself, at its own URL,
+with the security headers below set by the function (`app/page.py`); there is
+no CloudFront and no site bucket there, and the deploy puts the files into a
+layer of the function. The rest of this section describes eu-west-1.
+
 The page and the answer function sit behind the same CloudFront distribution.
 The page is served from a private S3 bucket; the single path `/ask` goes to
 the answer function's URL instead. Both are reached through an origin access
@@ -86,9 +91,12 @@ a second question while the first is in flight is ignored. Two would be two
 questions off the key's budget, and an answer that may not belong to the
 question in the field.
 
-The page stops waiting after 125 seconds. CloudFront gives up at 120 and
-sends a 504, so in every ordinary case that answer arrives first; this is the
-floor under it, for a connection that neither answers nor fails. Without it
+The page stops waiting after 200 seconds, longer than the function may run
+(195). Behind CloudFront, CloudFront gives up at 120 and sends a 504, so that
+answer arrives first. Without CloudFront (eu-central-1) the function's own
+timeout ends a request, and it times a second model call so that its answer
+is back before it (`caller_deadline_seconds` in `app/aws.py`). Either way the
+page's limit is the floor, for a connection that neither answers nor fails. Without it
 the button stayed on *Asking…* until the browser was reloaded.
 
 An answer is shown as the model wrote it, with its `[n]` citations, then the
@@ -123,7 +131,7 @@ containing `<script>` shows those eight characters.
 | 403 without a sentence | The request was refused on the way in. Not a wrong key — that is a 401 with a sentence. |
 | 504 | The answer took longer than CloudFront waits (120 seconds). The function may still be running it, and the question is already counted. |
 | No response at all | The connection failed. |
-| Nothing within 125 seconds | The page stopped waiting. The question may still be running, and asking again costs another one. |
+| Nothing within 200 seconds | The page stopped waiting. The question may still be running, and asking again costs another one. |
 
 The sentences in this table are the English ones; `language.js` has them in
 German too. The three statuses without a sentence never passed through the

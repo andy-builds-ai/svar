@@ -4,8 +4,12 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
+from infra.answer_models import DEFAULT_REGION
+
 STACK_NAME = "AndurStack"
-REGION = "eu-west-1"
+#: The default of every `--region`: the region infra/answer_models.py names, so a move is one
+#: setting for the stack and the scripts alike.
+REGION = DEFAULT_REGION
 
 #: Error codes AWS returns when the credentials themselves are the problem.
 _CREDENTIAL_ERROR_CODES = {

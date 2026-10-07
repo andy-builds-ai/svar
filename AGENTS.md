@@ -47,8 +47,22 @@ cdk diff     # compares it with the deployed stack; needs an AWS login, changes 
   `andur-grounding-probe` and cost 0.22 USD a run on 06.10.2026; run it only
   when asked, and after every change to the grounding check or the prompt ask
   for it.
-- **Region is `eu-west-1`,** pinned in `infra/app.py`. Use EU inference
-  profiles, never a global one.
+  `python -m scripts.control_eval` creates and deletes up to three guardrails
+  named `andur-control-*-probe` in eu-central-1; a run of the 42 questions cost
+  0.063 to 0.086 USD per Frankfurt model, 0.11 USD for Nova Pro and 0.33 USD
+  for Claude Sonnet 4.6 on 06.10.2026;
+  `python -m scripts.tool_probe` costs fractions of a cent per model. Run
+  both only when asked.
+- **Region is `eu-west-1` by default** (`DEFAULT_REGION` in
+  `infra/answer_models.py`); `cdk synth -c region=eu-central-1` and each
+  script's `--region` pick Frankfurt, whose stack has its own models, checks
+  the denied topics with gpt-oss-120b in the region (`app/topic_model.py`),
+  keeps masking and grounding off the EU profile, and has no CloudFront: the
+  function's URL serves page and `/ask` (`app/page.py`). Use EU inference
+  profiles, never a global one. `python -m scripts.topic_probe --region
+  eu-central-1` measures that check, three runs of 319 checks for 0.30 USD
+  on 07.10.2026; run it only when asked, and after every change to that
+  prompt or to `check_topics_with_model` in `app/handler.py` ask for it.
 - **Model IDs and prices live only in `infra/answer_models.py`.** Add a model
   there first; do not copy an ID or a price anywhere else.
 - **No secrets in code, tests, logs or messages:** no API keys, no parameter

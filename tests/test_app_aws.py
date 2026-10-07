@@ -29,21 +29,40 @@ def test_the_model_call_is_tried_once_everything_else_twice() -> None:
     assert aws.CLIENT_LIMITS["ssm"].attempts == 2
     assert aws.CLIENT_LIMITS["dynamodb"].attempts == 2
     assert aws.CLIENT_LIMITS["guardrail"].attempts == 2
+    assert aws.CLIENT_LIMITS["topic-model"].attempts == 1  # the handler asks again itself
     assert set(aws.CLIENT_LIMITS) == {
         "ssm",
         "dynamodb",
         "bedrock-agent-runtime",
         "bedrock-runtime",
         "guardrail",
+        "topic-model",
     }
 
 
 def test_the_excerpt_guardrail_is_a_bedrock_runtime_client_with_short_limits() -> None:
     """ApplyGuardrail is a bedrock-runtime call; under the model's 40 seconds the worst case
     would pass 180."""
-    assert aws.SERVICE_OF_CLIENT == {"guardrail": "bedrock-runtime"}
+    assert aws.SERVICE_OF_CLIENT == {
+        "guardrail": "bedrock-runtime",
+        "topic-model": "bedrock-runtime",
+    }
     guard = aws.CLIENT_LIMITS["guardrail"]
     assert guard.connect_timeout + guard.read_timeout == 7
+
+
+def test_a_topic_check_by_the_model_gets_no_more_time_than_the_topic_guardrail() -> None:
+    """It checks in the guardrail's place, so every sum of this module holds for either way of
+    checking the topics; the worst case counts its checks as guardrail calls. Two rounds of
+    2 + 8 seconds, one attempt each, the calls that confirm a topic at once in the second: the
+    guardrail's 20."""
+    import topic_model
+
+    assert aws.TOPIC_MODEL_ROUNDS_PER_CHECK == topic_model.ROUNDS_PER_CHECK == 2
+    assert aws.CLIENT_LIMITS["topic-model"].attempts == 1
+    assert aws.topic_model_check_seconds() == 2 * (2 + 8) == 20
+    assert aws.topic_check_fits_a_guardrail_call()
+    assert aws.call_seconds("guardrail") == 20
 
 
 def test_the_budget_counter_waits_the_shortest() -> None:
@@ -93,6 +112,26 @@ def test_a_second_model_call_ends_before_cloudfront_gives_up() -> None:
     assert ends < aws.ORIGIN_TIMEOUT_SECONDS
     assert aws.worst_case_seconds() == 189
     assert aws.CLIENT_LIMITS["bedrock-runtime"].attempts == 1
+
+
+def test_without_cloudfront_a_second_model_call_ends_inside_the_functions_time() -> None:
+    """Where the function is its own address, the page waits 200 seconds (web/app.js) and the
+    function may run 195: the function's own timeout is the limit. The second call may start
+    until second 105, and the answer is back at 190, 5 seconds before it. The worst case of
+    every timeout is then 190, still inside the 195."""
+    assert aws.caller_deadline_seconds(behind_cloudfront=False) == 195
+    assert aws.latest_model_retry_start(behind_cloudfront=False) == 195 - 5 - 2 - 43 - 2 * 20
+    assert aws.latest_model_retry_start(behind_cloudfront=False) == 105
+    ends = (
+        aws.latest_model_retry_start(behind_cloudfront=False)
+        + aws.MODEL_RETRY_PAUSE_SECONDS
+        + aws.call_seconds("bedrock-runtime")
+        + aws.GUARDRAIL_CALLS_AFTER_MODEL * aws.call_seconds("guardrail")
+    )
+    assert ends + aws.ORIGIN_MARGIN_SECONDS <= aws.FUNCTION_TIMEOUT_SECONDS
+    assert aws.FUNCTION_TIMEOUT_SECONDS < aws.PAGE_TIMEOUT_SECONDS
+    assert aws.worst_case_seconds(behind_cloudfront=False) == 190
+    assert aws.worst_case_seconds(behind_cloudfront=False) < aws.FUNCTION_TIMEOUT_SECONDS
 
 
 def test_clients_get_their_service_limits_and_are_made_once() -> None:

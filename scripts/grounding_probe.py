@@ -6,8 +6,9 @@ way the function retrieves them and are built into the sources text the model
 call is checked against. The check runs in a guardrail of its own,
 `PROBE_NAME`, a copy of the answer guardrail: the same topics on the question
 while the stack sets them there (none since the second deploy of 06.10.2026),
-masking, grounding and relevance thresholds and EU guardrail profile. Each
-answer is checked as written, the way the model call checks it.
+masking, grounding and relevance thresholds, and the EU guardrail profile
+where the stack of the region uses it (not in eu-central-1). Each answer is
+checked as written, the way the model call checks it.
 
 A German answer that check withholds is also checked in English: translated by
 the answer model through the probe, and the translation checked on the same
@@ -30,15 +31,16 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from infra.answer_models import region_answer_guardrail_uses_profile
 from infra.stacks.andur_stack import (
     ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
-    GROUNDING_THRESHOLD,
     GUARDRAIL_PROFILE_ID,
     GUARDRAIL_PROFILE_REGIONS,
     MASKED_PII_TYPES,
     RELEVANCE_THRESHOLD,
+    grounding_threshold_for,
 )
 from scripts import topic_probe, utf8_output
 from scripts.aws import REGION, AwsProblem, client, error_code
@@ -100,9 +102,11 @@ def load_answers(path: Path) -> list[dict[str, Any]]:
     return answers
 
 
-def probe_request() -> dict[str, Any]:
-    """The probe guardrail: the answer guardrail's policies as the stack sets them, read on
-    the same sides, under the probe's name."""
+def probe_request(region: str = REGION) -> dict[str, Any]:
+    """The probe guardrail: the answer guardrail's policies as the stack in ``region`` sets
+    them, read on the same sides, under the probe's name; through the EU profile only where
+    that stack's guardrails use it."""
+    profile = region_answer_guardrail_uses_profile(region)
     topics = topic_probe.topic_policy()
     for topic in topics["topicsConfig"]:
         topic["outputEnabled"] = False
@@ -110,8 +114,16 @@ def probe_request() -> dict[str, Any]:
     return {
         "name": PROBE_NAME,
         "description": "Andur: temporary copy of the answer guardrail; deleted after the run.",
-        **({"topicPolicyConfig": topics} if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS else {}),
-        "crossRegionConfig": {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID},
+        **(
+            {"topicPolicyConfig": topics}
+            if ANSWER_GUARDRAIL_READS_QUESTION_TOPICS and profile
+            else {}
+        ),
+        **(
+            {"crossRegionConfig": {"guardrailProfileIdentifier": GUARDRAIL_PROFILE_ID}}
+            if profile
+            else {}
+        ),
         "sensitiveInformationPolicyConfig": {
             "piiEntitiesConfig": [
                 {
@@ -134,7 +146,7 @@ def probe_request() -> dict[str, Any]:
                     "enabled": True,
                 }
                 for kind, threshold in (
-                    ("GROUNDING", GROUNDING_THRESHOLD),
+                    ("GROUNDING", grounding_threshold_for(region)),
                     ("RELEVANCE", RELEVANCE_THRESHOLD),
                 )
             ]
@@ -535,7 +547,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     utf8_output()
     args = parse_args(argv)
-    if args.region not in GUARDRAIL_PROFILE_REGIONS:
+    try:
+        profile = region_answer_guardrail_uses_profile(args.region)
+    except KeyError as problem:
+        print(f"error: {problem.args[0]}", file=sys.stderr)
+        return 2
+    if profile and args.region not in GUARDRAIL_PROFILE_REGIONS:
         print(
             f"error: {args.region} is not a source region of {GUARDRAIL_PROFILE_ID}",
             file=sys.stderr,
@@ -554,7 +571,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         bedrock = client("bedrock", args.region)
         runtime = client("bedrock-runtime", args.region)
-        guardrail_id = topic_probe.create_probe(bedrock, probe_request())
+        guardrail_id = topic_probe.create_probe(bedrock, probe_request(args.region))
         progress(f"created {PROBE_NAME} ({guardrail_id})")
         try:
             topic_probe.wait_until_ready(bedrock, guardrail_id, name=PROBE_NAME)
@@ -575,7 +592,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         args.out.write_text(
             json.dumps(
-                {"guardrail": probe_request(), "summary": summary, "rows": rows},
+                {"guardrail": probe_request(args.region), "summary": summary, "rows": rows},
                 ensure_ascii=False,
                 indent=2,
             ),

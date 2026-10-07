@@ -14,6 +14,15 @@ the budget are checked in the function either way.
 Everything arrives through the web address — see *One address for everything*
 in [architecture](../docs/architecture.md#one-address-for-everything).
 
+In eu-central-1 there is no CloudFront, and the Function URL is the way in:
+set to `NONE`, with the two permissions Lambda asks for since October 2025
+(`lambda:InvokeFunctionUrl`, and `lambda:InvokeFunction` only through the
+URL). The key is the gate there as everywhere. With `PAGE_FOLDER` set, the
+function also serves the page (`page.py`): `GET` and `HEAD` on `/` and the
+page's own file names, nothing else of the folder; `/ask` goes on to the
+answer as before; every response carries the security headers CloudFront's
+policy sets in eu-west-1.
+
 It runs only while a question is in flight; there is nothing to pay while
 nobody asks. `aws.py` holds the AWS clients with their timeouts and retries.
 `plans.py` holds the plans a paying customer's key can carry (*Plans* below).
@@ -221,9 +230,31 @@ through costs one question and repairs the item: the update writes the
 missing attribute from the defaults in the same call. While the item is whole
 the condition says exactly what it said before.
 
-**A question counts once it has passed the budget**, even if Bedrock then
-fails with a 502. Nothing is given back. That is one rule instead of two, and
-a caller who asks again knows what they paid.
+**A question counts once it has passed the budget, and a failure on AWS's
+side gives it back.** When the search, the topic check of the question or
+the model call then ends the request with a 502 (`RetrievalError`,
+`TopicCheckError`, `LLMError`: a model refused after its second call, a
+service unavailable, access denied), `refund_question` takes back what
+`charge_question` counted: `questions_used` of a demo key, or the day and
+month counts a key on a plan was charged to, also when the request ran past
+midnight. The caller reads that the question was not counted, and the body
+says `"refunded": true`. The 48-hour window a demo key's first question
+opened stays open. These keep the question counted:
+- **A timeout anywhere in the error's chain.** A call that timed out may have
+  run and been paid for, and whoever could cause timeouts on purpose would
+  otherwise get model time without budget.
+- **Anything after the answer model answered:** an empty answer, an answer
+  that could not be checked for the denied topics. The model call was paid
+  for, and the caller's question shapes its answer.
+- **A topic verdict nobody could read.** It follows from the text the caller
+  wrote.
+- **A refund that fails, or that would not end before the function's own
+  timeout.** The count may run ahead, never behind; a `budget-refund-failed`
+  or `budget-kept` line says so.
+- **A crash.** A bug is fixed, not refunded.
+
+The refund's condition keeps a count from going below zero
+(`DEMO_REFUND_CONDITION`, `PLAN_REFUND_CONDITION`).
 
 ### Setting a budget for one key
 
@@ -466,7 +497,7 @@ An answer from us-east-1, 23.09.2026, before the move to eu-west-1:
 | `stop_reason` | Bedrock's stop reason; `null` when no model was asked. `max_tokens` means the answer was cut off, `content_filtered` that the model's own filter stopped it, `guardrail_intervened` that the guardrail blocked or masked something — `guardrail` says which. |
 | `usage` | Tokens in and out of the model call. |
 | `guardrail` | What the guardrail did: `action` is `none`, `masked` (personal details replaced by their type, such as `{PHONE}`, and a note at the end of the answer), `blocked` (the answer is a sentence of Andur's, which replaced the guardrail's own message) or `intervened` (Bedrock says it stepped in, the trace does not say how). `policies` names what acted: `topic:<name>`, `pii:<type>`, `grounding`, `relevance`. |
-| `cost_usd` | What this answer cost: model tokens and guardrail text units, each times its price, rounded to six places. `null` when the guardrail reported no units, because a cost without them would be too low. Retrieval, embedding and Lambda are not in it — together under a hundredth of a cent. |
+| `cost_usd` | What this answer cost: model tokens and guardrail text units, each times its price, rounded to six places. `null` when the guardrail reported no units, because a cost without them would be too low; and `null` for an answer the guardrail withheld after the model wrote it, for which Bedrock reports no model tokens although it charges the model call (`model_tokens_unknown`). Retrieval, embedding and Lambda are not in it — together under a hundredth of a cent. |
 | `price_date` | The day the prices behind `cost_usd` were read off the AWS pricing page. A price changes at AWS without a deploy here; the date says how old the number is. |
 | `latency_ms` | Time inside the function, from request to response. |
 
@@ -790,7 +821,7 @@ below describe the English one.
 | 405 | Any method other than `POST`. The response carries `Allow: POST`. |
 | 429 | With an `error` sentence: a key on a plan has used its questions for this month or for today (*Plans*); the sentence says which, and the quota comes back with the next day or month. Without one: more requests at once than the function may run (5). Lambda refuses those before any code runs, so the body is Lambda's own: `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
 | 500 | The function is set up wrong (an environment variable, unreadable keys), the workspace's key could not be read and the function holds none younger than 15 minutes (*Getting a key*), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.* (*Der Dienst ist nicht eingerichtet.*); the cause is in the log. |
-| 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer; or the answer could not be checked for the denied topics, and is not given. The sentence names the cause. |
+| 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer; or the answer could not be checked for the denied topics, and is not given. The sentence names the cause. When it failed before the model answered, and not by a timeout or an unreadable topic verdict, the question is given back to the key, and the body adds `"refunded": true` and a sentence that says so (*Keys are budgets*). |
 | 503 | This instance has used its 10 reads in 10 seconds for workspaces it holds no key for (*Getting a key*). The response carries `Retry-After: 10`; nothing was read and nothing counted. |
 
 Two more can arrive that the function never saw. Neither body is
@@ -877,8 +908,8 @@ from files.
 | Variable | Set to |
 |---|---|
 | `KNOWLEDGE_BASE_ID` | The stack's knowledge base. |
-| `MODEL_ID` | `ANSWER_MODEL_ID` in `infra/stacks/andur_stack.py`: `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile. |
-| `REGION` | The stack's region, `eu-west-1`. |
+| `MODEL_ID` | The region's answer model in `REGIONS` (`infra/answer_models.py`): `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile, in eu-west-1; `qwen.qwen3-235b-a22b-2507-v1:0`, Qwen3 235B in the region itself, in eu-central-1. |
+| `REGION` | The stack's region, `eu-west-1` or `eu-central-1`. |
 | `NUMBER_OF_RESULTS` | Passages per question, `10`. Retrieve may return fewer. |
 | `API_KEY_PARAMETER_PATH` | `/andur/api-keys`. |
 | `BUDGET_TABLE_NAME` | `andur-key-budgets`, the table that counts per key. |
@@ -889,8 +920,12 @@ from files.
 | `GUARDRAIL_VERSION` | Its deployed version, a number. `DRAFT` is refused. |
 | `EXCERPT_GUARDRAIL_ID` | The stack's excerpt guardrail. |
 | `EXCERPT_GUARDRAIL_VERSION` | Its deployed version, a number. |
-| `TOPIC_GUARDRAIL_ID` | The stack's topic guardrail, which checks the answer without its citations. |
+| `TOPIC_GUARDRAIL_ID` | The stack's topic guardrail, which checks the question and the answer without its citations. Not set where a topic model checks. |
 | `TOPIC_GUARDRAIL_VERSION` | Its deployed version, a number. |
+| `PAGE_FOLDER` | Only where the function is the address itself, without CloudFront (eu-central-1): `/opt`, where Lambda unpacks the layer with the page's files. Then the function serves the page and sets the security headers itself, and times a second model call by its own 195 seconds instead of CloudFront's 120. |
+| `TOPIC_MODEL_ID` | Instead of the two above, in a region whose stack checks the topics with a model (`REGIONS` in `infra/answer_models.py`): `openai.gpt-oss-120b-1:0` in eu-central-1 since 07.10.2026. |
+| `PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS` | With `TOPIC_MODEL_ID`: USD per 1,000 input tokens of the topic model. |
+| `PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS` | With `TOPIC_MODEL_ID`: USD per 1,000 output tokens. |
 | `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00092`. |
 | `PRICE_OUTPUT_PER_1K_TOKENS` | USD per 1,000 output tokens, `0.00368`. |
 | `PRICE_TOPIC_PER_1K_UNITS` | USD per 1,000 text units of the topic filter, `0.15`. |
@@ -936,7 +971,12 @@ twice, which is the safe direction: the count runs ahead, never behind. The
 budget call waits the shortest of all, since it sits in front of every
 question. The guardrail calls are `bedrock-runtime` calls with limits of
 their own (2 + 5 seconds): under the model's 40 they would push the worst case
-past the function's timeout. Added up, the worst case is 189 seconds —
+past the function's timeout. Where a topic model checks the topics
+(eu-central-1), a check is at most two rounds of 2 + 8 seconds, one attempt
+each: the first call, then the call in place of a failed one or the two
+that confirm a topic, at once. That is 20 seconds, as long as the guardrail
+call it replaces, so every sum here holds for both ways
+(`topic_check_fits_a_guardrail_call()` in `aws.py`). Added up, the worst case is 189 seconds —
 Parameter Store counts once, because the function reads only the requested
 workspace's key and reads it at most once per request, however many
 workspaces there are, and the budget table counts twice, because an item whose own window outlasts it is
@@ -962,8 +1002,17 @@ seconds there with both guardrails (four answered questions, 23.09.2026),
 and 0.7 to 4.4 seconds inside the function with Nova Pro on the page in
 eu-west-1 (four questions, 28.09.2026), so this is a corner, not a case.
 
+Without CloudFront (eu-central-1) no layer cuts in at 120: the page waits 200
+seconds (`REQUEST_TIMEOUT_MS` in `web/app.js`), `scripts/ask.py` 200, and the
+function may run 195, so its own timeout is the limit. The second model call
+may start until second 105 there (`latest_model_retry_start(False)` in
+`aws.py`), its answer is back by 190, and the worst case is 190.
+
 At most 5 requests run at the same time (`ANSWER_MAX_CONCURRENCY` in the
-stack); Lambda answers the rest with 429. Five concurrent calls from a
+stack); Lambda answers the rest with 429. Where the function serves the page
+itself (eu-central-1), each file of the page is a request as well, so the
+stack reserves 5 more for one page load (`PAGE_LOAD_CONCURRENCY`): 10, of
+which questions may take all. Five concurrent calls from a
 stranger therefore hold the service up for everyone — taken on purpose:
 capping the bill matters more here than keeping a demo reachable, and a WAF in
 front of the URL is the answer if that ever becomes a real problem.

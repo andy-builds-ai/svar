@@ -12,13 +12,16 @@ import re
 import time
 import traceback
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, TypeVar
 
 import aws
+import page
 import plans
+import topic_model
 
 T = TypeVar("T")
 
@@ -95,6 +98,12 @@ NO_SOURCES_ANSWERS = {
 NOT_IN_SOURCES_ANSWERS = {
     "en": "The sources do not answer this question.",
     "de": "Die Quellen beantworten diese Frage nicht.",
+}
+
+#: Said after the error of a question that was given back to the key's budget.
+REFUNDED_NOTES = {
+    "en": " This question was not counted against your key.",
+    "de": " Diese Frage wurde Ihrem Schlüssel nicht angerechnet.",
 }
 
 #: The only thing a caller learns about a broken configuration.
@@ -225,10 +234,13 @@ class HandlerError(Exception):
     def __init__(self, message: str, german: str | None = None) -> None:
         super().__init__(message)
         self.german = german
+        #: Whether the question was given back to the key's budget (`refund_question`).
+        self.refunded = False
 
     def public_message(self, language: str = DEFAULT_LANGUAGE) -> str:
         """What the caller reads, in the language of the request."""
-        return self.german if language == "de" and self.german else str(self)
+        message = self.german if language == "de" and self.german else str(self)
+        return message + in_language(REFUNDED_NOTES, language) if self.refunded else message
 
 
 class BadRequest(HandlerError):
@@ -314,6 +326,9 @@ class Prices:
     topic_units: Decimal
     sensitive_information_units: Decimal
     grounding_units: Decimal
+    #: The topic model's tokens, where a model checks the topics; 0 where a guardrail does.
+    topic_model_input_tokens: Decimal = Decimal(0)
+    topic_model_output_tokens: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True)
@@ -333,10 +348,15 @@ class Settings:
     guardrail_version: str
     excerpt_guardrail_id: str
     excerpt_guardrail_version: str
-    topic_guardrail_id: str
-    topic_guardrail_version: str
+    #: Either the topic guardrail and its version, or the topic model; never both.
+    topic_guardrail_id: str | None
+    topic_guardrail_version: str | None
     prices: Prices
     price_date: str
+    topic_model_id: str | None = None
+    #: Where the function serves the page itself and is the address, without CloudFront in
+    #: front of it: the folder of the page's files (page.py). None behind CloudFront.
+    page_folder: str | None = None
 
 
 #: Environment variable for each setting. The stack sets all of them.
@@ -354,8 +374,6 @@ ENVIRONMENT_VARIABLES = {
     "guardrail_version": "GUARDRAIL_VERSION",
     "excerpt_guardrail_id": "EXCERPT_GUARDRAIL_ID",
     "excerpt_guardrail_version": "EXCERPT_GUARDRAIL_VERSION",
-    "topic_guardrail_id": "TOPIC_GUARDRAIL_ID",
-    "topic_guardrail_version": "TOPIC_GUARDRAIL_VERSION",
     "price_input_tokens": "PRICE_INPUT_PER_1K_TOKENS",
     "price_output_tokens": "PRICE_OUTPUT_PER_1K_TOKENS",
     "price_topic_units": "PRICE_TOPIC_PER_1K_UNITS",
@@ -363,6 +381,22 @@ ENVIRONMENT_VARIABLES = {
     "price_grounding_units": "PRICE_GROUNDING_PER_1K_UNITS",
     "price_date": "PRICE_DATE",
 }
+
+#: The settings of each way to check the topics: the stack sets the one or the other. The topic
+#: model is set where no guardrail that reads German stays in the region (infra/answer_models.py).
+TOPIC_GUARDRAIL_VARIABLES = {
+    "topic_guardrail_id": "TOPIC_GUARDRAIL_ID",
+    "topic_guardrail_version": "TOPIC_GUARDRAIL_VERSION",
+}
+TOPIC_MODEL_VARIABLES = {
+    "topic_model_id": "TOPIC_MODEL_ID",
+    "price_topic_model_input_tokens": "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS",
+    "price_topic_model_output_tokens": "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS",
+}
+
+#: Set only where the function is the address itself (infra/answer_models.py): then it serves
+#: the page from this folder, and no CloudFront waits in front of it.
+PAGE_VARIABLES = {"page_folder": page.PAGE_FOLDER_VARIABLE}
 
 
 def whole_number(variable: str, text: str, lowest: int, highest: int) -> int:
@@ -398,10 +432,24 @@ def price_day(text: str) -> str:
     return text
 
 
+def topic_check_variables(environ: Mapping[str, str]) -> dict[str, str]:
+    """The variables of the one way to check the topics the environment sets: the topic model
+    once ``TOPIC_MODEL_ID`` is set, else the topic guardrail; both at once is refused."""
+    if not environ.get("TOPIC_MODEL_ID", "").strip():
+        return TOPIC_GUARDRAIL_VARIABLES
+    both = [name for name in TOPIC_GUARDRAIL_VARIABLES.values() if environ.get(name, "").strip()]
+    if both:
+        raise ConfigurationError(
+            f"TOPIC_MODEL_ID and {', '.join(both)} are both set: the topics are checked by the "
+            "topic model or by the topic guardrail, not by both."
+        )
+    return TOPIC_MODEL_VARIABLES
+
+
 def load_settings(environ: Mapping[str, str]) -> Settings:
     """Read and check the settings; no network call."""
     values: dict[str, str] = {}
-    for name, variable in ENVIRONMENT_VARIABLES.items():
+    for name, variable in {**ENVIRONMENT_VARIABLES, **topic_check_variables(environ)}.items():
         value = environ.get(variable, "").strip()
         if not value:
             raise ConfigurationError(f"The environment variable {variable} is not set.")
@@ -423,11 +471,28 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             f"KEEP_DAYS ({keep_days}) must outlast WINDOW_HOURS ({window_hours}): a budget "
             "whose item disappears before its window closes is no budget."
         )
+    variables = {**ENVIRONMENT_VARIABLES, **TOPIC_GUARDRAIL_VARIABLES}
     for name in ("guardrail_version", "excerpt_guardrail_version", "topic_guardrail_version"):
-        if not (values[name].isascii() and values[name].isdigit()):
+        if name in values and not (values[name].isascii() and values[name].isdigit()):
             raise ConfigurationError(
-                f"{ENVIRONMENT_VARIABLES[name]} must be a version number, not {values[name]!r}."
+                f"{variables[name]} must be a version number, not {values[name]!r}."
             )
+    topic_model_prices = {
+        field_name: price(variable, values[name])
+        for field_name, name, variable in (
+            (
+                "topic_model_input_tokens",
+                "price_topic_model_input_tokens",
+                "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS",
+            ),
+            (
+                "topic_model_output_tokens",
+                "price_topic_model_output_tokens",
+                "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS",
+            ),
+        )
+        if name in values
+    }
     prices = Prices(
         input_tokens=price("PRICE_INPUT_PER_1K_TOKENS", values["price_input_tokens"]),
         output_tokens=price("PRICE_OUTPUT_PER_1K_TOKENS", values["price_output_tokens"]),
@@ -436,6 +501,7 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             "PRICE_PII_PER_1K_UNITS", values["price_sensitive_information_units"]
         ),
         grounding_units=price("PRICE_GROUNDING_PER_1K_UNITS", values["price_grounding_units"]),
+        **topic_model_prices,
     )
 
     return Settings(
@@ -452,10 +518,12 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         guardrail_version=values["guardrail_version"],
         excerpt_guardrail_id=values["excerpt_guardrail_id"],
         excerpt_guardrail_version=values["excerpt_guardrail_version"],
-        topic_guardrail_id=values["topic_guardrail_id"],
-        topic_guardrail_version=values["topic_guardrail_version"],
+        topic_guardrail_id=values.get("topic_guardrail_id"),
+        topic_guardrail_version=values.get("topic_guardrail_version"),
         prices=prices,
         price_date=price_day(values["price_date"]),
+        topic_model_id=values.get("topic_model_id"),
+        page_folder=environ.get(page.PAGE_FOLDER_VARIABLE, "").strip() or None,
     )
 
 
@@ -896,8 +964,16 @@ def write_budget(
     return True, attributes if isinstance(attributes, Mapping) else {}
 
 
-def charge_question(settings: Settings, workspace: str, key: str) -> None:
-    """Count this question against the key's budget, or refuse it.
+@dataclass(frozen=True)
+class Charge:
+    """What `charge_question` counted: the demo budget's questions, or a plan's counts of
+    the question's month and day (`month_count`, `day_count`)."""
+
+    plan_counts: tuple[str, str] | None = None
+
+
+def charge_question(settings: Settings, workspace: str, key: str) -> Charge:
+    """Count this question against the key's budget, or refuse it; what it counted.
 
     The first write is the demo budget's, and its condition refuses every item that
     names a plan. The refused item comes back with the refusal, so a key on a plan is
@@ -918,10 +994,9 @@ def charge_question(settings: Settings, workspace: str, key: str) -> None:
     )
     if passed:
         keep_the_item_past_its_window(settings, key, item)
-        return
+        return Charge()
     if PLAN_ATTRIBUTE in item:
-        charge_plan(settings, workspace, key, item, now)
-        return
+        return Charge(charge_plan(settings, workspace, key, item, now))
     spent = spent_message(item, now)
     raise BudgetSpent(spent["en"], spent["de"])
 
@@ -1009,8 +1084,9 @@ PLAN_CONDITION = (
 
 def charge_plan(
     settings: Settings, workspace: str, key: str, item: Mapping[str, Any], now: int
-) -> None:
-    """Count a question of a key on a plan, or refuse it with the quota it reached.
+) -> tuple[str, str]:
+    """Count a question of a key on a plan, or refuse it with the quota it reached; the
+    counts it raised, of the question's month and day.
 
     ``item`` is what the demo write refused. A plan the table does not know, and a count
     that is not a number, are refused too: a key on a plan never gets a question that
@@ -1047,7 +1123,7 @@ def charge_plan(
         },
     )
     if passed:
-        return
+        return month, day
     for count, limit, messages in (
         (month, plan.questions_per_month, MONTH_QUOTA_MESSAGES),
         (day, plan.questions_per_day, DAY_QUOTA_MESSAGES),
@@ -1060,6 +1136,98 @@ def charge_plan(
             )
     log_event("budget-item-broken", workspace=workspace, plan=plan.name, counts=[month, day])
     raise ConfigurationError(f"The budget item of this key cannot count {month} or {day}.")
+
+
+# --- Giving a question back ----------------------------------------------
+
+#: The errors of a question that ended without an answer after it was counted, each from an
+#: AWS call: the search, the topic check, the model. Given back only before the answer model
+#: answered, and not when a timeout caused it or the topic verdict could not be read.
+REFUNDABLE_ERRORS = (RetrievalError, LLMError, TopicCheckError)
+
+#: Takes back what `BUDGET_UPDATE_EXPRESSION` counted; never below zero, never on a plan.
+DEMO_REFUND_EXPRESSION = "SET questions_used = questions_used - :one"
+DEMO_REFUND_CONDITION = "attribute_not_exists(#plan) AND questions_used > :zero"
+
+#: Takes back what `PLAN_UPDATE_EXPRESSION` counted, in the month and day it counted in.
+PLAN_REFUND_EXPRESSION = "SET #month = #month - :one, #day = #day - :one"
+PLAN_REFUND_CONDITION = "#month > :zero AND #day > :zero"
+
+
+def refund_request(charge: Charge) -> dict[str, Any]:
+    """The update that takes one question back from what ``charge`` counted."""
+    values = {":zero": {"N": "0"}, ":one": {"N": "1"}}
+    if charge.plan_counts is None:
+        return {
+            "UpdateExpression": DEMO_REFUND_EXPRESSION,
+            "ConditionExpression": DEMO_REFUND_CONDITION,
+            "ExpressionAttributeNames": {"#plan": PLAN_ATTRIBUTE},
+            "ExpressionAttributeValues": values,
+        }
+    month, day = charge.plan_counts
+    return {
+        "UpdateExpression": PLAN_REFUND_EXPRESSION,
+        "ConditionExpression": PLAN_REFUND_CONDITION,
+        "ExpressionAttributeNames": {"#month": month, "#day": day},
+        "ExpressionAttributeValues": values,
+    }
+
+
+def refund_question(
+    settings: Settings,
+    workspace: str,
+    key: str,
+    charge: Charge,
+    error: HandlerError,
+    elapsed: float,
+    model_answered: bool = False,
+) -> bool:
+    """Give a question back to the key's budget after ``error``; whether it was.
+
+    Never when the question may have bought model time for nothing: after a timeout, which may
+    have run and been paid for; after the answer model answered, which was paid for, also when
+    the answer was empty or could not be checked; after a topic verdict nobody could read,
+    which follows from the text the caller wrote. Whoever could cause any of these would
+    otherwise ask without budget. A refund that fails, or that would not end before the
+    function's own timeout, leaves the question counted and says so in the log: the count may
+    run ahead, never behind.
+    """
+    reason = type(error).__name__
+    kept = (
+        "timeout"
+        if aws.timed_out(error)
+        else "model answered"
+        if model_answered
+        else "unreadable verdict"
+        if getattr(error, "unreadable", False)
+        else None
+    )
+    if kept:
+        log_event("budget-kept", workspace=workspace, error=reason, cause=kept)
+        return False
+    latest = aws.FUNCTION_TIMEOUT_SECONDS - aws.ORIGIN_MARGIN_SECONDS - aws.call_seconds("dynamodb")
+    if elapsed > latest:
+        log_event(
+            "budget-kept",
+            workspace=workspace,
+            error=reason,
+            cause="no time left",
+            elapsed_ms=round(elapsed * 1000),
+        )
+        return False
+    try:
+        client("dynamodb", settings.region).update_item(
+            TableName=settings.budget_table,
+            Key={BUDGET_KEY_ATTRIBUTE: {"S": key_hash(key)}},
+            **refund_request(charge),
+        )
+    except aws.botocore_errors() as exc:
+        log_event(
+            "budget-refund-failed", workspace=workspace, error=reason, detail=aws.error_detail(exc)
+        )
+        return False
+    log_event("budget-refunded", workspace=workspace, error=reason, plan=charge.plan_counts)
+    return True
 
 
 # --- Retrieval -----------------------------------------------------------
@@ -1228,7 +1396,7 @@ def ask_model(
             record.model_rejections += rejected
             if attempt == 1 and rejected:
                 elapsed = clock() - record.started
-                retry = elapsed <= aws.latest_model_retry_start()
+                retry = elapsed <= aws.latest_model_retry_start(settings.page_folder is None)
                 log_event(
                     "converse-rejected",
                     model=settings.model_id,
@@ -1471,16 +1639,36 @@ def add_units(
     return total
 
 
+def model_tokens_unknown(
+    response: Mapping[str, Any], usage: Mapping[str, int], question_refused: bool
+) -> bool:
+    """Whether the model wrote an answer whose tokens the response does not give: one the
+    guardrail withheld after the model call. Bedrock then reports 0 tokens, in the response and
+    in CloudWatch (96 calls on 07.10.2026), and its user guide says the model call is charged
+    all the same ("How charges are calculated for Amazon Bedrock Guardrails", read
+    07.10.2026). A question the guardrail refused before the model was asked has no model
+    tokens, and its cost is known."""
+    no_tokens = not (usage.get("input_tokens") or usage.get("output_tokens"))
+    intervened = response.get("stopReason") == "guardrail_intervened"
+    return intervened and not question_refused and no_tokens
+
+
 def answer_cost(
-    prices: Prices, usage: Mapping[str, int], units: Mapping[str, int] | None
+    prices: Prices,
+    usage: Mapping[str, int],
+    units: Mapping[str, int] | None,
+    topic_tokens: Mapping[str, int] | None = None,
 ) -> float | None:
-    """What one answer cost in USD: model tokens and guardrail units, each times its price per
-    thousand."""
+    """What one answer cost in USD: model tokens, guardrail units and the topic model's tokens,
+    each times its price per thousand."""
     if units is None:
         return None
+    topic_tokens = topic_tokens or {"input_tokens": 0, "output_tokens": 0}
     total = (
         Decimal(usage["input_tokens"]) * prices.input_tokens
         + Decimal(usage["output_tokens"]) * prices.output_tokens
+        + Decimal(topic_tokens["input_tokens"]) * prices.topic_model_input_tokens
+        + Decimal(topic_tokens["output_tokens"]) * prices.topic_model_output_tokens
         + sum(
             (
                 Decimal(units[name]) * getattr(prices, field_name)
@@ -1514,6 +1702,14 @@ def without_citations(answer: str) -> str:
 QUESTION_FRAME = "Customer to business: "
 ANSWER_FRAME = "Answer from the business to a customer: "
 
+#: The cause a topic check by the model gives when its reply names no topic and not "none":
+#: empty, without the JSON, or a topic of its own. Such a first call is replaced by one more,
+#: and the check refuses when that one gives no verdict either (`check_topics_with_model`).
+UNREADABLE_VERDICT = (
+    "the topic model gave no readable verdict",
+    "das Themen-Modell hat kein lesbares Urteil geliefert",
+)
+
 #: What a failed topic check says, by the side it checked.
 TOPIC_CHECK_FAILED = {
     "INPUT": (
@@ -1544,7 +1740,8 @@ def check_question_topics(
 ) -> dict[str, Any]:
     """The denied topics the question asks about, and the topic units of the check.
 
-    Checked by the topic guardrail as INPUT, after `QUESTION_FRAME`, before the model is asked.
+    Checked by the topic guardrail as INPUT, or by the topic model, after `QUESTION_FRAME`,
+    before the model is asked.
     The answer guardrail on the model call reads no topic (`ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`
     in the stack is False). A failed check answers nothing: the question is not asked
     unchecked.
@@ -1567,11 +1764,31 @@ def check_answer_topics(guardrail_client: Any, settings: Settings, answer: str) 
     return check_topics(guardrail_client, settings, "OUTPUT", text)
 
 
+def topic_client(settings: Settings) -> Any:
+    """The client of the way the topics are checked: the topic model's or the guardrail's."""
+    return client("topic-model" if settings.topic_model_id else "guardrail", settings.region)
+
+
+def topic_check_failed(source: str, cause: str, german_cause: str) -> TopicCheckError:
+    """The error of a topic check that cannot say the text is free of denied topics."""
+    english, german = TOPIC_CHECK_FAILED[source]
+    error = TopicCheckError(english.format(cause=cause), german.format(cause=german_cause))
+    # A verdict the model gave but nobody can read follows from the text it read, which the
+    # caller writes: such a question is not given back (`refund_question`).
+    error.unreadable = (cause, german_cause) == UNREADABLE_VERDICT
+    return error
+
+
 def check_topics(
     guardrail_client: Any, settings: Settings, source: str, text: str
 ) -> dict[str, Any]:
-    """The denied topics the topic guardrail blocks in ``text``, read as ``source``, and the
-    topic units of the call; a failed call raises `TopicCheckError`."""
+    """The denied topics the topic guardrail, or the topic model, finds in ``text``, read as
+    ``source``, and the topic units of the call. A failed guardrail call raises
+    `TopicCheckError`; so does the topic model once the call in place of a failed or unreadable
+    first call gives no verdict either (`check_topics_with_model`): what cannot be checked is
+    not let through."""
+    if settings.topic_model_id:
+        return check_topics_with_model(guardrail_client, settings, source, text)
     try:
         response = guardrail_client.apply_guardrail(
             guardrailIdentifier=settings.topic_guardrail_id,
@@ -1581,9 +1798,8 @@ def check_topics(
         )
     except aws.botocore_errors() as exc:
         log_event("topic-guard-failed", source=source, detail=aws.error_detail(exc))
-        english, german = TOPIC_CHECK_FAILED[source]
         cause = aws.error_cause(exc)
-        raise TopicCheckError(english.format(cause=cause), german.format(cause=cause)) from exc
+        raise topic_check_failed(source, cause, cause) from exc
     topics = [
         f"topic:{topic.get('name')}"
         for assessment in response.get("assessments", [])
@@ -1594,6 +1810,89 @@ def check_topics(
         topics = ["topic:unknown"]
     units = response.get("usage", {}).get("topicPolicyUnits")
     return {"topics": list(dict.fromkeys(topics)), "units": None if units is None else int(units)}
+
+
+def check_topics_with_model(
+    runtime: Any, settings: Settings, source: str, text: str
+) -> dict[str, Any]:
+    """`check_topics` by the topic model: no topic units, its tokens counted.
+
+    The first call decides when it names none. A topic it names is asked again by
+    `topic_model.CONFIRMING_CALLS` calls at once, and stands unless every one of them names
+    none; one that fails or gives no verdict keeps it. gpt-oss-120b refused a harmless question
+    now and then, as a single call (07.10.2026). A first call that fails or gives no verdict is
+    replaced by one more call, which decides alone: a topic it names stands, since the time of
+    the check (`aws.TOPIC_MODEL_ROUNDS_PER_CHECK`) leaves no round to confirm it; if it fails or
+    gives no verdict as well, the check refuses."""
+    model_id = settings.topic_model_id
+    assert model_id is not None
+    tokens = {"input_tokens": 0, "output_tokens": 0}
+
+    def ask(call: int) -> tuple[str | None, BaseException | None, dict[str, int]]:
+        """One call: its verdict or None, its error if it failed, its tokens."""
+        try:
+            response = topic_model.ask(runtime, model_id, text)
+        except aws.botocore_errors() as exc:
+            log_event("topic-model-failed", source=source, call=call, detail=aws.error_detail(exc))
+            return None, exc, {}
+        named = topic_model.verdict(topic_model.reply_text(response))
+        if named is None:
+            log_event(
+                "topic-model-unreadable",
+                source=source,
+                call=call,
+                stop_reason=response.get("stopReason"),
+            )
+        return named, None, read_usage(response)
+
+    def counted(*calls: tuple[str | None, BaseException | None, dict[str, int]]) -> None:
+        for _, _, usage in calls:
+            for kind, count in usage.items():
+                tokens[kind] += count
+
+    def verdict(named: str) -> dict[str, Any]:
+        return {
+            "topics": [] if named == topic_model.NO_TOPIC else [f"topic:{named}"],
+            "units": 0,
+            "tokens": tokens,
+        }
+
+    first = ask(1)
+    counted(first)
+    named = first[0]
+    if named is None:
+        replacement = ask(2)
+        counted(replacement)
+        named, error, _ = replacement
+        if named is not None:
+            return verdict(named)
+        if error is not None:
+            cause = aws.error_cause(error)
+            # A timeout of the first call stays in the chain: it may have run, and been paid for.
+            raise topic_check_failed(source, cause, cause) from (
+                first[1] if aws.timed_out(first[1]) else error
+            )
+        # From the first call's error, if it had one: a timeout there keeps the question
+        # counted (`refund_question`), as it would have without the call in its place.
+        raise topic_check_failed(source, *UNREADABLE_VERDICT) from first[1]
+    if named == topic_model.NO_TOPIC or not topic_model.CONFIRMING_CALLS:
+        return verdict(named)
+    numbers = range(2, 2 + topic_model.CONFIRMING_CALLS)
+    with ThreadPoolExecutor(max_workers=len(numbers)) as pool:
+        confirming = list(pool.map(ask, numbers))
+    counted(*confirming)
+    if all(answer == topic_model.NO_TOPIC for answer, _, _ in confirming):
+        log_event("topic-model-unconfirmed", source=source, topic=named)
+        return verdict(topic_model.NO_TOPIC)
+    return verdict(named)
+
+
+def topic_tokens(*checks: Mapping[str, Any]) -> dict[str, int]:
+    """The topic model's tokens over the checks of one request; 0 where a guardrail checked."""
+    return {
+        kind: sum(check.get("tokens", {}).get(kind, 0) for check in checks)
+        for kind in ("input_tokens", "output_tokens")
+    }
 
 
 def cited_numbers(answer: str, number_of_sources: int) -> set[int]:
@@ -1638,19 +1937,27 @@ class RequestRecord:
     model_rejections: int = 0
     #: What the request's body names, once it is read; English until then.
     language: str = DEFAULT_LANGUAGE
+    #: The topic model's tokens over the request's topic checks; 0 where a guardrail checks.
+    topic_tokens: dict[str, int] = field(
+        default_factory=lambda: {"input_tokens": 0, "output_tokens": 0}
+    )
+    #: Whether the answer model gave its response: from then on the question cost a paid model
+    #: call, and a failure after it is not given back (`refund_question`).
+    model_answered: bool = False
 
 
 def refused_for_topics(
     settings: Settings, checked: Mapping[str, Any], record: RequestRecord
 ) -> dict[str, Any]:
-    """The response to a question the topic guardrail refused: the handler's sentence, no
-    sources, no model call; it costs the check's topic units."""
+    """The response to a question the topic check refused: the handler's sentence, no
+    sources, no model call; it costs the check's topic units, or the topic model's tokens."""
     units = (
         None
         if checked["units"] is None
         else {**{name: 0 for name in PRICED_UNITS}, "topicPolicyUnits": checked["units"]}
     )
     usage = {"input_tokens": 0, "output_tokens": 0}
+    record.topic_tokens = topic_tokens(checked)
     record.guardrail = {
         "action": "blocked",
         "policies": checked["topics"],
@@ -1666,7 +1973,7 @@ def refused_for_topics(
         "stop_reason": None,
         "usage": usage,
         "guardrail": {"action": "blocked", "policies": checked["topics"]},
-        "cost_usd": answer_cost(settings.prices, usage, units),
+        "cost_usd": answer_cost(settings.prices, usage, units, record.topic_tokens),
         "price_date": settings.price_date,
     }
 
@@ -1705,7 +2012,7 @@ def answer_question(
             "price_date": settings.price_date,
         }
 
-    asked = check_question_topics(client("guardrail", settings.region), settings, question)
+    asked = check_question_topics(topic_client(settings), settings, question)
     if asked["topics"]:
         return refused_for_topics(settings, asked, record)
 
@@ -1715,16 +2022,16 @@ def answer_question(
         build_content(question, results),
         record,
     )
+    record.model_answered = True
     guardrail = read_guardrail(response)
     guardrail["units"] = add_units(guardrail["units"], asked["units"], "topicPolicyUnits")
     replaced = blocked_answer(response, guardrail, record.language)
     answer = replaced or extract_answer(response, guardrail["action"], record.language)
     # Whatever of the model's text the reader gets is checked; only the handler's own sentence
     # is not, also when the trace says BLOCKED on an answer Bedrock did not stop.
+    checked: Mapping[str, Any] = {}
     if replaced is None:
-        checked = check_answer_topics(
-            client("guardrail", settings.region), settings, model_text(response) or ""
-        )
+        checked = check_answer_topics(topic_client(settings), settings, model_text(response) or "")
         guardrail["units"] = add_units(guardrail["units"], checked["units"], "topicPolicyUnits")
         if checked["topics"]:
             answer = in_language(ANSWER_WITHHELD_ANSWERS, record.language)
@@ -1745,6 +2052,7 @@ def answer_question(
     guardrail["units"] = add_units(guardrail["units"], excerpts["units"])
     record.guardrail = guardrail
     record.excerpt_policies = excerpts["policies"]
+    record.topic_tokens = topic_tokens(asked, checked)
     cited = cited_numbers(answer, len(sources))
     for source in sources:
         source["cited"] = source["number"] in cited
@@ -1756,7 +2064,9 @@ def answer_question(
         "stop_reason": response.get("stopReason"),
         "usage": usage,
         "guardrail": {"action": guardrail["action"], "policies": guardrail["policies"]},
-        "cost_usd": answer_cost(settings.prices, usage, guardrail["units"]),
+        "cost_usd": None
+        if model_tokens_unknown(response, usage, guardrail["question_refused"])
+        else answer_cost(settings.prices, usage, guardrail["units"], record.topic_tokens),
         "price_date": settings.price_date,
     }
 
@@ -1788,12 +2098,36 @@ def handle(event: Mapping[str, Any], record: RequestRecord) -> dict[str, Any]:
     authorize(key, workspace, settings)
 
     question = requested_question(body)
-    charge_question(settings, workspace, key)
-    return answer_question(settings, workspace, question, record)
+    charge = charge_question(settings, workspace, key)
+    try:
+        return answer_question(settings, workspace, question, record)
+    except REFUNDABLE_ERRORS as error:
+        elapsed = clock() - record.started
+        error.refunded = refund_question(
+            settings, workspace, key, charge, error, elapsed, record.model_answered
+        )
+        raise
 
 
 def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
-    """Lambda entry point: one HTTP request in, one HTTP response out, one log line."""
+    """Lambda entry point: one HTTP request in, one HTTP response out.
+
+    Behind CloudFront only questions reach the function. Where it is the address itself
+    (`PAGE_VARIABLES`), it serves the page as well, and every response carries the headers
+    CloudFront would have set (page.py)."""
+    page_folder = os.environ.get(page.PAGE_FOLDER_VARIABLE, "").strip()
+    if not page_folder:
+        return answer_request(event)
+    try:
+        served = page.route(event, page_folder)
+    except Exception:
+        log_event("crashed", status=500, traceback=traceback.format_exc())
+        served = http_response(500, {"error": in_language(UNEXPECTED_FAILURE_MESSAGES, "en")})
+    return page.with_security_headers(served if served is not None else answer_request(event))
+
+
+def answer_request(event: Mapping[str, Any]) -> dict[str, Any]:
+    """One question in, one HTTP response out, one log line."""
     started = time.perf_counter()
     record = RequestRecord()
     try:
@@ -1806,9 +2140,10 @@ def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
             error=str(error),
             latency_ms=round((time.perf_counter() - started) * 1000),
         )
-        return http_response(
-            error.status, {"error": error.public_message(record.language)}, error.headers
-        )
+        body = {"error": error.public_message(record.language)}
+        if error.refunded:
+            body["refunded"] = True
+        return http_response(error.status, body, error.headers)
     except Exception:
         log_event(
             "crashed", status=500, workspace=record.workspace, traceback=traceback.format_exc()
@@ -1834,6 +2169,7 @@ def handler(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         grounding_score=record.guardrail.get("grounding_score"),
         relevance_score=record.guardrail.get("relevance_score"),
         guardrail_units=record.guardrail.get("units"),
+        topic_tokens=record.topic_tokens,
         cost_usd=body["cost_usd"],
         price_date=body["price_date"],
         latency_ms=body["latency_ms"],

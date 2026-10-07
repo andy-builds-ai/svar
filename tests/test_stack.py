@@ -25,7 +25,8 @@ import handler  # app/handler.py, likewise
 import pytest
 from aws_cdk.assertions import Match, Template
 
-from infra.answer_models import answer_model
+from infra import answer_models
+from infra.answer_models import PRICE_DATE, answer_model
 from infra.stacks.andur_stack import (
     ANSWER_FUNCTION_NAME,
     ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
@@ -62,7 +63,6 @@ from infra.stacks.andur_stack import (
     NONCURRENT_VERSION_RETENTION_DAYS,
     NUMBER_OF_RESULTS,
     ORIGIN_RESPONSE_TIMEOUT_SECONDS,
-    PRICE_DATE,
     PRICE_GROUNDING_PER_1K_UNITS,
     PRICE_INPUT_PER_1K_TOKENS,
     PRICE_OUTPUT_PER_1K_TOKENS,
@@ -609,6 +609,20 @@ def test_cloudfront_gives_up_before_the_function_does() -> None:
     assert ORIGIN_RESPONSE_TIMEOUT_SECONDS < aws.worst_case_seconds()
 
 
+def test_without_cloudfront_every_caller_outlasts_the_function() -> None:
+    """Where the function is its own address, the page and scripts/ask.py wait longer than
+    the function may run: the function's own timeout is the limit app/aws.py counts with,
+    and the worst case still ends inside it, as a 502 with a reason."""
+    from scripts import ask
+
+    assert aws.PAGE_TIMEOUT_SECONDS * 1000 == page_number("REQUEST_TIMEOUT_MS")
+    assert aws.FUNCTION_TIMEOUT_SECONDS == ANSWER_TIMEOUT_SECONDS
+    assert aws.PAGE_TIMEOUT_SECONDS > ANSWER_TIMEOUT_SECONDS
+    assert ask.HTTP_TIMEOUT_SECONDS > ANSWER_TIMEOUT_SECONDS
+    assert aws.caller_deadline_seconds(behind_cloudfront=False) == ANSWER_TIMEOUT_SECONDS
+    assert aws.worst_case_seconds(behind_cloudfront=False) < ANSWER_TIMEOUT_SECONDS
+
+
 def test_answer_function_runs_at_most_a_few_requests_at_once(
     stack: AndurStack, template: Template
 ) -> None:
@@ -646,7 +660,10 @@ def test_answer_function_is_configured_only_through_its_environment(
         "PRICE_GROUNDING_PER_1K_UNITS": PRICE_GROUNDING_PER_1K_UNITS,
         "PRICE_DATE": PRICE_DATE,
     }
-    assert set(variables) == set(handler.ENVIRONMENT_VARIABLES.values())
+    assert set(variables) == {
+        *handler.ENVIRONMENT_VARIABLES.values(),
+        *handler.TOPIC_GUARDRAIL_VARIABLES.values(),
+    }
 
 
 def test_the_model_id_is_configuration_not_handler_code() -> None:
@@ -1450,12 +1467,23 @@ def test_the_pinned_region_synthesises_with_its_own_profile() -> None:
 
 
 @pytest.mark.parametrize("region", ["us-east-1", "eu-west-2", "il-central-1"])
-def test_a_stack_outside_the_profiles_regions_does_not_synthesise(region: str) -> None:
+def test_a_stack_outside_the_regions_of_the_model_table_does_not_synthesise(region: str) -> None:
     """London has its own UK profile, and from Tel Aviv the EU profile also routes to
-    Tel Aviv: neither keeps the guardrail's checks in the EU."""
+    Tel Aviv: neither keeps the guardrail's checks in the EU, and neither has prices."""
+    app = cdk.App(context=deploy_context())
+    with pytest.raises(KeyError, match="has no models"):
+        AndurStack(app, "OutsideStack", env=cdk.Environment(region=region))
+
+
+def test_a_region_outside_the_profiles_regions_does_not_synthesise_its_guardrails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Should a region without a topic model ever join the table outside the profile's
+    regions, its guardrails would send their checks across a border."""
+    monkeypatch.setitem(answer_models.REGIONS, "eu-west-2", answer_models.REGIONS["eu-west-1"])
     app = cdk.App(context=deploy_context())
     with pytest.raises(ValueError, match="not a source region"):
-        AndurStack(app, "OutsideStack", env=cdk.Environment(region=region))
+        AndurStack(app, "OutsideStack", env=cdk.Environment(region="eu-west-2"))
 
 
 def test_topics_stay_inside_what_bedrock_accepts() -> None:

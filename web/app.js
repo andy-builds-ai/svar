@@ -1,8 +1,11 @@
 /* Ask Andur — the page.
  *
- * One address for everything: this page and the answer function sit behind the
- * same CloudFront distribution, so a question is a POST to /ask on this very
- * origin. No other server is contacted, and nothing is loaded from one.
+ * One address for everything: this page and the answer function share one
+ * origin, so a question is a POST to /ask on this very origin. Behind
+ * CloudFront (eu-west-1) the page comes from a bucket and /ask goes on to the
+ * function; where the function is its own address (eu-central-1), it serves
+ * this page itself. No other server is contacted, and nothing is loaded from
+ * one.
  *
  * Three things the request needs:
  *   Content-Type: application/json
@@ -11,6 +14,8 @@
  *                 that header with its own signature.
  *   x-amz-content-sha256: the SHA-256 of the body, because a signed request to
  *                 a Lambda function URL may not carry an unsigned payload.
+ *                 Where no CloudFront signs, nothing reads it, and it goes
+ *                 along all the same: one page for both ways in.
  *                 crypto.subtle computes it; it is built into the browser.
  *
  * Nothing the function returns is ever inserted as markup. Every value goes
@@ -30,12 +35,15 @@ const KEY_HEADER = "X-Andur-Key";
 const BODY_HASH_HEADER = "x-amz-content-sha256";
 const MAX_QUESTION_CHARACTERS = 1000;
 
-/* How long this page waits before it gives up on its own. CloudFront stops
- * waiting for the function after 120 seconds and sends a 504, so in every
- * ordinary case that answer arrives first and says more than this page could.
- * This is for the case underneath it: a connection that neither answers nor
- * fails, where without a limit the button would show its asking label forever. */
-const REQUEST_TIMEOUT_MS = 125000;
+/* How long this page waits before it gives up on its own: longer than the
+ * function may run (195 seconds), so every answer it gives arrives. Where the
+ * function is its own address, nothing between ends a request sooner, and the
+ * function times a second model call by its own timeout (app/aws.py,
+ * PAGE_TIMEOUT_SECONDS holds this number). Behind CloudFront, CloudFront stops
+ * waiting after 120 seconds and sends a 504 first. Either way, this limit is
+ * for a connection that neither answers nor fails, where without it the
+ * button would show its asking label forever. */
+const REQUEST_TIMEOUT_MS = 200000;
 
 /* What the page remembers between visits. The key lives here and nowhere
  * else: not in the address, not in a log line, not in this file. */
@@ -200,7 +208,7 @@ async function ask(workspace, key, question) {
   try {
     payload = JSON.parse(raw);
   } catch (problem) {
-    payload = null; // CloudFront's own error pages are HTML, not JSON.
+    payload = null; // CloudFront's and Lambda's own error pages are not this JSON.
   }
   return { status: response.status, payload: payload };
 }

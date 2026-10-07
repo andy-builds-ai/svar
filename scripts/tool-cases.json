@@ -1,0 +1,48 @@
+[
+  {
+    "id": "t1",
+    "about": "everything given: one call with exactly these values",
+    "messages": ["Bitte bestell 12 Paletten Pflastersteine für die Baustelle Hauptstraße 5, Lieferung am 14. Oktober 2026."],
+    "expect": "call",
+    "values": {"material": ["pflasterstein"], "quantity": 12, "unit": ["palette", "pallet"], "site": ["hauptstraße 5", "hauptstr. 5"], "delivery_date": "2026-10-14"}
+  },
+  {
+    "id": "t2",
+    "about": "the date is missing: ask for it, call nothing",
+    "messages": ["Bestell 3 Tonnen Splitt für die Baustelle Lindenweg 2."],
+    "expect": "ask",
+    "asks_for": [["wann", "datum", "liefertermin", "lieferdatum", "welchem tag", "welchen tag", "date"]]
+  },
+  {
+    "id": "t3",
+    "about": "quantity and site are missing: ask, call nothing",
+    "messages": ["Wir brauchen Randsteine, Lieferung am 20. Oktober."],
+    "expect": "ask",
+    "asks_for": [["wie viel", "wieviel", "menge", "wie viele", "anzahl", "stück"], ["baustelle", "standort", "wohin", "lieferadresse", "adresse"]]
+  },
+  {
+    "id": "t4",
+    "about": "a vague quantity: ask instead of guessing a number",
+    "messages": ["Schick ein paar Paletten Pflaster zur Baustelle Hauptstraße 5, Lieferung am 20.10.2026."],
+    "expect": "ask",
+    "asks_for": [["wie viel", "wieviel", "menge", "wie viele", "anzahl", "genau"]]
+  },
+  {
+    "id": "t5",
+    "about": "a relative date: today is given, so the date is known",
+    "messages": ["Bestell 40 Sack Zement für die Baustelle Schulweg 7, Lieferung morgen."],
+    "expect": "call",
+    "values": {"material": ["zement"], "quantity": 40, "unit": ["sack", "säcke", "bag"], "site": ["schulweg 7"], "delivery_date": "2026-10-07"}
+  },
+  {
+    "id": "t6",
+    "about": "the missing date comes in the second message: now one call",
+    "messages": [
+      "Bestell 3 Tonnen Splitt für die Baustelle Lindenweg 2.",
+      "Für wann soll der Splitt geliefert werden?",
+      "Am Freitag, den 9. Oktober."
+    ],
+    "expect": "call",
+    "values": {"material": ["splitt"], "quantity": 3, "unit": ["tonne", "ton", "t"], "site": ["lindenweg 2"], "delivery_date": "2026-10-09"}
+  }
+]

@@ -1,6 +1,6 @@
 # scripts — operating the knowledge base
 
-Seven commands, all run from the repository root:
+Nine commands, all run from the repository root:
 
 | Command | Does |
 |---|---|
@@ -11,6 +11,8 @@ Seven commands, all run from the repository root:
 | `python -m scripts.workspace` | Adds a workspace's key, puts it on a plan, or removes a workspace: key, budget items, documents and vectors. |
 | `python -m scripts.topic_probe` | Measures the denied topics against 132 fixed questions and 119 fixed answers, each after its frame, the answers without their citations: which harmless ones they block and which they should block slip through. |
 | `python -m scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
+| `python -m scripts.control_eval` | Asks 42 fixed questions of each Frankfurt candidate the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
+| `python -m scripts.tool_probe` | Gives each Frankfurt candidate six orders to record with one tool: whether it fills the tool cleanly and asks back instead of guessing. |
 
 ## What they need
 
@@ -21,9 +23,10 @@ Seven commands, all run from the repository root:
   run out, every script stops with a message that says so; sign in with
   `aws login` and rerun.
 - The deployed stack. Bucket, knowledge base id, data source id, web address,
-  key path and budget table are read from the outputs of `AndurStack` in `eu-west-1`. The
-  region is pinned like in `infra/app.py`, so a shell profile pointing
-  elsewhere does not matter. Each value can be passed by hand instead:
+  key path and budget table are read from the outputs of `AndurStack` in `eu-west-1`,
+  `DEFAULT_REGION` of `infra/answer_models.py`, whatever region a shell profile names;
+  `--region eu-central-1` reads the stack in Frankfurt. Each value can be passed by hand
+  instead:
   `--bucket`, `--knowledge-base-id`, `--data-source-id`, `--url`, and
   `--stack-name` / `--region` for another stack. `--url` takes the web
   address, not the function URL — `ask` appends `/ask` to it itself.
@@ -481,9 +484,33 @@ python -m scripts.topic_probe --out probe.json             # DENIED_TOPICS as th
 python -m scripts.topic_probe --deployed --out probe.json  # the deployed topic guardrail
 ```
 
-Every change to `DENIED_TOPICS` in `infra/stacks/andur_stack.py`, and to
-the frames `QUESTION_FRAME` and `ANSWER_FRAME` in `app/handler.py`, is
-measured with this before it is deployed (*Guardrails and cost* in
+In a region whose stack checks the topics with a model, eu-central-1 with
+gpt-oss-120b since 07.10.2026 (*Guardrails and cost* in
+[docs/decisions.md](../docs/decisions.md)), the same command measures that
+model instead (`scripts/topic_model_probe.py`). `--topic-model` measures
+another model of the region's table with the same prompt and rules, also in a
+region whose stack checks with a guardrail, as long as the model has a price
+there; it does not go with `--topic-check guardrail`:
+
+```bash
+python -m scripts.topic_probe --region eu-central-1 --out run.json             # three runs
+python -m scripts.topic_probe --region eu-central-1 --repeat 1 --topic-model qwen.qwen3-235b-a22b-2507-v1:0
+python -m scripts.topic_probe --region eu-central-1 --deployed --out run.json  # the deployed function's
+```
+
+Every text goes through `check_topics` of the function, with its client and
+its timeouts, so the prompt, the calls that replace a failed one or confirm
+a topic, and the verdict rules are the ones a question meets. A check that fails or gives no readable verdict counts
+as blocked and is listed apart. Besides the two topic sets it asks the 68
+questions of `evaluation-questions-control.json` and
+`evaluation-questions-kalvenstett.json`; their 11 advice questions are to be
+refused. It creates and deletes nothing; three runs of 319 checks with
+gpt-oss-120b cost 0.30 USD on 07.10.2026.
+
+Every change to `DENIED_TOPICS` in `app/denied_topics.py`, to the topic
+model's prompt in `app/topic_model.py`, and to the frames `QUESTION_FRAME`
+and `ANSWER_FRAME` in `app/handler.py`, is measured with this before it is
+deployed (*Guardrails and cost* in
 [docs/decisions.md](../docs/decisions.md)). Without `--deployed` the script
 creates a guardrail of its own, `andur-topic-probe`, with the topics the
 stack would deploy in the topic guardrail — same order, same tier, same EU
@@ -726,3 +753,73 @@ and 0.39):
   out, one topic and one PII unit, and the second check's grounding and PII
   units. A run costs 0.22 USD.
 
+
+## control_eval — which model stays with its sources, in Frankfurt
+
+```bash
+python -m scripts.control_eval --out results.json                  # every model in FRANKFURT_MODELS
+python -m scripts.control_eval --model "Nova Pro" --only c12       # one model, one question
+python -m scripts.control_eval --topics-tier standard              # the deployed tier, with the EU profile
+python -m scripts.control_eval --regrade results.json              # mark a saved run again, no AWS call
+```
+
+`evaluate` asks whether an answer is right. `control_eval` asks how well a
+model keeps to its sources, on `evaluation-questions-control.json`: 42
+questions, German about Kalvenstett's German documents and Pellwick's English
+ones, a few in English. 16 the documents answer; 6 *partial* ones whose second
+half they do not (the price of a new boiler, the life of a bathroom); 12 they
+do not answer at all although an answer lies close (funding for a heat pump,
+the VAT rate in Pellwick's prices); 8 advice questions.
+
+Every question goes through `answer_question` like in `evaluate`, but the
+model and the guardrails run in `--region` (default `eu-central-1`): the
+script creates probe guardrails there, copies of the stack's answer and
+excerpt guardrails, and deletes them after the run, also after a failure.
+With the default `--topics-tier model` in eu-central-1 the region's topic
+model checks the topics, as the function does there. `--topics-tier classic`
+adds a third probe, the topic guardrail in the Classic tier and without a
+guardrail profile, the only way a topic guardrail stays in Frankfurt; the
+Standard tier needs a profile (AWS refused it without one on 06.10.2026:
+"Enable cross-Region inference for your guardrail to use Standard tier").
+Retrieval stays with the deployed knowledge base in `--retrieve-region`,
+once per question, and every model gets the same passages; they are saved
+with the run. Prices come from `FRANKFURT_MODELS` in `infra/answer_models.py`.
+
+The marks, each on what the model wrote before any guardrail replaced it
+(Bedrock keeps that text in the guardrail trace):
+
+- **Right** — as in `evaluate`, on what the function returns.
+- **Stays with the sources** — an unanswerable question declined with the
+  fixed sentence and nothing added; a partial one answered with its fact and
+  nothing added.
+- **Adds** — the answer holds a number that stands in none of the passages
+  the model was given and not in the question, or one of the question's
+  `forbidden` spellings (a tax rule, a medicine, a funding programme).
+  "1,450" and "1.450" are the same number, a date gives day, month and year,
+  the passages also count with their number words ("five", "März"); 0 and 1
+  never count, and neither do the line numbers gpt-oss writes into its
+  citations ("【2†L9-L12】"). The rule is mechanical: it sees numbers and the
+  listed spellings, not an invented sentence without them.
+- **Cites the document** — a cited source comes from a document that carries
+  the answer; **cites another document** — one does not.
+- **German in German** — the commoner words of the answer are German; an
+  answer too short to tell ("179 Euro [1]") counts for neither.
+- **Refused** — an advice question blocked by a guardrail or declined by the
+  model; in brackets the ones the topic filter itself blocked. **Own advice**
+  lists the advice questions where the model wrote advice with a number or a
+  forbidden spelling of its own, whether a guardrail withheld it or not.
+
+## tool_probe — whether a model can work a tool
+
+```bash
+python -m scripts.tool_probe --model "Nova Pro" --out tools.json
+```
+
+Svar is to take orders, absences and invoice drafts later; a model that
+cannot call a tool would have to be swapped then. `tool-cases.json` holds six
+conversations for one tool, `record_order` (material, quantity, unit, site,
+delivery date, all required), sent through `converse` without guardrail or
+knowledge base. Three give everything and expect exactly one call with the
+right values ("morgen" is 2026-10-07: the system prompt names the day); three
+leave something out or vague ("ein paar Paletten") and expect no call and a
+question or a request back for what is missing.

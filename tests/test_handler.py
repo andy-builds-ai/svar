@@ -382,6 +382,15 @@ def apply_update(expression: str, before: dict[str, Any], values: dict[str, Any]
     written: list[str] = []
     for action in split_on(sets, ","):
         path, _, value = action.partition(" = ")
+        if " - " in value:
+            # A difference of two operands, as the refunds write it. Like DynamoDB, an
+            # operand that is not there is an error, not a zero.
+            minuend, subtrahend = (
+                operand(part.strip(), before, values) for part in value.split(" - ")
+            )
+            after[path] = {"N": str(int(minuend["N"]) - int(subtrahend["N"]))}
+            written.append(path)
+            continue
         summands = split_on(value, "+")
         resolved = [operand(part, before, values) for part in summands]
         after[path] = (
@@ -1669,16 +1678,16 @@ def test_the_budget_is_never_read_before_it_is_written(aws: dict[str, Any]) -> N
     assert update["ReturnValues"] == "ALL_NEW"
 
 
-def test_a_question_that_passed_the_budget_is_not_given_back(aws: dict[str, Any]) -> None:
-    """Simple, hard, and easy to explain: what got through the budget stays counted."""
-    aws["bedrock-runtime"].error = client_error("ThrottlingException")
-    assert call(event())[0] == 502
+def test_a_question_that_passed_the_budget_stays_counted_unless_aws_failed_it(
+    aws: dict[str, Any],
+) -> None:
+    """An answer counts; a failure on AWS's side is given back (tests/test_refund.py)."""
+    assert call(event())[0] == 200
     assert number(budget_item(aws), "questions_used") == 1
 
-    aws["bedrock-runtime"].error = None
     aws["bedrock-agent-runtime"].error = client_error("AccessDeniedException", operation="Retrieve")
     assert call(event())[0] == 502
-    assert number(budget_item(aws), "questions_used") == 2
+    assert number(budget_item(aws), "questions_used") == 1
 
 
 def test_the_table_is_asked_again_for_every_question_although_the_keys_are_cached(
@@ -3087,6 +3096,35 @@ def test_an_answer_withheld_by_the_grounding_check_keeps_its_sources(aws: dict[s
     assert len(aws["guardrail"].calls) == 1
 
 
+def test_an_answer_withheld_after_the_model_wrote_it_has_an_unknown_cost(
+    aws: dict[str, Any],
+) -> None:
+    """Bedrock reports 0 tokens for it, in the response and in CloudWatch, and charges the
+    model call all the same, its user guide says (07.10.2026): no number is better than one
+    that is too low."""
+    response = bedrock_response(
+        [{"text": "Withheld."}],
+        "guardrail_intervened",
+        guardrail_trace(output_assessment=UNGROUNDED),
+    )
+    response["usage"] = {"inputTokens": 0, "outputTokens": 0, "totalTokens": 0}
+    aws["bedrock-runtime"].response = response
+    status, body = call(event())
+    assert status == 200
+    assert body["guardrail"]["action"] == "blocked"
+    assert body["cost_usd"] is None
+
+
+def test_a_withheld_answer_whose_tokens_are_given_keeps_its_cost(aws: dict[str, Any]) -> None:
+    aws["bedrock-runtime"].response = bedrock_response(
+        [{"text": "Withheld."}],
+        "guardrail_intervened",
+        guardrail_trace(output_assessment=UNGROUNDED),
+    )
+    _, body = call(event())
+    assert isinstance(body["cost_usd"], float)
+
+
 def test_excerpts_go_through_the_excerpt_guardrail_in_one_block(aws: dict[str, Any]) -> None:
     aws["bedrock-agent-runtime"].results = [
         hit(text="Anja answers the phone from 08:00."),
@@ -3430,6 +3468,7 @@ def test_an_answer_logs_one_line_with_tokens_hits_dropped_and_latency(
             "sensitiveInformationPolicyUnits": 2,
             "contextualGroundingPolicyUnits": 3,
         },
+        "topic_tokens": {"input_tokens": 0, "output_tokens": 0},
         "cost_usd": 0.001376,
         "price_date": "2026-09-23",
         "latency_ms": line["latency_ms"],
@@ -3923,6 +3962,7 @@ def test_an_answer_the_topic_guardrail_cannot_check_is_not_given(
     aws["guardrail"].topic_error = client_error("AccessDeniedException", operation="ApplyGuardrail")
     status, body = call(event(in_(asked)))
     assert status == 502
+    # The model answered, and was paid for: the question stays counted (tests/test_refund.py).
     assert body == {"error": sentence}
     (line,) = [line for line in log_lines(caplog) if line["event"] == "topic-guard-failed"]
     assert line["detail"] == "ClientError: AccessDeniedException"
@@ -4034,7 +4074,7 @@ def test_a_question_the_topic_guardrail_cannot_check_is_not_answered(
     )
     status, body = call(event(in_(asked)))
     assert status == 502
-    assert body == {"error": sentence}
+    assert body == {"error": sentence + handler.REFUNDED_NOTES[asked], "refunded": True}
     assert aws["bedrock-runtime"].calls == []
     (line,) = [line for line in log_lines(caplog) if line["event"] == "topic-guard-failed"]
     assert (line["source"], line["detail"]) == ("INPUT", "ClientError: AccessDeniedException")

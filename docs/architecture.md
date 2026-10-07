@@ -37,6 +37,12 @@ barely is one.
 
 ## One address for everything
 
+In eu-central-1 there is no CloudFront: the answer function's URL is the one
+address, open to callers (`AuthType NONE`), and the function serves the page
+itself from a layer and sets the same security headers (`app/page.py`;
+*In Frankfurt the function's URL is the address* in
+[decisions.md](decisions.md)). What follows describes eu-west-1.
+
 The page and the answer function sit behind the same CloudFront
 distribution. The page comes from a private S3 bucket; the single path
 `/ask` goes to the answer function instead. Both origins are reached through

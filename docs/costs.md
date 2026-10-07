@@ -28,7 +28,11 @@ Nova Pro is the configured model since 28.09.2026. On the page the same
 day it cost 0.00342 USD for an answered question (1,868 / 82 tokens, units
 2 / 3 / 8), 0.003015 for one with a masked name, 0.0012 for one the grounding
 check withheld (the response reports no model tokens then) and 0.00015 for a
-refused one. Its evaluation run after the switch: 0.0029 USD per answered
+refused one. The 0.0012 was too low: Bedrock charges the model call of a
+withheld answer (user guide, "How charges are calculated for Amazon Bedrock
+Guardrails", read 07.10.2026) and reports 0 tokens for it, in the response
+and in CloudWatch alike (96 calls of Qwen3 235B in eu-central-1, 11 of them
+withheld, 07.10.2026). Since then such an answer carries `cost_usd: null`. Its evaluation run after the switch: 0.0029 USD per answered
 question on average (0.0019–0.0046, 20 answers).
 
 **Ten passages since 28.09.2026** (`NUMBER_OF_RESULTS`, was 6; see
