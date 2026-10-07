@@ -28,16 +28,8 @@ from scripts.aws import (
     read_stack_outputs,
     resolve,
 )
-from scripts.ingest import (
-    BUCKET_PREFIX,
-    MAX_WORKSPACE_CHARACTERS,
-    WORKSPACE_NAME,
-    delete_keys,
-    format_job,
-    job_succeeded,
-    remote_keys,
-    run_ingestion_job,
-)
+from scripts.ingest import delete_keys, format_job, job_succeeded, remote_keys, run_ingestion_job
+from scripts.layout import BUCKET_PREFIX, MAX_WORKSPACE_CHARACTERS, WORKSPACE_NAME
 
 #: 32 random bytes, written as 43 URL-safe characters: as strong as the keys the
 #: stack generated until 2026-10-01.
@@ -48,11 +40,11 @@ KEY_BYTES = 32
 KEY_DESCRIPTION = "Andur workspace key. Send it in the header X-Andur-Key."
 
 #: The partition key of the budget table: the SHA-256 of the key, in hex
-#: (``BUDGET_KEY_ATTRIBUTE`` and ``key_hash`` in app/handler.py).
+#: (``BUDGET_KEY_ATTRIBUTE`` and ``key_hash`` in app/budget.py).
 BUDGET_KEY_ATTRIBUTE = "key_hash"
 
 #: The attribute that names a key's plan, and the one the table's TTL reads
-#: (``PLAN_ATTRIBUTE`` and ``BUDGET_TTL_ATTRIBUTE`` in app/handler.py).
+#: (``PLAN_ATTRIBUTE`` and ``BUDGET_TTL_ATTRIBUTE`` in app/budget.py).
 PLAN_ATTRIBUTE = "plan"
 BUDGET_TTL_ATTRIBUTE = "delete_after"
 
@@ -228,7 +220,7 @@ def read_budget(dynamodb: Any, table: str, key: str) -> dict[str, Any] | None:
 
 
 #: The answer function writes the workspace into every budget item it creates
-#: (``BUDGET_UPDATE_EXPRESSION`` in app/handler.py).
+#: (``BUDGET_UPDATE_EXPRESSION`` in app/budget.py).
 BUDGET_WORKSPACE_ATTRIBUTE = "workspace"
 
 
@@ -391,7 +383,7 @@ def carry_out(
     return removal.key is not None
 
 
-#: ``KEY_CACHE_SECONDS`` in app/handler.py, in minutes.
+#: ``KEY_CACHE_SECONDS`` in app/keys.py, in minutes.
 KEY_CACHE_MINUTES = 5
 
 

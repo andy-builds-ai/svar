@@ -21,65 +21,69 @@ import aws  # app/aws.py, imported by its Lambda name (tests/conftest.py)
 # a red line anywhere. A missing dependency is a broken environment and has
 # to look like one.
 import aws_cdk as cdk
-import handler  # app/handler.py, likewise
+import budget
+import config
+import intake
 import pytest
+import sentences
 from aws_cdk.assertions import Match, Template
 
+from app.denied_topics import DENIED_TOPICS
+from app.page import ASK_PATH, HSTS_MAX_AGE_DAYS
 from infra import answer_models
 from infra.answer_models import PRICE_DATE, answer_model
-from infra.stacks.andur_stack import (
+from infra.stacks.andur_stack import AndurStack
+from infra.stacks.answer_function import (
     ANSWER_FUNCTION_NAME,
-    ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     ANSWER_MAX_CONCURRENCY,
     ANSWER_MEMORY_MB,
     ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
     API_KEY_PARAMETER_PATH,
-    ASK_PATH,
-    BLOCKED_INPUT_MESSAGE,
-    BLOCKED_OUTPUT_MESSAGE,
     BUDGET_KEY_ATTRIBUTE,
     BUDGET_TABLE_NAME,
     BUDGET_TTL_ATTRIBUTE,
-    CHUNK_MAX_TOKENS,
-    CHUNK_OVERLAP_PERCENT,
-    DATA_SOURCE_NAME,
     DEFAULT_KEEP_DAYS,
     DEFAULT_QUESTION_LIMIT,
     DEFAULT_WINDOW_HOURS,
-    DENIED_TOPICS,
-    DISTANCE_METRIC,
-    EMBEDDING_DIMENSION,
-    EMBEDDING_MODEL_ID,
-    EXCERPT_GUARDRAIL_NAME,
-    GROUNDING_THRESHOLD,
-    GUARDRAIL_NAME,
-    GUARDRAIL_PROFILE_ID,
-    GUARDRAIL_PROFILE_REGIONS,
-    HSTS_MAX_AGE_DAYS,
-    KNOWLEDGE_BASE_NAME,
-    MASKED_PII_TYPES,
-    NON_FILTERABLE_METADATA_KEYS,
-    NONCURRENT_VERSION_RETENTION_DAYS,
     NUMBER_OF_RESULTS,
-    ORIGIN_RESPONSE_TIMEOUT_SECONDS,
     PRICE_GROUNDING_PER_1K_UNITS,
     PRICE_INPUT_PER_1K_TOKENS,
     PRICE_OUTPUT_PER_1K_TOKENS,
     PRICE_PII_PER_1K_UNITS,
     PRICE_TOPIC_PER_1K_UNITS,
+)
+from infra.stacks.guardrails import (
+    ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
+    BLOCKED_INPUT_MESSAGE,
+    BLOCKED_OUTPUT_MESSAGE,
+    EXCERPT_GUARDRAIL_NAME,
+    GROUNDING_THRESHOLD,
+    GUARDRAIL_NAME,
+    GUARDRAIL_PROFILE_ID,
+    GUARDRAIL_PROFILE_REGIONS,
+    MASKED_PII_TYPES,
     RELEVANCE_THRESHOLD,
-    REPOSITORY_ROOT,
-    SITE_ROOT_DOCUMENT,
     TOPIC_GUARDRAIL_NAME,
     TOPICS_TIER,
+)
+from infra.stacks.knowledge_base import (
+    CHUNK_MAX_TOKENS,
+    CHUNK_OVERLAP_PERCENT,
+    DATA_SOURCE_NAME,
+    DISTANCE_METRIC,
+    EMBEDDING_DIMENSION,
+    EMBEDDING_MODEL_ID,
+    KNOWLEDGE_BASE_NAME,
+    NON_FILTERABLE_METADATA_KEYS,
+    NONCURRENT_VERSION_RETENTION_DAYS,
     VECTOR_DATA_TYPE,
     VECTOR_INDEX_NAME,
-    WEB_FOLDER,
     WORKSPACE_PREFIX,
-    AndurStack,
     replacement_safe_name,
 )
+from infra.stacks.shared import REPOSITORY_ROOT, WEB_FOLDER
+from infra.stacks.web import ORIGIN_RESPONSE_TIMEOUT_SECONDS, SITE_ROOT_DOCUMENT
 from scripts import ask, grounding_probe, topic_probe
 
 #: The file `cdk deploy` reads its context from. The tests read the same file,
@@ -661,8 +665,8 @@ def test_answer_function_is_configured_only_through_its_environment(
         "PRICE_DATE": PRICE_DATE,
     }
     assert set(variables) == {
-        *handler.ENVIRONMENT_VARIABLES.values(),
-        *handler.TOPIC_GUARDRAIL_VARIABLES.values(),
+        *config.ENVIRONMENT_VARIABLES.values(),
+        *config.TOPIC_GUARDRAIL_VARIABLES.values(),
     }
 
 
@@ -1092,9 +1096,9 @@ def test_the_page_and_the_stack_mean_the_same_path_and_the_same_headers() -> Non
     headers are the same kind of agreement one layer further in.
     """
     assert page_constant("ASK_PATH") == ASK_PATH
-    assert page_constant("KEY_HEADER") == handler.KEY_HEADER
+    assert page_constant("KEY_HEADER") == intake.KEY_HEADER
     assert page_constant("BODY_HASH_HEADER") == ask.BODY_HASH_HEADER
-    assert page_number("MAX_QUESTION_CHARACTERS") == handler.MAX_QUESTION_CHARACTERS
+    assert page_number("MAX_QUESTION_CHARACTERS") == intake.MAX_QUESTION_CHARACTERS
 
 
 def test_the_page_asks_once_at_a_time() -> None:
@@ -1156,18 +1160,18 @@ def test_the_budget_table_clears_old_items_by_itself(stack: AndurStack, template
         "AttributeName": BUDGET_TTL_ATTRIBUTE,
         "Enabled": True,
     }
-    assert f"{BUDGET_TTL_ATTRIBUTE} = " in handler.BUDGET_UPDATE_EXPRESSION
+    assert f"{BUDGET_TTL_ATTRIBUTE} = " in budget.BUDGET_UPDATE_EXPRESSION
 
 
 def test_the_table_and_the_handler_agree_on_the_attribute_names() -> None:
     """The stack creates the table, the handler writes the items; a typo would only show in AWS."""
-    assert handler.BUDGET_KEY_ATTRIBUTE == BUDGET_KEY_ATTRIBUTE
-    assert handler.BUDGET_TTL_ATTRIBUTE == BUDGET_TTL_ATTRIBUTE
+    assert budget.BUDGET_KEY_ATTRIBUTE == BUDGET_KEY_ATTRIBUTE
+    assert budget.BUDGET_TTL_ATTRIBUTE == BUDGET_TTL_ATTRIBUTE
 
 
 def test_the_defaults_the_stack_hands_over_are_a_budget_the_handler_accepts() -> None:
     """The handler refuses an item that would go before its own window closes."""
-    handler.load_settings(
+    config.load_settings(
         {
             "KNOWLEDGE_BASE_ID": "KB1",
             "MODEL_ID": ANSWER_MODEL_ID,
@@ -1275,7 +1279,7 @@ def test_the_second_deploy_took_the_topics_off_the_answer_guardrail_and_nothing_
     """Against the first deploy, with the flag on: then the answer guardrail read the four
     topics in the question only. The second deploy takes that policy off and changes nothing
     else of either guardrail but their descriptions, and both get a new version."""
-    from infra.stacks import andur_stack
+    from infra.stacks import guardrails as stack_guardrails
 
     def guardrails(of: AndurStack, resources: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         return {
@@ -1289,7 +1293,7 @@ def test_the_second_deploy_took_the_topics_off_the_answer_guardrail_and_nothing_
         }
 
     second = guardrails(stack, template.to_json()["Resources"])
-    monkeypatch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
+    monkeypatch.setattr(stack_guardrails, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
     other = AndurStack(cdk.App(context=deploy_context()), "FirstDeployStack")
     first = guardrails(other, Template.from_stack(other).to_json()["Resources"])
 
@@ -1398,9 +1402,9 @@ def test_with_the_flag_on_the_grounding_probe_copies_the_question_topics_too(
     """The copy follows the flag: on, as in the first deploy of 06.10.2026, the probe reads the
     answer guardrail's topics on the same sides, in the same tier. CloudFormation calls the
     tier `TopicsTierConfig`."""
-    from infra.stacks import andur_stack
+    from infra.stacks import guardrails as stack_guardrails
 
-    monkeypatch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
+    monkeypatch.setattr(stack_guardrails, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
     monkeypatch.setattr(grounding_probe, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
     other = AndurStack(cdk.App(context=deploy_context()), "FirstDeployProbeStack")
     properties = resource_of(other, Template.from_stack(other), other.guardrail)["Properties"]
@@ -1505,10 +1509,10 @@ def test_the_handler_says_in_english_what_the_guardrail_says_and_in_german_the_s
     """The handler replaces the guardrail's English message with its own sentence in the
     language of the request. The stack's message stays as the fallback, and the two must not
     drift apart: a visitor who asks in English reads the same words either way."""
-    assert handler.QUESTION_REFUSED_ANSWERS["en"] == BLOCKED_INPUT_MESSAGE
-    assert handler.ANSWER_WITHHELD_ANSWERS["en"] == BLOCKED_OUTPUT_MESSAGE
-    assert 1 <= len(handler.QUESTION_REFUSED_ANSWERS["de"]) <= 500
-    assert 1 <= len(handler.ANSWER_WITHHELD_ANSWERS["de"]) <= 500
+    assert sentences.QUESTION_REFUSED_ANSWERS["en"] == BLOCKED_INPUT_MESSAGE
+    assert sentences.ANSWER_WITHHELD_ANSWERS["en"] == BLOCKED_OUTPUT_MESSAGE
+    assert 1 <= len(sentences.QUESTION_REFUSED_ANSWERS["de"]) <= 500
+    assert 1 <= len(sentences.ANSWER_WITHHELD_ANSWERS["de"]) <= 500
 
 
 def test_personal_details_are_masked_in_the_answer_only(
@@ -1550,7 +1554,7 @@ def test_a_changed_setting_makes_a_new_guardrail_version(monkeypatch: pytest.Mon
     Without that, a new threshold would reach the guardrail's draft and never
     the version the function uses.
     """
-    from infra.stacks import andur_stack
+    from infra.stacks import guardrails as stack_guardrails
 
     def version_description() -> str:
         other = AndurStack(cdk.App(context=deploy_context()), "VersionStack")
@@ -1560,7 +1564,7 @@ def test_a_changed_setting_makes_a_new_guardrail_version(monkeypatch: pytest.Mon
 
     before = version_description()
     assert before == version_description()
-    monkeypatch.setattr(andur_stack, "GROUNDING_THRESHOLD", 0.8)
+    monkeypatch.setattr(stack_guardrails, "GROUNDING_THRESHOLD", 0.8)
     after = version_description()
     assert after != before
     assert len(after) <= 200
@@ -1577,7 +1581,7 @@ def test_a_changed_output_action_makes_new_versions_of_both_guardrails(
     """
     from aws_cdk import aws_bedrock as bedrock
 
-    from infra.stacks import andur_stack
+    from infra.stacks import guardrails as stack_guardrails
 
     def descriptions() -> tuple[str, str]:
         other = AndurStack(cdk.App(context=deploy_context()), "ActionStack")
@@ -1587,7 +1591,7 @@ def test_a_changed_output_action_makes_new_versions_of_both_guardrails(
             for version in (other.guardrail_version, other.excerpt_guardrail_version)
         )
 
-    real_policy = andur_stack.masking_policy
+    real_policy = stack_guardrails.masking_policy
 
     def blocking_policy() -> bedrock.CfnGuardrail.SensitiveInformationPolicyConfigProperty:
         entities = [
@@ -1606,7 +1610,7 @@ def test_a_changed_output_action_makes_new_versions_of_both_guardrails(
         )
 
     answer_before, excerpt_before = descriptions()
-    monkeypatch.setattr(andur_stack, "masking_policy", blocking_policy)
+    monkeypatch.setattr(stack_guardrails, "masking_policy", blocking_policy)
     answer_after, excerpt_after = descriptions()
     assert answer_after != answer_before
     assert excerpt_after != excerpt_before
@@ -1620,8 +1624,8 @@ def test_the_prices_are_ones_the_handler_accepts_and_dated() -> None:
         PRICE_PII_PER_1K_UNITS,
         PRICE_GROUNDING_PER_1K_UNITS,
     ):
-        handler.price("PRICE", value)
-    assert handler.price_day(PRICE_DATE) == PRICE_DATE
+        config.price("PRICE", value)
+    assert config.price_day(PRICE_DATE) == PRICE_DATE
 
 
 def test_the_guardrail_version_is_an_output(stack: AndurStack, template: Template) -> None:
@@ -1640,7 +1644,7 @@ def test_a_changed_topic_makes_a_new_version_of_the_topic_guardrail_only(
     """The topic guardrail reads `DENIED_TOPICS` on both sides: a changed definition has to
     reach the version the function uses. The answer guardrail reads no topic, so its version
     stays."""
-    from infra.stacks import andur_stack
+    from infra.stacks import guardrails as stack_guardrails
 
     def descriptions() -> tuple[str, str]:
         other = AndurStack(cdk.App(context=deploy_context()), "TopicStack")
@@ -1651,9 +1655,9 @@ def test_a_changed_topic_makes_a_new_version_of_the_topic_guardrail_only(
         )
 
     answer_before, topic_before = descriptions()
-    name, definition, examples = andur_stack.DENIED_TOPICS[0]
-    changed = ((name, definition + " Changed.", examples), *andur_stack.DENIED_TOPICS[1:])
-    monkeypatch.setattr(andur_stack, "DENIED_TOPICS", changed)
+    name, definition, examples = stack_guardrails.DENIED_TOPICS[0]
+    changed = ((name, definition + " Changed.", examples), *stack_guardrails.DENIED_TOPICS[1:])
+    monkeypatch.setattr(stack_guardrails, "DENIED_TOPICS", changed)
     answer_after, topic_after = descriptions()
     assert answer_after == answer_before
     assert topic_after != topic_before

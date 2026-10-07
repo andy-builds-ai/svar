@@ -334,7 +334,7 @@ cannot carry the last model's prices.
 
 **2026-09-29 — Temperature 0, and what it did not fix.** The function set
 only `maxTokens`, so Nova Pro sampled at its default (0.7). It now sends
-`temperature` 0 (`ANSWER_TEMPERATURE` in `app/handler.py`). The Nova user
+`temperature` 0 (`ANSWER_TEMPERATURE` in `app/llm.py`). The Nova user
 guide gives the range for `temperature` as 0.00001 to 1 on its request-schema
 page and uses `temperature: 0` on its structured-output page; a call to Nova
 Pro through the EU profile accepted both 0 and 0.00001 (29.09.2026). AWS does
@@ -1050,20 +1050,50 @@ not retried: it is what the page would show.
 
 ## Code
 
-**2026-09-23 — Files over 500 lines, and why they stay whole.** Measured
-28.09.2026. `app/handler.py` (1,217 lines) is the Lambda function: one
-module with one entry point keeps the package, its imports and the test
-fakes simple, and its parts are the steps of one request in order.
-`infra/stacks/andur_stack.py` (1,066) is one CloudFormation stack whose
-resources reference each other and deploy together. `scripts/ingest.py`
-(629) is one command with four steps: check, upload, prune, sync. The test
-files over 500 — `tests/test_handler.py` (2,590), `tests/test_stack.py`
-(1,440), `tests/test_ingest.py` (711) — follow the module they test and
-share its fakes. A split is a step of its own, not part of a change that
-must not change behaviour. `scripts/rehearsal.py` (07.10.2026, about 1,100
-lines) is one run whose plan reads top to bottom, one step after the other,
-and the checks only that run makes; most of its length is the plan the
-formatter spreads over lines.
+**2026-09-23, replaced 2026-10-07 — Files over 500 lines stayed whole.**
+Until 07.10.2026 the function, the stack, `scripts/ingest.py`,
+`scripts/control_eval.py` and `scripts/rehearsal.py` were one file each, on
+the grounds that a split is a step of its own and not part of a change that
+must not change behaviour. `app/handler.py` had grown to 2,227 lines by then.
+That step is the entry below.
+
+**2026-10-07 — One job per module, and the files that stay over 500 lines.**
+Counted with `wc -l` on 07.10.2026.
+
+- `app/handler.py` (130 lines) is the entry of the function; each step of a
+  request has a module of its own beside it (the table in
+  [app/README.md](../app/README.md)). The modules stay flat in `app/`,
+  because Lambda packages that folder and imports them by their plain names.
+  They call each other by module name (`keys.authorize`), as they already did
+  `aws` and `page`, so a test that replaces `clients.client` or `clocks.clock`
+  replaces it for every module that calls it.
+- `infra/stacks/andur_stack.py` (281) wires the parts together and names the
+  outputs; `knowledge_base.py`, `guardrails.py`, `answer_function.py`,
+  `web.py` and `shared.py` build them. Their functions put each construct on
+  the stack itself, with the id it had, so no logical id changed: the
+  templates of both regions, synthesised before and after the split, differ
+  in nothing but the hash of the function's code package.
+- `scripts/ingest.py` gave the layout contract and what a document becomes in
+  the bucket to `scripts/layout.py`; `scripts/control_eval.py` gave its marks
+  to `scripts/control_marks.py`; `scripts/rehearsal.py` gave its checks to
+  `scripts/rehearsal_checks.py` and the running of its steps to
+  `scripts/rehearsal_runner.py`.
+- `scripts/topic_probe.py` (683), `scripts/grounding_probe.py` (606) and
+  `scripts/workspace.py` (543) stay whole. Each is one command, read top to
+  bottom in the order it runs; none has a part a reader would look for on
+  its own. The one part used elsewhere, the life of a probe guardrail in
+  `topic_probe.py` (create, wait, delete; about 100 lines, used by
+  `control_eval.py` and `grounding_probe.py`), would leave 580 lines behind.
+- The test files over 500 stay whole: `tests/test_handler.py` (4,502),
+  `tests/test_stack.py` (1,761), `tests/test_ingest.py` (1,137),
+  `tests/test_topic_probe.py` (958), `tests/test_rehearsal.py` (887),
+  `tests/test_workspace.py` (753), `tests/test_control_eval.py` (656),
+  `tests/test_deploy_steps.py` (607), `tests/test_grounding_probe.py` (565).
+  The split above had to change no behaviour, and the proof is that the same
+  tests pass; so the tests changed only where a name moved to another module.
+  `tests/test_handler.py` holds the fakes and settings seven other test files
+  import, and its sections already follow the new modules: cut along them,
+  with the fakes in a module of their own, it is the next split.
 
 **2026-09-23 — Comments say what the code cannot.** Docstrings are one
 sentence; reasons live here, measurements in the READMEs.

@@ -1,11 +1,19 @@
 """A question that fails on AWS's side after it was counted is given back to the key's budget,
-unless a timeout caused it (app/handler.py, `refund_question`)."""
+unless a timeout caused it (app/refunds.py, `refund_question`)."""
 
 import logging
 from typing import Any
 
-import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py)
+import answering
+import aws as aws_module
+import budget
+import clocks
+import config
+import errors
+import llm
 import pytest
+import refunds
+import topic_check
 
 from tests.test_handler import (  # noqa: F401 (aws, budget_clock and cold_start are fixtures)
     ENVIRONMENT,
@@ -33,18 +41,18 @@ def timeout() -> Exception:
     return exceptions.ReadTimeoutError(endpoint_url="https://bedrock-runtime")
 
 
-def refunds(aws: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: F811
+def refund_writes(aws: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: F811
     """The refund writes the function sent to the budget table."""
     return [
         update
         for update in aws["dynamodb"].calls
         if update["UpdateExpression"]
-        in (handler.DEMO_REFUND_EXPRESSION, handler.PLAN_REFUND_EXPRESSION)
+        in (refunds.DEMO_REFUND_EXPRESSION, refunds.PLAN_REFUND_EXPRESSION)
     ]
 
 
 def fail_the_model_twice(aws: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
-    monkeypatch.setattr(handler, "pause", lambda seconds: None)
+    monkeypatch.setattr(clocks, "pause", lambda seconds: None)
     aws["bedrock-runtime"].error = client_error("ThrottlingException")
 
 
@@ -111,7 +119,7 @@ def test_a_timeout_keeps_the_question_counted(
     assert "refunded" not in body
     assert "not counted" not in body["error"]
     assert number(budget_item(aws), "questions_used") == 1
-    assert refunds(aws) == []
+    assert refund_writes(aws) == []
     (line,) = [line for line in log_lines(caplog) if line["event"] == "budget-kept"]
     assert line["cause"] == "timeout"
 
@@ -134,16 +142,19 @@ def test_a_question_whose_answer_the_model_gave_stays_counted(
     status, body = call(event())
     assert status == 502 and "refunded" not in body
     assert number(budget_item(aws), "questions_used") == 1
-    assert refunds(aws) == []
+    assert refund_writes(aws) == []
     (line,) = [line for line in log_lines(caplog) if line["event"] == "budget-kept"]
     assert line["cause"] == "model answered"
 
 
 def test_an_unreadable_topic_verdict_keeps_the_question() -> None:
     """It follows from the text the caller wrote, so it is not given back."""
-    error = handler.topic_check_failed("INPUT", *handler.UNREADABLE_VERDICT)
+    error = topic_check.topic_check_failed("INPUT", *topic_check.UNREADABLE_VERDICT)
     assert error.unreadable is True
-    assert handler.topic_check_failed("INPUT", "access denied", "access denied").unreadable is False
+    assert (
+        topic_check.topic_check_failed("INPUT", "access denied", "access denied").unreadable
+        is False
+    )
 
 
 def test_a_timeout_of_the_first_topic_call_stays_in_the_chain_when_the_next_one_fails(
@@ -152,16 +163,16 @@ def test_a_timeout_of_the_first_topic_call_stays_in_the_chain_when_the_next_one_
     """The first call timed out, the call in its place was throttled: the error carries the
     timeout, and the question stays counted."""
     exceptions = pytest.importorskip("botocore.exceptions")
-    errors = [
+    failures = [
         exceptions.ReadTimeoutError(endpoint_url="https://bedrock-runtime"),
         client_error("ThrottlingException"),
     ]
 
     class Runtime:
         def converse(self, **_: Any) -> Any:
-            raise errors.pop(0)
+            raise failures.pop(0)
 
-    settings = handler.load_settings(
+    settings = config.load_settings(
         {
             **{k: v for k, v in ENVIRONMENT.items() if not k.startswith("TOPIC_GUARDRAIL_")},
             "TOPIC_MODEL_ID": "openai.gpt-oss-120b-1:0",
@@ -169,9 +180,9 @@ def test_a_timeout_of_the_first_topic_call_stays_in_the_chain_when_the_next_one_
             "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS": "0.00079",
         }
     )
-    with pytest.raises(handler.TopicCheckError) as failed:
-        handler.check_topics_with_model(Runtime(), settings, "INPUT", "Wie exportiere ich?")
-    assert handler.aws.timed_out(failed.value)
+    with pytest.raises(errors.TopicCheckError) as failed:
+        topic_check.check_topics_with_model(Runtime(), settings, "INPUT", "Wie exportiere ich?")
+    assert aws_module.timed_out(failed.value)
     assert "too many requests" in str(failed.value)
 
 
@@ -184,10 +195,10 @@ def test_a_rejection_that_follows_a_timeout_in_its_chain_keeps_the_question() ->
         try:
             raise first
         except exceptions.ReadTimeoutError as exc:
-            raise handler.topic_check_failed("INPUT", *handler.UNREADABLE_VERDICT) from exc
-    except handler.TopicCheckError as error:
-        assert handler.aws.timed_out(error)
-    assert not handler.aws.timed_out(handler.LLMError("no text"))
+            raise topic_check.topic_check_failed("INPUT", *topic_check.UNREADABLE_VERDICT) from exc
+    except errors.TopicCheckError as error:
+        assert aws_module.timed_out(error)
+    assert not aws_module.timed_out(errors.LLMError("no text"))
 
 
 def test_a_refund_that_fails_leaves_the_question_counted_and_says_so(
@@ -216,13 +227,13 @@ def test_a_refund_never_counts_below_zero(
     """The item was set back by hand between the count and the failure: the refund's
     condition refuses, and nothing goes negative."""
     aws["bedrock-runtime"].error = client_error("AccessDeniedException")
-    real_answer = handler.answer_question
+    real_answer = answering.answer_question
 
     def reset_then_fail(*args: Any) -> Any:
         budget_item(aws)["questions_used"] = {"N": "0"}
         return real_answer(*args)
 
-    monkeypatch.setattr(handler, "answer_question", reset_then_fail)
+    monkeypatch.setattr(answering, "answer_question", reset_then_fail)
     status, body = call(event())
     assert status == 502 and "refunded" not in body
     assert number(budget_item(aws), "questions_used") == 0
@@ -238,18 +249,18 @@ def test_no_refund_when_it_would_not_end_before_the_functions_timeout(
     after that would end as a bare Lambda timeout, without the error and its reason."""
     caplog.set_level(logging.INFO, logger="andur")
     aws["bedrock-runtime"].error = client_error("AccessDeniedException")
-    real_ask = handler.ask_model
+    real_ask = llm.ask_model
 
     def slow_ask(*args: Any) -> Any:
         cold_start.advance(
-            handler.aws.FUNCTION_TIMEOUT_SECONDS
-            - handler.aws.ORIGIN_MARGIN_SECONDS
-            - handler.aws.call_seconds("dynamodb")
+            aws_module.FUNCTION_TIMEOUT_SECONDS
+            - aws_module.ORIGIN_MARGIN_SECONDS
+            - aws_module.call_seconds("dynamodb")
             + 1
         )
         return real_ask(*args)
 
-    monkeypatch.setattr(handler, "ask_model", slow_ask)
+    monkeypatch.setattr(llm, "ask_model", slow_ask)
     status, body = call(event())
     assert status == 502 and "refunded" not in body
     assert number(budget_item(aws), "questions_used") == 1
@@ -266,19 +277,19 @@ def test_a_key_on_a_plan_gets_its_question_back_in_the_day_and_month_it_was_coun
     was charged to, not the new day's."""
     key_on_plan(aws)
     budget_clock.now = 1_790_000_000.0
-    counted_day = handler.german_date(int(budget_clock.now))
-    month, day = handler.month_count(counted_day), handler.day_count(counted_day)
+    counted_day = budget.german_date(int(budget_clock.now))
+    month, day = budget.month_count(counted_day), budget.day_count(counted_day)
 
     def fail_tomorrow(*_: Any) -> Any:
         budget_clock.advance(24 * 60 * 60)
-        raise handler.LLMError("The model could not answer: access denied.")
+        raise errors.LLMError("The model could not answer: access denied.")
 
-    monkeypatch.setattr(handler, "answer_question", fail_tomorrow)
+    monkeypatch.setattr(answering, "answer_question", fail_tomorrow)
     status, body = call(event())
     assert status == 502 and body["refunded"] is True
     item = budget_item(aws)
     assert (number(item, month), number(item, day)) == (0, 0)
-    (refund,) = refunds(aws)
+    (refund,) = refund_writes(aws)
     assert refund["ExpressionAttributeNames"] == {"#month": month, "#day": day}
 
 
@@ -289,15 +300,15 @@ def test_only_a_failed_question_is_given_back(
 ) -> None:
     if status_code == 402:
         budget_item_before = {
-            handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+            budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(KEYS["quillmoor"])},
             "questions_used": {"N": "10"},
             "question_limit": {"N": "10"},
             "first_used_at": {"N": "1"},
             "expires_at": {"N": "9999999999"},
         }
-        aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = budget_item_before
+        aws["dynamodb"].items[budget.key_hash(KEYS["quillmoor"])] = budget_item_before
     assert call(event())[0] == status_code
-    assert refunds(aws) == []
+    assert refund_writes(aws) == []
 
 
 def test_a_crash_is_not_given_back(
@@ -309,6 +320,6 @@ def test_a_crash_is_not_given_back(
     def broken(*_: Any) -> Any:
         raise ZeroDivisionError("a bug")
 
-    monkeypatch.setattr(handler, "answer_question", broken)
+    monkeypatch.setattr(answering, "answer_question", broken)
     assert call(event())[0] == 500
     assert number(budget_item(aws), "questions_used") == 1

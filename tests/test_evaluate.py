@@ -3,15 +3,25 @@
 import json
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
-import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py)
+import aws
+import config
+import errors
+import intake
+import llm
+import log
 import pytest
+import sentences
 
 from infra.answer_models import ANSWER_MODELS, AnswerModel
-from infra.stacks.andur_stack import ANSWER_FUNCTION_NAME
+from infra.stacks.answer_function import ANSWER_FUNCTION_NAME
 from scripts import evaluate
 from tests.test_handler import ENVIRONMENT
+
+#: The answer function's modules, as the scripts take them (`evaluate.import_app`).
+app = evaluate.import_app()
 
 KNOWLEDGE = Path(__file__).resolve().parents[1] / "knowledge"
 
@@ -37,7 +47,7 @@ def test_the_question_set_covers_every_demo_workspace_and_every_kind(
     assert len(questions) == 30
     assert len({q["id"] for q in questions}) == len(questions)
     assert {q["workspace"] for q in questions} == demo_workspaces
-    assert all(handler.WORKSPACE_NAME.match(name) for name in demo_workspaces)
+    assert all(intake.WORKSPACE_NAME.match(name) for name in demo_workspaces)
     assert {q["kind"] for q in questions} == set(evaluate.KINDS)
 
 
@@ -104,7 +114,7 @@ def test_german_facts_that_stand_in_several_documents_list_all_of_them(
 
 
 def test_the_languages_are_the_handlers() -> None:
-    assert evaluate.LANGUAGES == handler.LANGUAGES
+    assert evaluate.LANGUAGES == sentences.LANGUAGES
 
 
 ANSWER_ENTRY = {
@@ -174,15 +184,22 @@ ANSWER_QUESTION = {
 
 def test_an_answer_is_right_when_every_fact_group_is_in_it() -> None:
     marks = evaluate.score(
-        ANSWER_QUESTION, body("The link works for **60** minutes [1].", cited=("faq.md",)), handler
+        ANSWER_QUESTION, body("The link works for **60** minutes [1].", cited=("faq.md",)), app
     )
     assert marks == {"correct": True, "cites_document": True}
 
 
 def test_a_section_of_the_document_counts_as_citing_it() -> None:
     marks = evaluate.score(
-        ANSWER_QUESTION, body("One hour [2].", cited=("faq--03-passwords.md",)), handler
+        ANSWER_QUESTION, body("One hour [2].", cited=("faq--03-passwords.md",)), app
     )
+    assert marks == {"correct": True, "cites_document": True}
+
+
+@pytest.mark.parametrize("file", ["faq.html", "faq.pdf"])
+def test_a_document_uploaded_whole_counts_as_citing_it(file: str) -> None:
+    """A file that is not Markdown goes up whole, with its suffix; it is still the document."""
+    marks = evaluate.score(ANSWER_QUESTION, body("One hour [1].", cited=(file,)), app)
     assert marks == {"correct": True, "cites_document": True}
 
 
@@ -190,7 +207,7 @@ def test_citing_any_listed_document_counts() -> None:
     marks = evaluate.score(
         ANSWER_QUESTION,
         body("One hour [1].", cited=("manual-01-getting-started--02-signing-in.md",)),
-        handler,
+        app,
     )
     assert marks == {"correct": True, "cites_document": True}
 
@@ -203,27 +220,27 @@ def test_german_opening_hours_count_in_every_spelling(
 ) -> None:
     """A full stop between hours and minutes is how German writes a time."""
     (hours,) = [q for q in german_questions if q["id"] == "de08"]
-    marks = evaluate.score(hours, body(answer, cited=("company-and-services.md",)), handler)
+    marks = evaluate.score(hours, body(answer, cited=("company-and-services.md",)), app)
     assert marks == {"correct": True, "cites_document": True}
 
 
 def test_an_answer_without_the_fact_or_the_citation_is_marked_so() -> None:
-    marks = evaluate.score(ANSWER_QUESTION, body("Two days.", cited=("glossary.md",)), handler)
+    marks = evaluate.score(ANSWER_QUESTION, body("Two days.", cited=("glossary.md",)), app)
     assert marks == {"correct": False, "cites_document": False}
 
 
 def test_a_blocked_answer_is_never_right_even_with_the_fact() -> None:
-    marks = evaluate.score(ANSWER_QUESTION, body("60 minutes", action="blocked"), handler)
+    marks = evaluate.score(ANSWER_QUESTION, body("60 minutes", action="blocked"), app)
     assert marks["correct"] is False
 
 
 @pytest.mark.parametrize(
     ("answer", "action", "correct"),
     [
-        (handler.NOT_IN_SOURCES_ANSWERS["en"], "none", True),
-        (handler.NO_SOURCES_ANSWERS["en"], "none", True),
-        (handler.NOT_IN_SOURCES_ANSWERS["de"], "none", True),
-        (handler.NO_SOURCES_ANSWERS["de"], "none", True),
+        (sentences.NOT_IN_SOURCES_ANSWERS["en"], "none", True),
+        (sentences.NO_SOURCES_ANSWERS["en"], "none", True),
+        (sentences.NOT_IN_SOURCES_ANSWERS["de"], "none", True),
+        (sentences.NO_SOURCES_ANSWERS["de"], "none", True),
         ("Andur does not give legal advice.", "blocked", True),
         ("You may withhold payment.", "none", False),
         ("A name is masked here.", "masked", False),
@@ -234,12 +251,12 @@ def test_a_refusal_or_unanswerable_question_is_right_when_andur_declines(
 ) -> None:
     for kind in ("refuse", "unanswerable"):
         question = {"id": "q", "kind": kind, "documents": [], "facts": []}
-        assert evaluate.score(question, body(answer, action), handler)["correct"] is correct
+        assert evaluate.score(question, body(answer, action), app)["correct"] is correct
 
 
 def test_settings_for_a_model_change_only_the_model_and_its_token_prices() -> None:
-    prices = handler.Prices(*(Decimal("0.1") for _ in range(5)))
-    base = handler.Settings(*(["x"] * 15), prices=prices, price_date="2026-01-01")
+    prices = config.Prices(*(Decimal("0.1") for _ in range(5)))
+    base = config.Settings(*(["x"] * 15), prices=prices, price_date="2026-01-01")
     model = AnswerModel("M", "eu.m", "0.001", "0.002")
     settings = evaluate.settings_for(base, model)
     assert settings.model_id == "eu.m"
@@ -250,19 +267,18 @@ def test_settings_for_a_model_change_only_the_model_and_its_token_prices() -> No
     assert settings.knowledge_base_id == base.knowledge_base_id
 
 
-class FakeHandler:
-    """Answers after each of ``outcomes``: the model calls AWS turned away on the way, and
-    the error to raise."""
+class FakeApp:
+    """The modules `evaluate.ask` reads, with a question path that answers after each of
+    ``outcomes``: the model calls AWS turned away on the way, and the error to raise."""
 
-    HandlerError = handler.HandlerError
-    RequestRecord = handler.RequestRecord
-    MODEL_REJECTION_CODES = handler.MODEL_REJECTION_CODES
-    aws = handler.aws
+    errors, log, llm, aws = errors, log, llm, aws
 
     def __init__(self, outcomes: list[tuple[int, Exception | None]]) -> None:
         self.outcomes = outcomes
         self.calls = 0
         self.languages: list[str] = []
+        #: In place of app/answering.py.
+        self.answering = SimpleNamespace(answer_question=self.answer_question)
 
     def answer_question(self, settings: Any, workspace: str, question: str, record: Any) -> Any:
         self.calls += 1
@@ -274,11 +290,11 @@ class FakeHandler:
         return {"answer": "ok"}
 
 
-def failed_on(code: str, message: str) -> handler.LLMError:
+def failed_on(code: str, message: str) -> errors.LLMError:
     """The handler's error for a model call that AWS answered with ``code``."""
     cause = Exception(code)
     cause.response = {"Error": {"Code": code}}  # type: ignore[attr-defined]
-    error = handler.LLMError(message)
+    error = errors.LLMError(message)
     error.__cause__ = cause
     return error
 
@@ -293,7 +309,7 @@ def no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_a_rejection_the_function_recovers_from_still_counts(no_sleep: None) -> None:
-    outcome = evaluate.ask(FakeHandler([(1, None)]), None, QUESTION)
+    outcome = evaluate.ask(FakeApp([(1, None)]), None, QUESTION)
     assert outcome["body"] == {"answer": "ok"}
     assert outcome["rejected"] == 1 and outcome["first_call_rejected"] is True
     assert outcome["attempts"] == 1
@@ -303,7 +319,7 @@ def test_a_question_that_stays_busy_is_asked_again_with_every_rejection_counted(
     no_sleep: None,
 ) -> None:
     throttled = failed_on("ThrottlingException", "too many requests (throttled)")
-    fake = FakeHandler([(2, BUSY), (2, throttled)])
+    fake = FakeApp([(2, BUSY), (2, throttled)])
     outcome = evaluate.ask(fake, None, QUESTION)
     assert outcome["body"] == {"answer": "ok"} and fake.calls == 3
     assert outcome["rejected"] == 4 and outcome["first_call_rejected"] is True
@@ -311,7 +327,7 @@ def test_a_question_that_stays_busy_is_asked_again_with_every_rejection_counted(
 
 
 def test_a_service_that_stays_busy_ends_as_an_error(no_sleep: None) -> None:
-    fake = FakeHandler([(2, BUSY) for _ in range(4)])
+    fake = FakeApp([(2, BUSY) for _ in range(4)])
     outcome = evaluate.ask(fake, None, QUESTION)
     assert outcome["error"] == str(BUSY) and fake.calls == 4 and outcome["rejected"] == 8
 
@@ -320,13 +336,13 @@ def test_a_service_that_stays_busy_ends_as_an_error(no_sleep: None) -> None:
 def test_a_question_is_asked_in_its_language(language: str | None, asked_in: str) -> None:
     """Like the page, which sends its language: the fixed sentences and the prompt follow it."""
     question = QUESTION if language is None else {**QUESTION, "language": language}
-    fake = FakeHandler([])
+    fake = FakeApp([])
     evaluate.ask(fake, None, question)
     assert fake.languages == [asked_in]
 
 
 def test_an_internal_error_is_not_asked_again() -> None:
-    fake = FakeHandler([(0, failed_on("InternalServerException", "unavailable"))])
+    fake = FakeApp([(0, failed_on("InternalServerException", "unavailable"))])
     outcome = evaluate.ask(fake, None, QUESTION)
     assert "error" in outcome and fake.calls == 1
 
@@ -394,7 +410,7 @@ def test_the_results_are_written_after_every_model(
     out = tmp_path / "results.json"
     written: list[list[str]] = []
 
-    def run_model(handler: Any, base: Any, model: Any, questions: Any, progress: Any) -> Any:
+    def run_model(app: Any, base: Any, model: Any, questions: Any, progress: Any) -> Any:
         if out.exists():
             written.append(list(json.loads(out.read_text(encoding="utf-8"))["runs"]))
         return [{"kind": "refuse", "correct": True, "cites_document": False, "seconds": 1.0,
@@ -402,8 +418,8 @@ def test_the_results_are_written_after_every_model(
                  "body": {"cost_usd": 0.00015}}]  # fmt: skip
 
     monkeypatch.setattr(evaluate, "deployed_environment", lambda region: {})
-    settings = handler.load_settings(ENVIRONMENT)
-    monkeypatch.setattr(handler, "load_settings", lambda environ: settings)
+    settings = config.load_settings(ENVIRONMENT)
+    monkeypatch.setattr(config, "load_settings", lambda environ: settings)
     monkeypatch.setattr(evaluate, "run_model", run_model)
     assert evaluate.main(["--model", "Nova Pro", "--model", "Nova 2 Lite", "--out", str(out)]) == 0
     assert written == [["Nova Pro"]]
@@ -411,7 +427,7 @@ def test_the_results_are_written_after_every_model(
 
 
 def test_any_other_error_is_recorded_not_retried() -> None:
-    fake = FakeHandler([(0, handler.LLMError("access denied"))])
+    fake = FakeApp([(0, errors.LLMError("access denied"))])
     outcome = evaluate.ask(fake, None, QUESTION)
     assert outcome["error"] == "access denied" and fake.calls == 1
     assert outcome["rejected"] == 0 and outcome["first_call_rejected"] is False

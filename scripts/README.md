@@ -388,7 +388,7 @@ python -m scripts.evaluate --model "Nova Pro" --questions scripts/evaluation-que
 It asks the 30 questions in `evaluation-questions.json` — 22 that the
 documents answer, 4 that the guardrail must refuse, 4 that no document
 answers — of every model in `MODELS`, through `answer_question` in
-`app/handler.py` with the deployed function's own settings. Only the model
+`app/answering.py` with the deployed function's own settings. Only the model
 and its token prices change; see *Evaluation* in
 [docs/decisions.md](../docs/decisions.md). No key and no budget are used.
 Only models that run in the region or behind an EU profile are allowed; the
@@ -510,7 +510,7 @@ gpt-oss-120b cost 0.30 USD on 07.10.2026.
 
 Every change to `DENIED_TOPICS` in `app/denied_topics.py`, to the topic
 model's prompt in `app/topic_model.py`, and to the frames `QUESTION_FRAME`
-and `ANSWER_FRAME` in `app/handler.py`, is measured with this before it is
+and `ANSWER_FRAME` in `app/topic_check.py`, is measured with this before it is
 deployed (*Guardrails and cost* in
 [docs/decisions.md](../docs/decisions.md)). Without `--deployed` the script
 creates a guardrail of its own, `andur-topic-probe`, with the topics the
@@ -864,7 +864,9 @@ this order, each step timed on its own:
    address of `WebUrl` in the region and in no other by AWS's
    `ip-ranges.json`, and that plain HTTP serves nothing while HTTPS serves the
    page and answers a question without a key with 401, both with the security
-   headers of `app/page.py`;
+   headers of `app/page.py`; an address that only times out on port 80 is
+   counted as closed but named apart, since a block on this computer's side
+   looks the same;
 2. **setup** — `ingest --check`, `workspace add` (its stdout, the key, is
    thrown away; the key stays in Parameter Store), `ingest`, `retrieve` (every
    hit from the new workspace), the first question through `ask --language
@@ -873,7 +875,8 @@ this order, each step timed on its own:
 3. **apart** — the demo workspaces' documents, which the measurements need; a
    search in `--other-workspace` that must find hits there and none from a
    document of the new workspace, by file name as well as by its metadata, so a
-   document filed under the wrong workspace shows; and the new key asked there
+   document filed under the wrong workspace shows (a name with spaces is read
+   as it is and with `%20`); and the new key asked there
    and refused with HTTP 401, which is what keeps a business to its own
    documents;
 4. **measure** — `topic_probe --deployed` at the same time as `tool_probe` and
@@ -914,8 +917,9 @@ per phase, and the wall clock. At the end, also after Ctrl+C, the summary is
 written and the account id is replaced by `<account>` in every file there; on
 the screen it never shows. It deploys nothing and deletes nothing; the
 measurements create and delete their probe guardrails as they do alone, and
-cost what they cost alone, about 0.9 USD with the Frankfurt answer model
-(estimated from the runs of 06. and 07.10.2026, not measured as one run).
+cost what they cost alone. On 07.10.2026 the whole run in eu-central-1, 22
+steps, took 11 minutes 12 seconds and cost 0.70 USD (at most 0.75) with the
+Frankfurt answer model.
 
 | Exit code | Meaning |
 |---|---|

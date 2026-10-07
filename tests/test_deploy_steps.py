@@ -25,13 +25,13 @@ import pytest
 from aws_cdk.assertions import Template
 
 from infra.deploy_drain import handler as drain_handler
-from infra.stacks import andur_stack
-from infra.stacks.andur_stack import (
+from infra.stacks import answer_function, guardrails as stack_guardrails
+from infra.stacks.andur_stack import AndurStack
+from infra.stacks.answer_function import (
     ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
     DEPLOY_DRAIN_SECONDS,
     EU_PROFILE_PREFIX,
-    AndurStack,
 )
 from tests.test_stack import REGIONAL_MODEL_ID, deploy_context
 
@@ -107,16 +107,16 @@ def synthesise(
 
 def threshold_changed(patch: pytest.MonkeyPatch) -> None:
     """Replaces the answer guardrail's version."""
-    patch.setattr(andur_stack, "GROUNDING_THRESHOLD", 0.75)
+    patch.setattr(stack_guardrails, "GROUNDING_THRESHOLD", 0.75)
 
 
 def topic_changed(patch: pytest.MonkeyPatch) -> None:
     """Replaces the version of the topic guardrail; the answer guardrail reads no topic."""
-    name, definition, examples = andur_stack.DENIED_TOPICS[0]
+    name, definition, examples = stack_guardrails.DENIED_TOPICS[0]
     patch.setattr(
-        andur_stack,
+        stack_guardrails,
         "DENIED_TOPICS",
-        ((name, definition + " Changed.", examples), *andur_stack.DENIED_TOPICS[1:]),
+        ((name, definition + " Changed.", examples), *stack_guardrails.DENIED_TOPICS[1:]),
     )
 
 
@@ -124,12 +124,12 @@ def question_topics_on(patch: pytest.MonkeyPatch) -> None:
     """The stack of the first of the two deploys of 06.10.2026, the answer guardrail reading
     the question's topics; from it to the stack as it is, the second replaces the versions of
     the answer and the topic guardrail."""
-    patch.setattr(andur_stack, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
+    patch.setattr(stack_guardrails, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
 
 
 def masking_changed(patch: pytest.MonkeyPatch) -> None:
     """Replaces the versions of the answer and the excerpt guardrail."""
-    patch.setattr(andur_stack, "MASKED_PII_TYPES", ("NAME", "EMAIL", "PHONE"))
+    patch.setattr(stack_guardrails, "MASKED_PII_TYPES", ("NAME", "EMAIL", "PHONE"))
 
 
 @pytest.fixture(scope="module")
@@ -548,7 +548,7 @@ def test_a_deploy_that_replaces_no_version_does_not_wait(current: Synthesised) -
     deploys as fast as before."""
 
     def price_changed(patch: pytest.MonkeyPatch) -> None:
-        patch.setattr(andur_stack, "PRICE_TOPIC_PER_1K_UNITS", "0.16")
+        patch.setattr(answer_function, "PRICE_TOPIC_PER_1K_UNITS", "0.16")
 
     orders, problems = walk(synthesise(price_changed), current)
     assert orders == [[current.function]]

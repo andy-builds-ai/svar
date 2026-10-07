@@ -1,7 +1,7 @@
 """The plans a paying customer's key can carry, and what each allows.
 
 This table is the one place a plan is defined. The answer function reads it to
-count a question (app/handler.py), `python -m scripts.workspace` to give a key
+count a question (app/budget.py), `python -m scripts.workspace` to give a key
 its plan. Changing a number here and deploying changes it for every key on that
 plan, from its next question. A new plan is deployed before a key is put on
 it, and a plan keys carry is never renamed or removed: the function refuses

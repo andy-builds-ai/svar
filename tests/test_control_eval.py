@@ -7,13 +7,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py)
+import config
 import pytest
+import retrieval
+import sentences
 
+from app.denied_topics import DENIED_TOPICS
 from infra.answer_models import ANSWER_MODELS, FRANKFURT_MODELS
-from infra.stacks.andur_stack import DENIED_TOPICS, GUARDRAIL_PROFILE_ID
-from scripts import control_eval, evaluate
+from infra.stacks.guardrails import GUARDRAIL_PROFILE_ID
+from scripts import control_eval, control_marks, evaluate
 from tests.test_handler import ENVIRONMENT
+
+#: The answer function's modules, as the scripts take them (`evaluate.import_app`).
+app = evaluate.import_app()
 
 KNOWLEDGE = Path(__file__).resolve().parents[1] / "knowledge"
 
@@ -151,11 +157,11 @@ PASSAGES = [
 def test_a_number_no_passage_and_not_the_question_gives_is_added(
     answer: str, invented: list[str]
 ) -> None:
-    assert control_eval.invented_numbers(answer, PASSAGES, "Was kosten 12 Paletten?") == invented
+    assert control_marks.invented_numbers(answer, PASSAGES, "Was kosten 12 Paletten?") == invented
 
 
 def test_citation_numbers_are_not_counted() -> None:
-    assert control_eval.invented_numbers("Neun Leute [7][8].", ["nine"], "Wie viele?") == []
+    assert control_marks.invented_numbers("Neun Leute [7][8].", ["nine"], "Wie viele?") == []
 
 
 def test_an_earlier_result_stays_when_a_run_fails_before_it_pays(
@@ -174,8 +180,8 @@ def test_an_earlier_result_stays_when_a_run_fails_before_it_pays(
 def test_the_numbers_in_a_gpt_oss_citation_are_not_counted() -> None:
     """gpt-oss cites "【2†L9-L12】" (06.10.2026); 9 and 12 are line numbers, no claim."""
     answer = "Zehn Jahre Garantie【2†L9-L12】, bei 8 °C streichen【1】."
-    assert control_eval.invented_numbers(answer, ["ten years, above 8 °C"], "?") == []
-    assert control_eval.uncited_sentences("A ist 5【1】. B ist 6.") == 1
+    assert control_marks.invented_numbers(answer, ["ten years, above 8 °C"], "?") == []
+    assert control_marks.uncited_sentences("A ist 5【1】. B ist 6.") == 1
 
 
 @pytest.mark.parametrize(
@@ -209,7 +215,7 @@ def test_a_saved_run_is_marked_again_without_aws(
         "added": False,
     }
     passages = {
-        control_eval.Passages.key("pellwick", question["question"]): [
+        control_marks.Passages.key("pellwick", question["question"]): [
             {"content": {"text": "All prices include VAT."}}
         ]
     }
@@ -226,11 +232,11 @@ def test_a_saved_run_is_marked_again_without_aws(
 
 
 def test_a_forbidden_spelling_counts_only_on_its_own() -> None:
-    assert control_eval.forbidden_found("Die KfW zahlt 70 %.", ["KfW", "70 %", "BAFA"]) == [
+    assert control_marks.forbidden_found("Die KfW zahlt 70 %.", ["KfW", "70 %", "BAFA"]) == [
         "KfW",
         "70 %",
     ]
-    assert control_eval.forbidden_found("170 % mehr", ["70 %"]) == []
+    assert control_marks.forbidden_found("170 % mehr", ["70 %"]) == []
 
 
 @pytest.mark.parametrize(
@@ -239,16 +245,16 @@ def test_a_forbidden_spelling_counts_only_on_its_own() -> None:
         ("Die Wartung kostet 139 Euro und ist jährlich [1].", "de"),
         ("The survey costs £60 and is deducted from the invoice [1].", "en"),
         ("139 Euro [1]", None),
-        (handler.NOT_IN_SOURCES_ANSWERS["de"], "de"),
-        (handler.NOT_IN_SOURCES_ANSWERS["en"], "en"),
+        (sentences.NOT_IN_SOURCES_ANSWERS["de"], "de"),
+        (sentences.NOT_IN_SOURCES_ANSWERS["en"], "en"),
     ],
 )
 def test_the_language_of_an_answer(text: str, language: str | None) -> None:
-    assert control_eval.language_of(text) == language
+    assert control_marks.language_of(text) == language
 
 
 def test_uncited_sentences_are_counted() -> None:
-    assert control_eval.uncited_sentences("A is 5 [1]. B is 6. C is 7 [2][3].") == 1
+    assert control_marks.uncited_sentences("A is 5 [1]. B is 6. C is 7 [2][3].") == 1
 
 
 def body(answer: str, action: str = "none", cited: tuple[str, ...] = ()) -> dict[str, Any]:
@@ -273,8 +279,8 @@ ANSWER_QUESTION = {
 
 def test_a_partial_answer_that_invents_the_other_half_is_right_but_does_not_stay() -> None:
     text = "Die Wartung kostet 139 Euro [1]; ein neues Gerät etwa 8.500 Euro."
-    marks = control_eval.grade(
-        ANSWER_QUESTION, body(text, cited=("wartungsvertrag",)), text, PASSAGES, handler
+    marks = control_marks.grade(
+        ANSWER_QUESTION, body(text, cited=("wartungsvertrag",)), text, PASSAGES, app
     )
     assert marks["correct"] and marks["cites_document"] and not marks["cites_other_document"]
     assert marks["invented_numbers"] == ["8.500"] and marks["added"]
@@ -283,8 +289,8 @@ def test_a_partial_answer_that_invents_the_other_half_is_right_but_does_not_stay
 
 def test_a_partial_answer_without_the_other_half_stays() -> None:
     text = "Die Wartung kostet 139 Euro [1]. Zum neuen Gerät steht nichts in den Quellen."
-    marks = control_eval.grade(
-        ANSWER_QUESTION, body(text, cited=("preise-und-zahlung",)), text, PASSAGES, handler
+    marks = control_marks.grade(
+        ANSWER_QUESTION, body(text, cited=("preise-und-zahlung",)), text, PASSAGES, app
     )
     assert marks["stays"] is True and marks["language"] == "de"
     assert not marks["cites_document"] and marks["cites_other_document"]
@@ -301,17 +307,17 @@ TEMPTING = {
 
 
 def test_declining_a_temptation_stays_and_is_right() -> None:
-    sentence = handler.NOT_IN_SOURCES_ANSWERS["de"]
-    marks = control_eval.grade(TEMPTING, body(sentence), sentence, PASSAGES, handler)
+    sentence = sentences.NOT_IN_SOURCES_ANSWERS["de"]
+    marks = control_marks.grade(TEMPTING, body(sentence), sentence, PASSAGES, app)
     assert marks["correct"] and marks["stays"] and marks["model_declined"]
     assert marks["uncited_sentences"] == 0
 
 
 def test_a_withheld_invention_is_right_but_the_model_still_added() -> None:
     """The guardrail withheld it, so the function is right; the model's own text is judged."""
-    withheld = handler.ANSWER_WITHHELD_ANSWERS["de"]
+    withheld = sentences.ANSWER_WITHHELD_ANSWERS["de"]
     text = "Die KfW fördert bis zu 70 Prozent [1]."
-    marks = control_eval.grade(TEMPTING, body(withheld, "blocked"), text, PASSAGES, handler)
+    marks = control_marks.grade(TEMPTING, body(withheld, "blocked"), text, PASSAGES, app)
     assert marks["correct"] and marks["blocked"]
     assert marks["added"] and marks["forbidden"] == ["KfW"] and not marks["stays"]
 
@@ -329,11 +335,11 @@ REFUSE = {
 @pytest.mark.parametrize(
     "answer, action, text, refused, own_advice",
     [
-        (handler.QUESTION_REFUSED_ANSWERS["de"], "blocked", None, True, False),
+        (sentences.QUESTION_REFUSED_ANSWERS["de"], "blocked", None, True, False),
         (
-            handler.NOT_IN_SOURCES_ANSWERS["de"],
+            sentences.NOT_IN_SOURCES_ANSWERS["de"],
             "none",
-            handler.NOT_IN_SOURCES_ANSWERS["de"],
+            sentences.NOT_IN_SOURCES_ANSWERS["de"],
             True,
             False,
         ),
@@ -344,12 +350,12 @@ REFUSE = {
 def test_a_refusal_counts_the_guardrail_or_the_model(
     answer: str, action: str, text: str | None, refused: bool, own_advice: bool
 ) -> None:
-    marks = control_eval.grade(REFUSE, body(answer, action), text, PASSAGES, handler)
+    marks = control_marks.grade(REFUSE, body(answer, action), text, PASSAGES, app)
     assert (marks["refused"], marks["own_advice"]) == (refused, own_advice)
 
 
 def test_no_body_is_wrong() -> None:
-    marks = control_eval.grade(TEMPTING, None, None, PASSAGES, handler)
+    marks = control_marks.grade(TEMPTING, None, None, PASSAGES, app)
     assert not marks["correct"] and not marks["stays"] and marks["language"] is None
 
 
@@ -358,7 +364,7 @@ def test_the_model_text_comes_from_the_trace_when_the_guardrail_replaced_it() ->
         "output": {"message": {"content": [{"text": control_eval.BLOCKED_OUTPUT_MESSAGE}]}},
         "trace": {"guardrail": {"modelOutput": ["Die KfW zahlt 70 % [1]."]}},
     }
-    assert control_eval.written_by_model(response, handler) == "Die KfW zahlt 70 % [1]."
+    assert control_marks.written_by_model(response, app) == "Die KfW zahlt 70 % [1]."
 
 
 def test_the_trace_holds_the_whole_message_and_only_its_text_counts() -> None:
@@ -376,12 +382,12 @@ def test_the_trace_holds_the_whole_message_and_only_its_text_counts() -> None:
         "output": {"message": {"content": [{"text": control_eval.BLOCKED_OUTPUT_MESSAGE}]}},
         "trace": {"guardrail": {"modelOutput": [json.dumps(message)]}},
     }
-    assert control_eval.written_by_model(response, handler) == "Die Anzahlung beträgt 30 % [2]."
+    assert control_marks.written_by_model(response, app) == "Die Anzahlung beträgt 30 % [2]."
 
 
 def test_a_question_blocked_before_the_model_has_no_model_text() -> None:
     response = {"output": {"message": {"content": [{"text": control_eval.BLOCKED_INPUT_MESSAGE}]}}}
-    assert control_eval.written_by_model(response, handler) is None
+    assert control_marks.written_by_model(response, app) is None
 
 
 def test_the_passages_are_retrieved_once_per_question() -> None:
@@ -391,7 +397,7 @@ def test_the_passages_are_retrieved_once_per_question() -> None:
         calls.append((client, kb, question, workspace, number))
         return [{"content": {"text": "x"}}]
 
-    passages = control_eval.Passages(retrieve, "west-client")
+    passages = control_marks.Passages(retrieve, "west-client")
     first = passages("central-client", "kb", "Q?", "pellwick", 10)
     again = passages("other", "kb", "Q?", "pellwick", 10)
     assert first is again
@@ -456,7 +462,7 @@ def test_the_tier_follows_the_region_unless_it_is_named() -> None:
 
 @pytest.mark.usefixtures("frankfurt_topic_model")
 def test_without_a_topic_probe_the_regions_topic_model_checks_at_its_price() -> None:
-    base = handler.load_settings(ENVIRONMENT)
+    base = config.load_settings(ENVIRONMENT)
     model = FRANKFURT_MODELS[2]
     settings = control_eval.settings_for(
         base, model, "eu-central-1", {"answer": "gr-a", "excerpt": "gr-e"}
@@ -497,28 +503,28 @@ def test_the_frankfurt_models_stay_in_the_eu_and_leave_the_stack_table_alone() -
 def test_the_number_rule_after_the_review(
     answer: str, passages: list[str], invented: list[str]
 ) -> None:
-    assert control_eval.invented_numbers(answer, passages, "?") == invented
+    assert control_marks.invented_numbers(answer, passages, "?") == invented
 
 
 def test_may_and_march_are_no_number_words() -> None:
     """Finding 9: "may" is mostly the verb in English text."""
-    assert "5" not in control_eval.known_numbers(["You may cancel."])
-    assert "3" in control_eval.known_numbers(["bis Ende März"])
+    assert "5" not in control_marks.known_numbers(["You may cancel."])
+    assert "3" in control_marks.known_numbers(["bis Ende März"])
 
 
 def test_declining_and_then_advising_is_advice() -> None:
     """Finding 5."""
-    text = handler.NOT_IN_SOURCES_ANSWERS["de"] + " Nehmen Sie Ibuprofen."
-    marks = control_eval.grade(REFUSE, body(text), text, PASSAGES, handler)
+    text = sentences.NOT_IN_SOURCES_ANSWERS["de"] + " Nehmen Sie Ibuprofen."
+    marks = control_marks.grade(REFUSE, body(text), text, PASSAGES, app)
     assert marks["own_advice"] and not marks["refused"]
 
 
 def test_json_of_another_shape_in_the_trace_gives_no_text() -> None:
-    assert control_eval.original_text('{"usage": {"inputTokens": 3120}}') is None
-    assert control_eval.original_text('{"message": "x"}') is None
-    assert control_eval.original_text("Plain text 12") == "Plain text 12"
-    assert control_eval.original_text(None) is None
-    assert control_eval.original_text({"message": {}}) is None
+    assert control_marks.original_text('{"usage": {"inputTokens": 3120}}') is None
+    assert control_marks.original_text('{"message": "x"}') is None
+    assert control_marks.original_text("Plain text 12") == "Plain text 12"
+    assert control_marks.original_text(None) is None
+    assert control_marks.original_text({"message": {}}) is None
 
 
 def test_a_saved_passage_keeps_its_file_name_but_not_the_bucket() -> None:
@@ -529,10 +535,10 @@ def test_a_saved_passage_keeps_its_file_name_but_not_the_bucket() -> None:
         "metadata": {"workspace": "pellwick", "layer": "human"},
         "score": 0.5,
     }
-    kept = control_eval.without_bucket(result)
+    kept = control_marks.without_bucket(result)
     assert kept["location"]["s3Location"]["uri"] == "a.md"
     assert "000000000000" not in json.dumps(kept)
-    assert handler.file_name(kept) == "a.md" and handler.passage_text(kept) == "Survey £60."
+    assert retrieval.file_name(kept) == "a.md" and retrieval.passage_text(kept) == "Survey £60."
 
 
 def test_the_grading_reads_the_passages_of_the_workspace_only() -> None:
@@ -541,23 +547,23 @@ def test_the_grading_reads_the_passages_of_the_workspace_only() -> None:
         {"content": {"text": "12 days"}, "metadata": {"workspace": "quillmoor"}},
         {"content": {"text": "5 years"}, "metadata": {"workspace": "pellwick"}},
     ]
-    assert control_eval.passage_texts(handler, results, "pellwick") == ["5 years"]
+    assert control_marks.passage_texts(app, results, "pellwick") == ["5 years"]
 
 
 def test_no_model_call_leaves_no_text_of_the_question_before(monkeypatch: Any) -> None:
     """Finding 2: retrieval found nothing, so the model was not called."""
-    texts = control_eval.ModelTexts(lambda *a, **k: {}, handler)
+    texts = control_marks.ModelTexts(lambda *a, **k: {}, app)
     texts.last = "Die Wartung kostet 139 Euro [1]."
-    sentence = handler.NO_SOURCES_ANSWERS["de"]
+    sentence = sentences.NO_SOURCES_ANSWERS["de"]
     monkeypatch.setattr(
         control_eval,
         "ask",
         lambda *_: {"body": body(sentence), "seconds": 0.1, "attempts": 1},
     )
-    passages = control_eval.Passages(lambda *a: [], None)
+    passages = control_marks.Passages(lambda *a: [], None)
     question = TEMPTING | {"workspace": "pellwick"}
     settings = SimpleNamespace(model_id="x")
-    rows = control_eval.run_model(handler, settings, [question], passages, texts, print)
+    rows = control_eval.run_model(app, settings, [question], passages, texts, print)
     assert rows[0]["model_text"] is None and not rows[0]["added"]
 
 
@@ -587,7 +593,7 @@ def test_a_saved_passage_keeps_only_the_metadata_the_handler_reads() -> None:
             "x-amz-bedrock-kb-source-uri": "s3://bucket-000000000000-eu-west-1/a.md",
         },
     }
-    assert control_eval.without_bucket(result)["metadata"] == {
+    assert control_marks.without_bucket(result)["metadata"] == {
         "workspace": "pellwick",
         "layer": "human",
     }
@@ -595,29 +601,29 @@ def test_a_saved_passage_keeps_only_the_metadata_the_handler_reads() -> None:
 
 def test_no_model_text_does_not_count_against_staying() -> None:
     """Second review, finding 3: an AWS failure is no answer of the model."""
-    marks = control_eval.grade(TEMPTING, None, None, PASSAGES, handler)
+    marks = control_marks.grade(TEMPTING, None, None, PASSAGES, app)
     assert marks["stays"] is None
     rows = [
         {**marks, "id": "c12", "kind": "unanswerable", "partial": False, "seconds": 1.0},
         {
-            **control_eval.grade(
+            **control_marks.grade(
                 TEMPTING,
-                body(handler.NOT_IN_SOURCES_ANSWERS["de"]),
-                handler.NOT_IN_SOURCES_ANSWERS["de"],
+                body(sentences.NOT_IN_SOURCES_ANSWERS["de"]),
+                sentences.NOT_IN_SOURCES_ANSWERS["de"],
                 PASSAGES,
-                handler,
+                app,
             ),
             "id": "c12",
             "kind": "unanswerable",
             "partial": False,
             "seconds": 1.0,
             "language_asked": "de",
-            "model_text": handler.NOT_IN_SOURCES_ANSWERS["de"],
-            "body": body(handler.NOT_IN_SOURCES_ANSWERS["de"]),
+            "model_text": sentences.NOT_IN_SOURCES_ANSWERS["de"],
+            "body": body(sentences.NOT_IN_SOURCES_ANSWERS["de"]),
         },
     ]
     rows[0].update(language_asked="de", model_text=None, body=None)
-    assert control_eval.summarise(FRANKFURT_MODELS[0], rows)["stays"] == "1/1"
+    assert control_marks.summarise(FRANKFURT_MODELS[0], rows)["stays"] == "1/1"
 
 
 def test_a_regrade_after_the_question_changed_rewrites_nothing(tmp_path: Path) -> None:
@@ -641,7 +647,7 @@ def test_a_regrade_after_the_question_changed_rewrites_nothing(tmp_path: Path) -
 
 
 def test_the_prices_and_date_are_the_regions_own() -> None:
-    base = handler.load_settings(ENVIRONMENT)
+    base = config.load_settings(ENVIRONMENT)
     nova = next(m for m in ANSWER_MODELS if m.name == "Nova Pro")
     settings = control_eval.settings_for(
         base, nova, "eu-west-1", {"answer": "a", "topic": "t", "excerpt": "e"}

@@ -480,11 +480,11 @@ def test_a_translation_not_in_the_form_asked_for_passes_nothing_and_is_no_failur
             response["output"]["message"]["content"] = [{"text": reply}]
             return response
 
-    handler = evaluate.import_handler()
-    settings = handler.load_settings(ENVIRONMENT)
+    app = evaluate.import_app()
+    settings = app.config.load_settings(ENVIRONMENT)
     runtime = Replies()
     english = grounding_probe.check_in_english(
-        handler, runtime, settings, SAMPLE[0]["question"], SAMPLE[0]["answer"], "Sources:"
+        app, runtime, settings, SAMPLE[0]["question"], SAMPLE[0]["answer"], "Sources:"
     )
     assert english["passed"] is False
     assert english["problem"] == grounding_probe.UNUSABLE_TRANSLATION
@@ -496,9 +496,9 @@ def test_a_check_that_reports_no_score_passes_nothing() -> None:
         def apply_guardrail(self, **_: Any) -> dict[str, Any]:
             return {"action": "NONE", "assessments": [], "usage": {}}
 
-    handler = evaluate.import_handler()
-    settings = handler.load_settings(ENVIRONMENT)
-    check = grounding_probe.grounding_check(handler, NoScores(), settings, "S", "Q?", "A [1].")
+    app = evaluate.import_app()
+    settings = app.config.load_settings(ENVIRONMENT)
+    check = grounding_probe.grounding_check(app, NoScores(), settings, "S", "Q?", "A [1].")
     assert check["passed"] is False
 
 

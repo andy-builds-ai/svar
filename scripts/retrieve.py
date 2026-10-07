@@ -14,7 +14,7 @@ from scripts.aws import (
     read_stack_outputs,
     resolve,
 )
-from scripts.ingest import LAYERS
+from scripts.layout import LAYERS
 
 EXCERPT_CHARACTERS = 160
 

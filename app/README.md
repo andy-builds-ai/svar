@@ -1,7 +1,7 @@
 # app — the answer function
 
-`handler.py` is the Lambda function behind Andur's `/ask` path. It takes a
-question for one workspace, counts it against the budget of the key that
+`handler.py` is the entry of the Lambda function behind Andur's `/ask` path.
+It takes a question for one workspace, counts it against the budget of the key that
 asked, retrieves passages from the knowledge base with a `workspace` filter,
 asks the answering model to answer from those passages only, and returns the
 answer with its sources and the layer of each source.
@@ -24,10 +24,35 @@ answer as before; every response carries the security headers CloudFront's
 policy sets in eu-west-1.
 
 It runs only while a question is in flight; there is nothing to pay while
-nobody asks. `aws.py` holds the AWS clients with their timeouts and retries.
-`plans.py` holds the plans a paying customer's key can carry (*Plans* below).
+nobody asks. Each step of a request has a module of its own, in the order a
+question meets them:
+
+| Module | What it does |
+|---|---|
+| `handler.py` | The entry: one HTTP request in, one response and one log line out |
+| `intake.py` | Reads the method, the body's fields and the key header |
+| `config.py` | Reads and checks the settings from the environment |
+| `keys.py` | Checks the key against Parameter Store, cached per instance |
+| `budget.py` | Counts the question against the key's budget or its plan's quota |
+| `answering.py` | One question start to finish: search, topic checks, model, response |
+| `retrieval.py` | Searches the knowledge base inside one workspace |
+| `topic_check.py` | Checks question and answer for the denied topics |
+| `prompts.py` | The system rules and the message the model reads |
+| `llm.py` | The model call through the answer guardrail, and its response |
+| `guardrails.py` | What the guardrails did, and the masking of the excerpts |
+| `citations.py` | The source numbers an answer cites |
+| `pricing.py` | What one answer cost |
+| `refunds.py` | Gives a question back after an error that bought nothing |
+| `sentences.py` | Every sentence the function says itself, in both languages |
+| `errors.py` | The errors that end a request, each with its HTTP status |
+| `log.py`, `clients.py`, `clocks.py` | The log, the AWS clients, the clocks |
+
+`aws.py` holds the AWS clients' timeouts and retries. `plans.py` holds the
+plans a paying customer's key can carry (*Plans* below); `page.py` serves the
+page where no CloudFront stands in front (above); `topic_model.py` and
+`denied_topics.py` hold the topic model's prompt and the denied topics.
 Lambda packages this folder and imports the modules by their plain names,
-`handler`, `aws` and `plans`; the tests import them the same way
+`handler`, `aws`, `keys` and the rest; the tests import them the same way
 ([tests/conftest.py](../tests/conftest.py)). Nothing else is needed but the
 standard library and the boto3 the Lambda runtime brings.
 
@@ -515,7 +540,7 @@ for them. The page sends the language it is set to, which is the browser's
 until the visitor uses the DE/EN switch ([web/README.md](../web/README.md)).
 
 Every sentence the function says itself comes in both languages, from the
-tables at the top of `app/handler.py`:
+tables in `app/sentences.py`:
 
 - the answer when no passage matched, and the sentence the prompt tells the
   model to give when the sources do not answer;
@@ -555,7 +580,7 @@ other guardrail is refused. Not the deployed version alone, so a deploy that
 makes a new version leaves the role as it is (`docs/decisions.md`,
 05.10.2026).
 
-Three policies, set in `infra/stacks/andur_stack.py`:
+Three policies, set in `infra/stacks/guardrails.py`:
 
 - **Refused topics:** legal, tax and medical advice, and questions about
   public figures or a person's private life. The topic guardrail checks all
@@ -946,7 +971,7 @@ a row there does not synthesise. The guardrail prices are the same as in
 us-east-1. A text unit is up to 1,000 characters of text one policy reads.
 
 There is no variable for the address or the key header: the function reads
-the key from `KEY_HEADER` in `handler.py`, and nothing in it knows what it is
+the key from `KEY_HEADER` in `intake.py`, and nothing in it knows what it is
 reached through.
 
 A model that is only offered through an inference profile, such as the
@@ -963,7 +988,7 @@ the excerpts are tried twice; the model call once, because a converse
 that timed out may already have produced its answer, and a second attempt
 would pay for the input tokens again. The exception is a call AWS documents
 as not run — throttled over a quota, a service unable to handle it, a model
-not ready (`MODEL_REJECTION_CODES` in `handler.py`; an internal error is not
+not ready (`MODEL_REJECTION_CODES` in `llm.py`; an internal error is not
 among them, the model may have run). The handler makes it once more after 2
 seconds, but only up to second 30 of the request (`latest_model_retry_start()`
 in `aws.py`): the pause, a model call that runs into its 3 + 40 seconds and

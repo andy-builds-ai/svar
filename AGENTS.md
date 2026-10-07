@@ -54,8 +54,8 @@ cdk diff     # compares it with the deployed stack; needs an AWS login, changes 
   `python -m scripts.tool_probe` costs fractions of a cent per model. Run
   both only when asked. `python -m scripts.rehearsal` sets up a workspace
   with its key on the deployed stack and runs the measurements above against
-  it, about 0.9 USD (estimated); run it only when asked. `--list` calls
-  nothing.
+  it, 0.70 USD on 07.10.2026 (at most 0.75); run it only when asked.
+  `--list` calls nothing.
 - **Region is `eu-west-1` by default** (`DEFAULT_REGION` in
   `infra/answer_models.py`); `cdk synth -c region=eu-central-1` and each
   script's `--region` pick Frankfurt, whose stack has its own models, checks
@@ -65,7 +65,7 @@ cdk diff     # compares it with the deployed stack; needs an AWS login, changes 
   profiles, never a global one. `python -m scripts.topic_probe --region
   eu-central-1` measures that check, three runs of 319 checks for 0.30 USD
   on 07.10.2026; run it only when asked, and after every change to that
-  prompt or to `check_topics_with_model` in `app/handler.py` ask for it.
+  prompt or to `check_topics_with_model` in `app/topic_check.py` ask for it.
 - **Model IDs and prices live only in `infra/answer_models.py`.** Add a model
   there first; do not copy an ID or a price anywhere else.
 - **No secrets in code, tests, logs or messages:** no API keys, no parameter

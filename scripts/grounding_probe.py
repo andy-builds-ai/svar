@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from infra.answer_models import region_answer_guardrail_uses_profile
-from infra.stacks.andur_stack import (
+from infra.stacks.guardrails import (
     ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
@@ -44,7 +44,7 @@ from infra.stacks.andur_stack import (
 )
 from scripts import topic_probe, utf8_output
 from scripts.aws import REGION, AwsProblem, client, error_code
-from scripts.evaluate import deployed_environment, import_handler
+from scripts.evaluate import deployed_environment, import_app
 
 ANSWERS_FILE = Path(__file__).with_name("grounding-answers.json")
 
@@ -181,7 +181,7 @@ def failed_call(exc: BaseException) -> str | None:
 
 
 def retrieve_sources(
-    handler: Any, agent: Any, settings: Any, answers: Sequence[Mapping[str, Any]]
+    app: Any, agent: Any, settings: Any, answers: Sequence[Mapping[str, Any]]
 ) -> dict[tuple[str, str], str]:
     """The sources text of every question, once per workspace and question, retrieved and
     built the way the function does it."""
@@ -190,20 +190,20 @@ def retrieve_sources(
         key = (answer["workspace"], answer["question"])
         if key in sources:
             continue
-        found = handler.retrieve_passages(
+        found = app.retrieval.retrieve_passages(
             agent, settings.knowledge_base_id, key[1], key[0], settings.number_of_results
         )
-        results, _ = handler.keep_workspace(found, key[0])
+        results, _ = app.retrieval.keep_workspace(found, key[0])
         if not results:
             raise AwsProblem(f"No passages for {key[1]!r} in the workspace {key[0]}")
-        sources[key] = handler.build_sources(results)
+        sources[key] = app.prompts.build_sources(results)
     return sources
 
 
-def units_of(usage: Mapping[str, Any] | None, handler: Any) -> dict[str, int]:
+def units_of(usage: Mapping[str, Any] | None, app: Any) -> dict[str, int]:
     """The priced units of one ApplyGuardrail response's ``usage``, 0 where it names none."""
     usage = usage or {}
-    return {name: int(usage.get(name, 0)) for name in handler.PRICED_UNITS}
+    return {name: int(usage.get(name, 0)) for name in app.pricing.PRICED_UNITS}
 
 
 def added(units: Mapping[str, int] | None, more: Mapping[str, int] | None) -> dict[str, int] | None:
@@ -214,7 +214,7 @@ def added(units: Mapping[str, int] | None, more: Mapping[str, int] | None) -> di
 
 
 def grounding_check(
-    handler: Any, runtime: Any, settings: Any, sources: str, question: str, answer: str
+    app: Any, runtime: Any, settings: Any, sources: str, question: str, answer: str
 ) -> dict[str, Any]:
     """The grounding check of one answer through ApplyGuardrail: the sources, query and
     answer blocks the model call gives the guardrail. A check that reports no score has not
@@ -241,11 +241,11 @@ def grounding_check(
             if check.get("action") == "BLOCKED":
                 blocked.append(kind)
     passed = not blocked and None not in scores.values()
-    return {"passed": passed, **scores, "units": units_of(response.get("usage"), handler)}
+    return {"passed": passed, **scores, "units": units_of(response.get("usage"), app)}
 
 
 def translate_to_english(
-    handler: Any, runtime: Any, settings: Any, question: str, answer: str
+    app: Any, runtime: Any, settings: Any, question: str, answer: str
 ) -> dict[str, Any]:
     """The question and the answer in English: one call of the answer model through the
     guardrail, which reads the topics in it, if it has them, and masks the reply. The call
@@ -258,8 +258,8 @@ def translate_to_english(
                 {"role": "user", "content": [{"text": f"Question: {question}\nAnswer: {answer}"}]}
             ],
             inferenceConfig={
-                "maxTokens": handler.MAX_ANSWER_TOKENS,
-                "temperature": handler.ANSWER_TEMPERATURE,
+                "maxTokens": app.llm.MAX_ANSWER_TOKENS,
+                "temperature": app.llm.ANSWER_TEMPERATURE,
             },
             guardrailConfig={
                 "guardrailIdentifier": settings.guardrail_id,
@@ -268,8 +268,8 @@ def translate_to_english(
             },
         )
     )
-    guardrail = handler.read_guardrail(response)
-    question_part, separator, answer_part = (handler.model_text(response) or "").partition(
+    guardrail = app.guardrails.read_guardrail(response)
+    question_part, separator, answer_part = (app.llm.model_text(response) or "").partition(
         "\nAnswer:"
     )
     usable = (
@@ -284,13 +284,13 @@ def translate_to_english(
     return {
         "question": question_part.removeprefix("Question:").strip() if usable else None,
         "answer": answer_part.strip() if usable else None,
-        "usage": handler.read_usage(response),
+        "usage": app.llm.read_usage(response),
         "units": guardrail["units"],
     }
 
 
 def check_in_english(
-    handler: Any, runtime: Any, settings: Any, question: str, answer: str, sources: str
+    app: Any, runtime: Any, settings: Any, question: str, answer: str, sources: str
 ) -> dict[str, Any]:
     """Whether the English translation of an answer passes the grounding check on the same
     sources, with the tokens and units both calls took. A translation that is not in the form
@@ -302,10 +302,10 @@ def check_in_english(
         "translation": None,
         "problem": None,
         "usage": {"input_tokens": 0, "output_tokens": 0},
-        "units": {name: 0 for name in handler.PRICED_UNITS},
+        "units": {name: 0 for name in app.pricing.PRICED_UNITS},
     }
     try:
-        translation = translate_to_english(handler, runtime, settings, question, answer)
+        translation = translate_to_english(app, runtime, settings, question, answer)
         result.update(
             usage=translation["usage"],
             units=translation["units"],
@@ -315,7 +315,7 @@ def check_in_english(
             result["problem"] = UNUSABLE_TRANSLATION
             return result
         check = grounding_check(
-            handler, runtime, settings, sources, translation["question"], translation["answer"]
+            app, runtime, settings, sources, translation["question"], translation["answer"]
         )
     except Exception as exc:
         problem = failed_call(exc)
@@ -333,13 +333,13 @@ def check_in_english(
 
 
 def measure_one(
-    handler: Any, runtime: Any, settings: Any, answer: Mapping[str, Any], sources: str
+    app: Any, runtime: Any, settings: Any, answer: Mapping[str, Any], sources: str
 ) -> dict[str, Any]:
     """One answer as written, and a German one the check withholds in English too. A failed
     call is named in ``error`` and the answer counted as withheld."""
     try:
         written = grounding_check(
-            handler, runtime, settings, sources, answer["question"], answer["answer"]
+            app, runtime, settings, sources, answer["question"], answer["answer"]
         )
         error = None
     except Exception as exc:
@@ -366,7 +366,7 @@ def measure_one(
     if error is None and not written["passed"] and answer["language"] in ENGLISH_CHECK_LANGUAGES:
         started = time.perf_counter()
         english = check_in_english(
-            handler, runtime, settings, answer["question"], answer["answer"], sources
+            app, runtime, settings, answer["question"], answer["answer"], sources
         )
         row["english"] = {
             "passed": english["passed"],
@@ -381,12 +381,12 @@ def measure_one(
         row["units"] = added(written["units"], english["units"])
         if english["problem"] not in (None, UNUSABLE_TRANSLATION):
             row["error"] = english["problem"]
-    row["cost_usd"] = handler.answer_cost(settings.prices, row["usage"], row["units"])
+    row["cost_usd"] = app.pricing.answer_cost(settings.prices, row["usage"], row["units"])
     return row
 
 
 def measure(
-    handler: Any,
+    app: Any,
     runtime: Any,
     settings: Any,
     answers: Sequence[Mapping[str, Any]],
@@ -398,7 +398,7 @@ def measure(
 
     def one(answer: Mapping[str, Any]) -> dict[str, Any]:
         key = (answer["workspace"], answer["question"])
-        return measure_one(handler, runtime, settings, answer, sources[key])
+        return measure_one(app, runtime, settings, answer, sources[key])
 
     rows = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -559,15 +559,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     answers = load_answers(args.answers)
-    handler = import_handler()
+    app = import_app()
 
     def progress(line: str) -> None:
         print(line, file=sys.stderr)
 
     try:
-        deployed = handler.load_settings(deployed_environment(args.region))
+        deployed = app.config.load_settings(deployed_environment(args.region))
         sources = retrieve_sources(
-            handler, client("bedrock-agent-runtime", args.region), deployed, answers
+            app, client("bedrock-agent-runtime", args.region), deployed, answers
         )
         bedrock = client("bedrock", args.region)
         runtime = client("bedrock-runtime", args.region)
@@ -578,12 +578,12 @@ def main(argv: list[str] | None = None) -> int:
             settings = dataclasses.replace(
                 deployed, guardrail_id=guardrail_id, guardrail_version="DRAFT"
             )
-            rows = measure(handler, runtime, settings, answers, sources, progress, args.workers)
+            rows = measure(app, runtime, settings, answers, sources, progress, args.workers)
         except BaseException:
             topic_probe.delete_reporting(bedrock, guardrail_id, progress, PROBE_NAME)
             raise
         deleted = topic_probe.delete_reporting(bedrock, guardrail_id, progress, PROBE_NAME)
-    except (AwsProblem, handler.HandlerError) as problem:
+    except (AwsProblem, app.errors.HandlerError) as problem:
         print(f"error: {problem}", file=sys.stderr)
         return 2
 

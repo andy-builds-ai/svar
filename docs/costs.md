@@ -1,7 +1,8 @@
 # What it costs
 
 Prices for `eu-west-1` (Ireland), read 28.09.2026 from the AWS Price List API,
-the machine-readable source of the pricing pages, unless dated otherwise.
+the machine-readable source of the pricing pages, unless dated otherwise;
+for `eu-central-1` (Frankfurt) read 06.10.2026 (`infra/answer_models.py`).
 Order of magnitude, not a quote; the cost per question below is measured.
 
 **Idle:** cents per month. S3 Vectors storage is 0.06 USD per GB, the
@@ -34,6 +35,17 @@ Guardrails", read 07.10.2026) and reports 0 tokens for it, in the response
 and in CloudWatch alike (96 calls of Qwen3 235B in eu-central-1, 11 of them
 withheld, 07.10.2026). Since then such an answer carries `cost_usd: null`. Its evaluation run after the switch: 0.0029 USD per answered
 question on average (0.0019–0.0046, 20 answers).
+
+In `eu-central-1` on 07.10.2026, Qwen3 235B with the deployed function's
+settings, the three question sets of `python -m scripts.evaluate`: 0.0023 USD
+per question on average for the English set, 0.0013 for German questions on
+English documents and 0.0021 for German questions on German documents,
+counting the questions with a known cost; 14 of the 88 were withheld by the
+grounding check and carry `cost_usd: null`. Three runs of the topic check by
+gpt-oss-120b, 957 checks, cost 0.30 USD. A rehearsal of a new business with
+all its measurements cost 0.70 USD (at most 0.75), from the cost lines of
+the measurements; see
+[scripts/README.md](../scripts/README.md#rehearsal--a-new-business-set-up-and-measured-step-by-step).
 
 **Ten passages since 28.09.2026** (`NUMBER_OF_RESULTS`, was 6; see
 [decisions](decisions.md)). Nova Pro, the 22 answerable questions, two runs

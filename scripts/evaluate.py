@@ -1,6 +1,6 @@
 """Ask every evaluation question of every model the way the deployed function does.
 
-The questions run through `answer_question` in app/handler.py — retrieval, the
+The questions run through `answer_question` in app/answering.py — retrieval, the
 prompt, `converse` with the guardrail, the excerpt guardrail and the cost line
 — with the deployed function's own settings. Only the model and its token
 prices change per model; the guardrail prices stay the deployed ones. No key
@@ -9,7 +9,9 @@ and no budget are involved, so a run costs model and guardrail calls only.
 
 import argparse
 import dataclasses
+import importlib
 import json
+import pkgutil
 import re
 import statistics
 import sys
@@ -17,12 +19,13 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from infra.answer_models import ANSWER_MODELS, PRICE_DATE, AnswerModel, region_models
 from scripts import utf8_output
 from scripts.aws import REGION, AwsProblem, client, explained
-from scripts.ingest import SECTION_SEPARATOR
+from scripts.layout import document_of
 
 #: app/ holds the handler under the plain names Lambda imports, `handler` and `aws`.
 APP_FOLDER = Path(__file__).resolve().parents[1] / "app"
@@ -34,8 +37,8 @@ FUNCTION_NAME = "andur-answer"
 
 KINDS = ("answer", "refuse", "unanswerable")
 
-#: The handler's `LANGUAGES`. A question asks in one of them, English unless it says
-#: otherwise, the way the page sends its language with every question.
+#: The function's `LANGUAGES` (app/sentences.py). A question asks in one of them, English
+#: unless it says otherwise, the way the page sends its language with every question.
 LANGUAGES = ("en", "de")
 
 #: Only a model in the region or an EU profile keeps the data in the EU.
@@ -102,26 +105,24 @@ def plain(text: str) -> str:
     return " ".join(text.split()).lower()
 
 
-def document_of(file_name: str) -> str:
-    """The document a source file comes from: an uploaded section names its document first."""
-    return file_name.split(SECTION_SEPARATOR, 1)[0].removesuffix(".md")
-
-
-def declined(body: Mapping[str, Any], handler: Any) -> bool:
+def declined(body: Mapping[str, Any], app: Any) -> bool:
     """True when Andur gave no answer: the guardrail blocked, or no source carried one, in
     either language."""
     if body["guardrail"]["action"] == "blocked":
         return True
-    sentences = {*handler.NOT_IN_SOURCES_ANSWERS.values(), *handler.NO_SOURCES_ANSWERS.values()}
+    sentences = {
+        *app.sentences.NOT_IN_SOURCES_ANSWERS.values(),
+        *app.sentences.NO_SOURCES_ANSWERS.values(),
+    }
     return body["answer"].strip() in sentences
 
 
-def score(question: Mapping[str, Any], body: Mapping[str, Any], handler: Any) -> dict[str, bool]:
+def score(question: Mapping[str, Any], body: Mapping[str, Any], app: Any) -> dict[str, bool]:
     """Whether the answer is right, and — for an answer question — whether it cites one of
     the documents that carry the answer."""
     if question["kind"] != "answer":
-        return {"correct": declined(body, handler), "cites_document": False}
-    correct = not declined(body, handler) and all(
+        return {"correct": declined(body, app), "cites_document": False}
+    correct = not declined(body, app) and all(
         any(contains(body["answer"], alternative) for alternative in group)
         for group in question["facts"]
     )
@@ -142,7 +143,7 @@ def settings_for(base: Any, model: AnswerModel, price_date: str = PRICE_DATE) ->
     return dataclasses.replace(base, model_id=model.model_id, prices=prices, price_date=price_date)
 
 
-def ask(handler: Any, settings: Any, question: Mapping[str, Any]) -> dict[str, Any]:
+def ask(app: Any, settings: Any, question: Mapping[str, Any]) -> dict[str, Any]:
     """One question through the handler's path, asked again while it comes back busy.
 
     `rejected` counts every model call AWS turned away, the function's second
@@ -150,14 +151,14 @@ def ask(handler: Any, settings: Any, question: Mapping[str, Any]) -> dict[str, A
     """
     rejected, first_call_rejected = 0, None
     for attempt, pause in enumerate((*RETRY_PAUSES, None), start=1):
-        record = handler.RequestRecord(language=question.get("language", "en"))
+        record = app.log.RequestRecord(language=question.get("language", "en"))
         started = time.perf_counter()
         error = None
         try:
-            body = handler.answer_question(
+            body = app.answering.answer_question(
                 settings, question["workspace"], question["question"], record
             )
-        except handler.HandlerError as failed:
+        except app.errors.HandlerError as failed:
             error = failed
             outcome = {"error": str(failed)}
         else:
@@ -171,20 +172,20 @@ def ask(handler: Any, settings: Any, question: Mapping[str, Any]) -> dict[str, A
             first_call_rejected=first_call_rejected,
             attempts=attempt,
         )
-        if error is not None and turned_away(handler, error) and pause is not None:
+        if error is not None and turned_away(app, error) and pause is not None:
             time.sleep(pause)
             continue
         return outcome
     raise AssertionError("unreachable")
 
 
-def turned_away(handler: Any, error: BaseException) -> bool:
+def turned_away(app: Any, error: BaseException) -> bool:
     """True when the function failed because AWS turned the model call away."""
-    return handler.aws.error_code(error.__cause__) in handler.MODEL_REJECTION_CODES
+    return app.aws.error_code(error.__cause__) in app.llm.MODEL_REJECTION_CODES
 
 
 def run_model(
-    handler: Any,
+    app: Any,
     base: Any,
     model: AnswerModel,
     questions: Sequence[Mapping[str, Any]],
@@ -195,11 +196,9 @@ def run_model(
     settings = settings_for(base, model, base.price_date)
     results = []
     for question in questions:
-        outcome = ask(handler, settings, question)
+        outcome = ask(app, settings, question)
         body = outcome.get("body")
-        marks = (
-            score(question, body, handler) if body else {"correct": False, "cites_document": False}
-        )
+        marks = score(question, body, app) if body else {"correct": False, "cites_document": False}
         results.append({"id": question["id"], "kind": question["kind"], **outcome, **marks})
         progress(f"{model.name} {question['id']}: {'right' if marks['correct'] else 'wrong'}")
     return results
@@ -264,13 +263,13 @@ def table(summaries: Sequence[Mapping[str, Any]]) -> list[str]:
     return lines
 
 
-def import_handler() -> Any:
-    """app/handler.py under the name Lambda gives it."""
+def import_app() -> SimpleNamespace:
+    """Every module of the answer function in app/, under the name Lambda gives it, as one
+    namespace: ``app.answering.answer_question`` is the function's own path for a question."""
     if str(APP_FOLDER) not in sys.path:
         sys.path.insert(0, str(APP_FOLDER))
-    import handler
-
-    return handler
+    names = [module.name for module in pkgutil.iter_modules([str(APP_FOLDER)])]
+    return SimpleNamespace(**{name: importlib.import_module(name) for name in names})
 
 
 def deployed_environment(region: str) -> dict[str, str]:
@@ -321,10 +320,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: these would leave the EU: {outside}", file=sys.stderr)
         return 2
     questions = load_questions(args.questions)
-    handler = import_handler()
+    app = import_app()
     try:
-        base = handler.load_settings(deployed_environment(args.region))
-    except (AwsProblem, handler.ConfigurationError) as problem:
+        base = app.config.load_settings(deployed_environment(args.region))
+    except (AwsProblem, app.errors.ConfigurationError) as problem:
         print(f"error: {problem}", file=sys.stderr)
         return 2
     base = dataclasses.replace(base, price_date=regional.price_date)
@@ -332,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
     runs, summaries = {}, []
     for model in models:
         runs[model.name] = run_model(
-            handler, base, model, questions, lambda line: print(line, file=sys.stderr)
+            app, base, model, questions, lambda line: print(line, file=sys.stderr)
         )
         summaries.append(summarise(model, runs[model.name]))
         if args.out:

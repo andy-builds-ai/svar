@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 
 from app.page import SECURITY_HEADERS
-from scripts import rehearsal
-from scripts.rehearsal import Context, Result, Runner, Step, StepFailed
+from scripts import layout, rehearsal, rehearsal_checks, rehearsal_runner
+from scripts.rehearsal_runner import Context, Result, Runner, Step, StepFailed
 
 REGION = "eu-central-1"
 
@@ -97,7 +97,7 @@ def test_the_key_is_never_captured_and_the_plan_reaches_it(plan: list[Step]) -> 
     assert steps["key"].command is not None
     assert steps["key"].command[-2:] == ("--plan", "betrieb")
     assert [s.id for s in plan if s.secret_stdout] == ["key"]
-    assert steps["key-apart"].environment is rehearsal.workspace_key_environment
+    assert steps["key-apart"].environment is rehearsal_checks.workspace_key_environment
     assert steps["key-apart"].exit_code == 1
 
 
@@ -183,7 +183,7 @@ def test_ctrl_c_still_leaves_a_summary_and_no_account_id(
 
 def test_an_out_dir_in_the_repository_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
     argv = ["--workspace", "k", "--source", "x", "--question", "q"]
-    assert rehearsal.main([*argv, "--out-dir", str(rehearsal.REPOSITORY / "out")]) == 2
+    assert rehearsal.main([*argv, "--out-dir", str(rehearsal_runner.REPOSITORY / "out")]) == 2
     assert "outside the repository" in capsys.readouterr().err
 
 
@@ -191,14 +191,14 @@ def test_an_out_dir_in_the_repository_is_refused(capsys: pytest.CaptureFixture[s
 
 
 def test_from_and_only_keep_the_identity_first(plan: list[Step]) -> None:
-    started = rehearsal.select(plan, "topics", None)
+    started = rehearsal_runner.select(plan, "topics", None)
     assert [s.id for _, s in started[:3]] == ["identity", "topics", "tools"]
     assert started[1][0] == [s.id for s in plan].index("topics") + 1
-    only = rehearsal.select(plan, None, ["page", "residency"])
+    only = rehearsal_runner.select(plan, None, ["page", "residency"])
     assert [s.id for _, s in only] == ["identity", "page", "residency"]
-    assert [s.id for _, s in rehearsal.select(plan, None, None)] == [s.id for s in plan]
+    assert [s.id for _, s in rehearsal_runner.select(plan, None, None)] == [s.id for s in plan]
     with pytest.raises(ValueError, match="no step 'nope'"):
-        rehearsal.select(plan, "nope", None)
+        rehearsal_runner.select(plan, "nope", None)
 
 
 # --- Running ----------------------------------------------------------------------------
@@ -305,11 +305,14 @@ def test_a_key_in_the_shell_is_not_handed_on(
     monkeypatch.setenv("ANDUR_API_KEY", "from-the-shell")
     code = "import os; print(os.environ.get('ANDUR_API_KEY', 'none'))"
     log = tmp_path / "env.log"
-    assert rehearsal.run_command((sys.executable, "-c", code), log, False, {})[1].strip() == "none"
-    given = {"ANDUR_API_KEY": "the-step's"}
-    assert rehearsal.run_command((sys.executable, "-c", code), log, False, given)[1].strip() == (
-        "the-step's"
+    assert (
+        rehearsal_runner.run_command((sys.executable, "-c", code), log, False, {})[1].strip()
+        == "none"
     )
+    given = {"ANDUR_API_KEY": "the-step's"}
+    assert rehearsal_runner.run_command((sys.executable, "-c", code), log, False, given)[
+        1
+    ].strip() == ("the-step's")
 
 
 def test_steps_by_hand_are_left_open_or_timed_while_waiting(tmp_path: Path) -> None:
@@ -362,11 +365,11 @@ def test_a_secret_stdout_never_reaches_the_log(tmp_path: Path) -> None:
     # The key is put together at run time, so the logged command line does not hold it.
     code = "import sys; print('THE' + '-KEY'); print('stored', file=sys.stderr)"
     log = tmp_path / "key.log"
-    returned, output = rehearsal.run_command((sys.executable, "-c", code), log, True, {})
+    returned, output = rehearsal_runner.run_command((sys.executable, "-c", code), log, True, {})
     assert returned == 0
     assert "THE-KEY" not in output and "THE-KEY" not in log.read_text(encoding="utf-8")
     assert "stored" in log.read_text(encoding="utf-8")
-    _, shown = rehearsal.run_command((sys.executable, "-c", code), log, False, {})
+    _, shown = rehearsal_runner.run_command((sys.executable, "-c", code), log, False, {})
     assert "THE-KEY" in shown
 
 
@@ -376,7 +379,7 @@ def test_the_summary_adds_up_the_phases(tmp_path: Path) -> None:
         Result(2, "b", "setup", "B", "manual", "open", "t", 0.0, "left open"),
         Result(3, "c", "setup", "C", "command", "passed", "t", 75.0, "x | y", group="g"),
     ]
-    lines = rehearsal.summary_lines(results, 90.0)
+    lines = rehearsal_runner.summary_lines(results, 90.0)
     assert "| 3 | c | command | passed | 1 min 15 s (at once) | x \\| y |" in lines
     assert "| setup | 2 | 1 min 15 s |" in lines
     assert "Wall clock of the run: 1 min 30 s." in lines
@@ -387,9 +390,9 @@ def test_the_account_id_is_replaced_in_every_file(tmp_path: Path) -> None:
     (tmp_path / "a.log").write_text("arn:aws:iam::123456789012:role/x", encoding="utf-8")
     (tmp_path / "b.json").write_text("{}", encoding="utf-8")
     (tmp_path / "c.bin").write_bytes(b"\xff\xfe\x00123456789012")
-    assert rehearsal.scrub(tmp_path, "123456789012") == 1
+    assert rehearsal_runner.scrub(tmp_path, "123456789012") == 1
     assert (tmp_path / "a.log").read_text(encoding="utf-8") == "arn:aws:iam::<account>:role/x"
-    assert rehearsal.scrub(tmp_path, None) == 0
+    assert rehearsal_runner.scrub(tmp_path, None) == 0
 
 
 # --- The checks -------------------------------------------------------------------------
@@ -418,14 +421,14 @@ def test_the_identity_names_the_role_and_keeps_the_account(tmp_path: Path) -> No
     arn = "arn:aws:sts::123456789012:assumed-role/OrganizationAccountAccessRole/botocore-1"
     sts = Fake(get_caller_identity={"Account": "123456789012", "Arn": arn})
     ctx = context(tmp_path, {"sts": sts})
-    assert rehearsal.check_identity(ctx) == "signed in as OrganizationAccountAccessRole"
+    assert rehearsal_checks.check_identity(ctx) == "signed in as OrganizationAccountAccessRole"
     assert ctx.account == "123456789012"
     ctx.expect_role = "OrganizationAccountAccessRole"
-    rehearsal.check_identity(ctx)
+    rehearsal_checks.check_identity(ctx)
     user = "arn:aws:iam::123456789012:user/andur-dev"
     ctx.clients = lambda s: Fake(get_caller_identity={"Account": "1", "Arn": user})
     with pytest.raises(StepFailed, match="signed in as user/andur-dev"):
-        rehearsal.check_identity(ctx)
+        rehearsal_checks.check_identity(ctx)
 
 
 def stack(status: str, *outputs: str) -> dict[str, Any]:
@@ -444,17 +447,17 @@ def test_the_stack_must_be_finished_and_have_its_outputs(tmp_path: Path) -> None
         tmp_path,
         {
             "cloudformation": Fake(
-                describe_stacks=stack("CREATE_COMPLETE", *rehearsal.NEEDED_OUTPUTS)
+                describe_stacks=stack("CREATE_COMPLETE", *rehearsal_checks.NEEDED_OUTPUTS)
             )
         },
     )
-    assert rehearsal.check_stack(ctx) == f"AndurStack CREATE_COMPLETE in {REGION}"
+    assert rehearsal_checks.check_stack(ctx) == f"AndurStack CREATE_COMPLETE in {REGION}"
     ctx.clients = lambda s: Fake(describe_stacks=stack("UPDATE_ROLLBACK_COMPLETE", "WebUrl"))
     with pytest.raises(StepFailed, match="not deployed and finished"):
-        rehearsal.check_stack(ctx)
+        rehearsal_checks.check_stack(ctx)
     ctx.clients = lambda s: Fake(describe_stacks=stack("UPDATE_COMPLETE", "WebUrl"))
     with pytest.raises(StepFailed, match="no output ApiKeyParameterPath"):
-        rehearsal.check_stack(ctx)
+        rehearsal_checks.check_stack(ctx)
 
 
 T0 = datetime(2026, 10, 7, 5, 0, tzinfo=UTC)
@@ -478,11 +481,16 @@ def test_the_deploy_is_timed_from_the_stacks_own_events() -> None:
         event("AndurStack", "CREATE_IN_PROGRESS", 0),
     ]
     later = T0 + timedelta(minutes=30)
-    assert rehearsal.last_deploy(newest_first, "AndurStack") == ("update", 300.0, later)
+    assert rehearsal_checks.last_deploy(newest_first, "AndurStack") == ("update", 300.0, later)
     created = T0 + timedelta(minutes=10)
-    assert rehearsal.last_deploy(newest_first[4:], "AndurStack") == ("create", 600.0, created)
+    assert rehearsal_checks.last_deploy(newest_first[4:], "AndurStack") == (
+        "create",
+        600.0,
+        created,
+    )
     assert (
-        rehearsal.last_deploy([event("AndurStack", "CREATE_IN_PROGRESS", 0)], "AndurStack") is None
+        rehearsal_checks.last_deploy([event("AndurStack", "CREATE_IN_PROGRESS", 0)], "AndurStack")
+        is None
     )
 
 
@@ -501,7 +509,7 @@ def test_the_deploy_time_reads_both_stacks(tmp_path: Path) -> None:
     cloudformation = Fake(get_paginator=lambda name: Paginator())
     ctx = context(tmp_path, {"cloudformation": cloudformation})
     finished = (T0 + timedelta(minutes=2)).astimezone().strftime("%d.%m.%Y %H:%M")
-    assert rehearsal.check_deploy_time(ctx) == (
+    assert rehearsal_checks.check_deploy_time(ctx) == (
         f"CDKToolkit create 2 min 00 s, finished {finished}; "
         f"AndurStack create 2 min 00 s, finished {finished}"
     )
@@ -519,13 +527,13 @@ RANGES = {
 def test_every_address_must_lie_in_the_region_only(tmp_path: Path) -> None:
     ctx = context(tmp_path)
     good = ["18.192.39.89", "2a05:d014:e7d:8601::1"]
-    summary = rehearsal.check_address_region(ctx, lambda host: good, lambda: RANGES)
+    summary = rehearsal_checks.check_address_region(ctx, lambda host: good, lambda: RANGES)
     assert summary == f"2 address(es), each in {REGION} only"
     for addresses in (["18.192.39.89", "52.95.1.1"], ["8.8.8.8"]):
         with pytest.raises(StepFailed, match="not only in"):
-            rehearsal.check_address_region(ctx, lambda host, a=addresses: a, lambda: RANGES)
+            rehearsal_checks.check_address_region(ctx, lambda host, a=addresses: a, lambda: RANGES)
     with pytest.raises(StepFailed, match="resolves to no address"):
-        rehearsal.check_address_region(ctx, lambda host: [], lambda: RANGES)
+        rehearsal_checks.check_address_region(ctx, lambda host: [], lambda: RANGES)
 
 
 def sender(
@@ -565,10 +573,10 @@ TWO = ["18.192.39.89", "2a05:d014::1"]
 
 def test_https_only_passes_when_port_80_is_closed_and_https_holds(tmp_path: Path) -> None:
     send = sender(TimeoutError("timed out"), PAGE, (401, dict(SECURITY_HEADERS)))
-    summary = rehearsal.check_https_only(context(tmp_path), send, lambda host: TWO)
+    summary = rehearsal_checks.check_https_only(context(tmp_path), send, lambda host: TWO)
     assert summary == (
-        "http: 2 of 2 address(es) without a connection; "
-        "https: page 200, no key 401, security headers on both"
+        "http: 2 of 2 address(es) without a connection (2 timed out, which a block on this side "
+        "would look like too); https: page 200, no key 401, security headers on both"
     )
     plain = sorted(c for c in send.calls if c[0] == "http")
     assert plain == [("http", HOST, "GET", "/", None, a) for a in TWO]
@@ -578,20 +586,24 @@ def test_https_only_passes_when_port_80_is_closed_and_https_holds(tmp_path: Path
     ]
     mixed = {TWO[0]: (308, {"Location": "https://abc/"}, b""), TWO[1]: ConnectionRefusedError()}
     redirect = sender(mixed, PAGE, (401, dict(SECURITY_HEADERS)))
-    summary = rehearsal.check_https_only(context(tmp_path), redirect, lambda host: TWO)
+    summary = rehearsal_checks.check_https_only(context(tmp_path), redirect, lambda host: TWO)
     assert summary.startswith("http: 1 of 2 address(es) without a connection, sent on: 308 to")
+    refused = sender(ConnectionRefusedError(), PAGE, (401, dict(SECURITY_HEADERS)))
+    summary = rehearsal_checks.check_https_only(context(tmp_path), refused, lambda host: TWO)
+    assert summary.startswith("http: 2 of 2 address(es) without a connection; https:")
 
 
 def test_an_address_without_a_route_from_here_is_named_as_not_checked(tmp_path: Path) -> None:
     unreachable = {TWO[0]: TimeoutError(), TWO[1]: OSError(10051, "network unreachable")}
     send = sender(unreachable, PAGE, (401, dict(SECURITY_HEADERS)))
-    summary = rehearsal.check_https_only(context(tmp_path), send, lambda host: TWO)
+    summary = rehearsal_checks.check_https_only(context(tmp_path), send, lambda host: TWO)
     assert summary.startswith(
-        "http: 1 of 2 address(es) without a connection, 1 not checked (no route from here);"
+        "http: 1 of 2 address(es) without a connection (1 timed out, which a block on this side "
+        "would look like too), 1 not checked (no route from here);"
     )
     garbled = {TWO[0]: TimeoutError(), TWO[1]: http.client.BadStatusLine("SSH-2.0")}
     with pytest.raises(StepFailed, match="answers, not as HTTP"):
-        rehearsal.check_https_only(
+        rehearsal_checks.check_https_only(
             context(tmp_path), sender(garbled, PAGE, (401, {})), lambda h: TWO
         )
 
@@ -600,9 +612,9 @@ def test_one_open_address_on_port_80_fails(tmp_path: Path) -> None:
     mixed = {TWO[0]: OSError(), TWO[1]: (200, {}, b"<html>")}
     send = sender(mixed, PAGE, (401, dict(SECURITY_HEADERS)))
     with pytest.raises(StepFailed, match="plain http on 2a05:d014::1 answers 200"):
-        rehearsal.check_https_only(context(tmp_path), send, lambda host: TWO)
+        rehearsal_checks.check_https_only(context(tmp_path), send, lambda host: TWO)
     with pytest.raises(StepFailed, match="resolves to no address"):
-        rehearsal.check_https_only(context(tmp_path), send, lambda host: [])
+        rehearsal_checks.check_https_only(context(tmp_path), send, lambda host: [])
 
 
 @pytest.mark.parametrize(
@@ -621,7 +633,7 @@ def test_https_only_fails_on_every_gap(
 ) -> None:
     with pytest.raises(StepFailed, match=message):
         send = sender(plain, page, (ask[0], dict(ask[1])))
-        rehearsal.check_https_only(context(tmp_path), send, lambda host: TWO)
+        rehearsal_checks.check_https_only(context(tmp_path), send, lambda host: TWO)
 
 
 def test_a_header_with_another_value_counts_as_missing() -> None:
@@ -629,13 +641,13 @@ def test_a_header_with_another_value_counts_as_missing() -> None:
         **{k.lower(): v for k, v in SECURITY_HEADERS.items()},
         "x-frame-options": "SAMEORIGIN",
     }
-    assert rehearsal.missing_headers(headers) == ["X-Frame-Options"]
+    assert rehearsal_checks.missing_headers(headers) == ["X-Frame-Options"]
 
 
 def test_the_key_for_another_workspace_comes_from_parameter_store(tmp_path: Path) -> None:
     ssm = Fake(get_parameter={"Parameter": {"Value": "k3y"}})
     ctx = context(tmp_path, {"ssm": ssm}, ApiKeyParameterPath="/andur/api-keys")
-    assert rehearsal.workspace_key_environment(ctx) == {"ANDUR_API_KEY": "k3y"}
+    assert rehearsal_checks.workspace_key_environment(ctx) == {"ANDUR_API_KEY": "k3y"}
     assert ssm.calls == [
         ("get_parameter", {"Name": "/andur/api-keys/kalvenstett", "WithDecryption": True})
     ]
@@ -695,8 +707,33 @@ def test_the_new_documents_are_named_from_the_source(tmp_path: Path) -> None:
     assert rehearsal.document_names(tmp_path, "kalvenstett") == {"preise", "liste", "notes-4.1"}
     assert rehearsal.document_names(tmp_path, "nobody") == frozenset()
     # A section names its document before "--"; a file uploaded whole keeps its suffix.
-    assert rehearsal.document_of("notes-4.1--02-changes.md") == "notes-4.1"
-    assert rehearsal.document_of("liste.pdf") == "liste"
+    assert layout.document_of("notes-4.1--02-changes.md") == "notes-4.1"
+    assert layout.document_of("liste.pdf") == "liste"
+
+
+def test_a_document_name_with_spaces_or_its_own_dashes_is_read_whole() -> None:
+    # The name before a section's number and slug, not before the first "--".
+    assert layout.document_of("preise und zahlung--02-skonto.md") == "preise und zahlung"
+    assert layout.document_of("a--b--03-x.md") == "a--b"
+    # A file uploaded whole has no section part: its "--" belongs to its name.
+    assert layout.document_of("notes--draft.pdf") == "notes--draft"
+    # Decomposed umlauts, as a Mac may save them, read like the composed keys ingest writes.
+    assert layout.document_of("Prëise--01-x.md") == "Prëise"
+
+
+@pytest.mark.parametrize(
+    "file", ["preise und zahlung--01-skonto.md", "preise%20und%20zahlung--01-skonto.md"]
+)
+def test_a_new_document_with_spaces_in_its_name_is_found_in_another_workspace(
+    tmp_path: Path, file: str
+) -> None:
+    """Whether Bedrock gives the space as it is or as %20, the misfiled section is found; before,
+    the line did not match, fell out, and the step passed on the other hit alone."""
+    ctx = context(tmp_path)
+    ctx.documents = frozenset({"preise und zahlung"})
+    misfiled = OTHER.replace("faq--03-projects.md", file)
+    with pytest.raises(StepFailed, match="show up in quillmoor"):
+        rehearsal.no_hits_of_workspace(misfiled, ctx)
 
 
 def test_the_first_answer_must_hold_the_fact(tmp_path: Path) -> None:
@@ -785,7 +822,8 @@ OUTPUTS = {"DocumentsBucketName": "d", "KnowledgeBaseId": "k", "BudgetTableName"
 def test_residency_names_every_place_and_writes_its_table(tmp_path: Path) -> None:
     ctx = context(tmp_path, residency_clients(), **OUTPUTS)
     assert (
-        rehearsal.check_residency(ctx) == f"11 places, each in {REGION}; no log of the model calls"
+        rehearsal_checks.check_residency(ctx)
+        == f"11 places, each in {REGION}; no log of the model calls"
     )
     table = (tmp_path / "residency.md").read_text(encoding="utf-8")
     for line in (
@@ -815,7 +853,7 @@ def test_residency_fails_on_anything_that_leaves_the_region(
     tmp_path: Path, clients: dict[str, Any], message: str
 ) -> None:
     with pytest.raises(StepFailed, match=message):
-        rehearsal.check_residency(context(tmp_path, clients, **OUTPUTS))
+        rehearsal_checks.check_residency(context(tmp_path, clients, **OUTPUTS))
 
 
 def test_the_function_log_is_counted_and_a_crash_fails(tmp_path: Path) -> None:
@@ -826,7 +864,7 @@ def test_the_function_log_is_counted_and_a_crash_fails(tmp_path: Path) -> None:
         '[INFO]\t2026-10-07T05:00:02Z\t3\t{"event": "answered", "status": 200}',
         '[INFO]\t2026-10-07T05:00:03Z\t4\t{"event": broken',
     ]
-    assert rehearsal.event_counts(lines) == {"answered": 2, "refused": 1}
+    assert rehearsal_checks.event_counts(lines) == {"answered": 2, "refused": 1}
 
     class Paginator:
         def __init__(self, messages: list[str]) -> None:
@@ -836,14 +874,14 @@ def test_the_function_log_is_counted_and_a_crash_fails(tmp_path: Path) -> None:
             return [{"events": [{"message": m} for m in self.messages]}]
 
     ctx = context(tmp_path, {"logs": Fake(get_paginator=lambda name: Paginator(lines))})
-    assert rehearsal.check_function_log(ctx) == "answered 2, refused 1"
+    assert rehearsal_checks.check_function_log(ctx) == "answered 2, refused 1"
     assert '"answered": 2' in (tmp_path / "function-log.json").read_text(encoding="utf-8")
     crashed = [*lines, '[ERROR]\t...\t{"event": "crashed", "status": 500}']
     ctx.clients = lambda s: Fake(get_paginator=lambda name: Paginator(crashed))
     with pytest.raises(StepFailed, match="ended badly: {'crashed': 1}"):
-        rehearsal.check_function_log(ctx)
+        rehearsal_checks.check_function_log(ctx)
     # A timeout is Lambda's own line; the handler never gets to write one.
     timed_out = [*lines, "2026-10-07T05:03:15Z 5 Task timed out after 195.00 seconds"]
     ctx.clients = lambda s: Fake(get_paginator=lambda name: Paginator(timed_out))
     with pytest.raises(StepFailed, match="'timed-out': 1"):
-        rehearsal.check_function_log(ctx)
+        rehearsal_checks.check_function_log(ctx)

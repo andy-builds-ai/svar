@@ -3,12 +3,15 @@
 from types import SimpleNamespace
 from typing import Any
 
-import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py)
+import clients
 import pytest
 
-from scripts import topic_model_probe, topic_probe
+from scripts import evaluate, topic_model_probe, topic_probe
 from tests.test_handler import client_error
 from tests.test_topic_model import verdict_response
+
+#: The answer function's modules, as the scripts take them (`evaluate.import_app`).
+app = evaluate.import_app()
 
 SETTINGS = SimpleNamespace(topic_model_id="openai.gpt-oss-20b-1:0", region="eu-central-1")
 
@@ -61,7 +64,7 @@ def test_a_failed_or_unreadable_check_counts_as_blocked_and_is_listed() -> None:
         }
     )
     rows = topic_model_probe.measure(
-        handler,
+        app,
         runtime,
         SETTINGS,
         [
@@ -101,7 +104,7 @@ def test_a_throttled_check_is_asked_again_and_not_counted_as_a_verdict() -> None
     )
     waits: list[float] = []
     result = topic_model_probe.check(
-        handler,
+        app,
         runtime,
         SETTINGS,
         "INPUT",
@@ -185,7 +188,7 @@ def test_topic_model_without_a_price_in_the_region_stops_before_any_call(
     def no_call(service: str, region: str) -> None:
         raise AssertionError(f"{service} was called in {region}")
 
-    monkeypatch.setattr(handler, "client", no_call)
+    monkeypatch.setattr(clients, "client", no_call)
     code = topic_probe.main(["--region", "eu-west-1", "--topic-model", "openai.gpt-oss-120b-1:0"])
     assert code == 2
     assert "has no price for eu-west-1" in capsys.readouterr().err
@@ -206,5 +209,5 @@ def test_a_run_with_a_failed_check_does_not_pass(
         return [row]
 
     monkeypatch.setattr(topic_model_probe, "measure", measure)
-    monkeypatch.setattr(handler, "client", lambda service, region: None)
+    monkeypatch.setattr(clients, "client", lambda service, region: None)
     assert topic_probe.main(["--region", "eu-central-1"]) == code

@@ -6,8 +6,12 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
-import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py)
+import clients
+import config
+import errors
 import pytest
+import sentences
+import topic_check
 import topic_model
 from denied_topics import DENIED_TOPICS
 
@@ -55,7 +59,7 @@ class FakeTopicModel:
         if self.error:
             raise self.error
         text = kwargs["messages"][0]["content"][0]["text"]
-        on_question = text.startswith("Text:\n" + handler.QUESTION_FRAME)
+        on_question = text.startswith("Text:\n" + topic_check.QUESTION_FRAME)
         reply = self.question_reply if on_question else self.answer_reply
         if isinstance(reply, list):
             reply = reply.pop(0)
@@ -148,7 +152,7 @@ def test_the_model_is_asked_at_temperature_zero_with_the_text_after_its_frame(
 
 
 def test_the_topic_model_and_its_prices_come_from_the_environment() -> None:
-    settings = handler.load_settings(MODEL_ENVIRONMENT)
+    settings = config.load_settings(MODEL_ENVIRONMENT)
     assert settings.topic_model_id == "openai.gpt-oss-20b-1:0"
     assert (settings.topic_guardrail_id, settings.topic_guardrail_version) == (None, None)
     assert settings.prices.topic_model_input_tokens == Decimal("0.00009")
@@ -156,8 +160,8 @@ def test_the_topic_model_and_its_prices_come_from_the_environment() -> None:
 
 
 def test_a_topic_guardrail_beside_the_topic_model_is_refused() -> None:
-    with pytest.raises(handler.ConfigurationError, match="TOPIC_GUARDRAIL_ID"):
-        handler.load_settings({**MODEL_ENVIRONMENT, "TOPIC_GUARDRAIL_ID": "gr-topics"})
+    with pytest.raises(errors.ConfigurationError, match="TOPIC_GUARDRAIL_ID"):
+        config.load_settings({**MODEL_ENVIRONMENT, "TOPIC_GUARDRAIL_ID": "gr-topics"})
 
 
 @pytest.mark.parametrize(
@@ -165,16 +169,16 @@ def test_a_topic_guardrail_beside_the_topic_model_is_refused() -> None:
     ["PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS", "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS"],
 )
 def test_the_topic_models_prices_are_required_and_checked(variable: str) -> None:
-    with pytest.raises(handler.ConfigurationError, match=variable):
-        handler.load_settings({**MODEL_ENVIRONMENT, variable: " "})
-    with pytest.raises(handler.ConfigurationError, match=variable):
-        handler.load_settings({**MODEL_ENVIRONMENT, variable: "cheap"})
+    with pytest.raises(errors.ConfigurationError, match=variable):
+        config.load_settings({**MODEL_ENVIRONMENT, variable: " "})
+    with pytest.raises(errors.ConfigurationError, match=variable):
+        config.load_settings({**MODEL_ENVIRONMENT, variable: "cheap"})
 
 
 def test_without_the_topic_model_the_topic_guardrail_is_required() -> None:
     environment = {k: v for k, v in MODEL_ENVIRONMENT.items() if k != "TOPIC_MODEL_ID"}
-    with pytest.raises(handler.ConfigurationError, match="TOPIC_GUARDRAIL_ID"):
-        handler.load_settings(environment)
+    with pytest.raises(errors.ConfigurationError, match="TOPIC_GUARDRAIL_ID"):
+        config.load_settings(environment)
 
 
 # --- The way through the handler -----------------------------------------
@@ -208,7 +212,7 @@ def test_a_question_on_a_denied_topic_is_refused_before_the_model_is_asked(
     model_aws["topic-model"].question_reply = '{"topic": "Medical advice"}'
     status, body = call(event())
     assert status == 200
-    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS["en"]
+    assert body["answer"] == sentences.QUESTION_REFUSED_ANSWERS["en"]
     assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Medical advice"]}
     assert body["sources"] == []
     assert model_aws["bedrock-runtime"].calls == []
@@ -225,7 +229,7 @@ def test_an_answer_on_a_denied_topic_is_withheld_with_its_sources(
     model_aws["topic-model"].answer_reply = '{"topic": "Tax returns"}'
     status, body = call(event())
     assert status == 200
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["en"]
     assert "topic:Tax returns" in body["guardrail"]["policies"]
     assert body["sources"] == []
 
@@ -299,7 +303,7 @@ def test_a_topic_named_by_the_call_in_place_of_a_failed_one_stands_unconfirmed(
     model_aws["topic-model"].question_reply = ["", '{"topic": "Legal action"}']
     status, body = call(event())
     assert status == 200
-    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS["en"]
+    assert body["answer"] == sentences.QUESTION_REFUSED_ANSWERS["en"]
     assert model_aws["bedrock-runtime"].calls == []
     assert len(model_aws["topic-model"].calls) == 2
 
@@ -331,7 +335,7 @@ def test_a_topic_stands_unless_both_confirming_calls_name_none(
     model_aws["topic-model"].question_reply = ['{"topic": "Private lives"}', *replies]
     status, body = call(event())
     assert status == 200
-    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS["en"]
+    assert body["answer"] == sentences.QUESTION_REFUSED_ANSWERS["en"]
     assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Private lives"]}
     assert model_aws["bedrock-runtime"].calls == []
     assert len(model_aws["topic-model"].calls) == 3
@@ -370,7 +374,9 @@ def test_the_confirming_calls_run_at_once() -> None:
             return verdict_response(NONE)
 
     settings = SimpleNamespace(topic_model_id="openai.gpt-oss-120b-1:0", region="eu-central-1")
-    checked = handler.check_topics_with_model(Runtime(), settings, "INPUT", "Wer ist der Inhaber?")
+    checked = topic_check.check_topics_with_model(
+        Runtime(), settings, "INPUT", "Wer ist der Inhaber?"
+    )
     assert checked["topics"] == []
     assert checked["tokens"] == {"input_tokens": 1200, "output_tokens": 90}
 
@@ -382,7 +388,7 @@ def test_without_confirming_calls_the_first_topic_stands_alone(
     model_aws["topic-model"].question_reply = ['{"topic": "Private lives"}', NONE, NONE]
     status, body = call(event())
     assert status == 200
-    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS["en"]
+    assert body["answer"] == sentences.QUESTION_REFUSED_ANSWERS["en"]
     assert len(model_aws["topic-model"].calls) == 1
 
 
@@ -411,9 +417,9 @@ def test_the_topic_model_is_called_through_its_own_client(
     model_aws: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     asked: list[str] = []
-    clients = dict(model_aws)
+    fakes = dict(model_aws)
     monkeypatch.setattr(
-        handler, "client", lambda service, region: asked.append(service) or clients[service]
+        clients, "client", lambda service, region: asked.append(service) or fakes[service]
     )
     call(event())
     assert asked.count("topic-model") == 2

@@ -6,7 +6,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import clocks
+import config
+import errors
 import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py)
+import llm
+import log
 import page
 import pytest
 
@@ -149,7 +154,7 @@ def test_behind_cloudfront_the_function_answers_as_before(aws: dict[str, Any]) -
 
 
 def test_the_page_folder_is_a_setting_only_where_the_function_is_the_address() -> None:
-    assert handler.PAGE_VARIABLES == {"page_folder": "PAGE_FOLDER"}
+    assert config.PAGE_VARIABLES == {"page_folder": "PAGE_FOLDER"}
     assert SETTINGS.page_folder is None
 
 
@@ -162,14 +167,14 @@ def test_a_second_model_call_may_start_later_without_cloudfront(
 ) -> None:
     """At second 100 the second call still ends inside the function's 195 seconds, not before
     CloudFront's 120 (app/aws.py)."""
-    monkeypatch.setattr(handler, "pause", lambda seconds: None)
+    monkeypatch.setattr(clocks, "pause", lambda seconds: None)
     settings = dataclasses.replace(SETTINGS, page_folder=page_folder)
     bedrock = SequencedBedrockRuntime([client_error("ThrottlingException")])
-    record = handler.RequestRecord()
+    record = log.RequestRecord()
     cold_start.advance(100)
     if retried:
-        assert handler.ask_model(bedrock, settings, [{"text": "p"}], record) == bedrock.response
+        assert llm.ask_model(bedrock, settings, [{"text": "p"}], record) == bedrock.response
     else:
-        with pytest.raises(handler.LLMError):
-            handler.ask_model(bedrock, settings, [{"text": "p"}], record)
+        with pytest.raises(errors.LLMError):
+            llm.ask_model(bedrock, settings, [{"text": "p"}], record)
     assert len(bedrock.calls) == (2 if retried else 1)

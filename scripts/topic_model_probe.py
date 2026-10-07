@@ -1,6 +1,6 @@
 """Measure the topic model through the function's own check, for `python -m scripts.topic_probe`.
 
-Every text goes through `handler.check_topics` with the function's own client for the topic
+Every text goes through `topic_check.check_topics` with the function's own client for the topic
 model, so prompt, timeouts and verdict rules are the ones a question meets: a check that fails
 or gives no readable verdict refuses the text, and counts as blocked here too, listed apart. A
 throttled check is repeated after a wait, because the probe asks faster than a person does.
@@ -62,20 +62,20 @@ def evaluation_questions(paths: Sequence[Path] = EVALUATION_SETS) -> list[dict[s
 
 
 def check(
-    handler: Any,
+    app: Any,
     runtime: Any,
     settings: Any,
     source: str,
     text: str,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
-    """One text through `handler.check_topics`: the topics it found, whether the check failed
+    """One text through `topic_check.check_topics`: the topics it found, whether the check failed
     and why, its tokens and seconds, and how often AWS throttled it first."""
     for attempt in range(1, THROTTLE_ATTEMPTS + 1):
         started = time.perf_counter()
         try:
-            checked = handler.check_topics(runtime, settings, source, text)
-        except handler.TopicCheckError as error:
+            checked = app.topic_check.check_topics(runtime, settings, source, text)
+        except app.errors.TopicCheckError as error:
             if error_code(error.__cause__) == "ThrottlingException" and attempt < THROTTLE_ATTEMPTS:
                 ceiling = min(THROTTLE_MAX_WAIT_SECONDS, THROTTLE_WAIT_SECONDS * 2 ** (attempt - 1))
                 sleep(random.uniform(ceiling / 2, ceiling))
@@ -98,7 +98,7 @@ def check(
 
 
 def measure(
-    handler: Any,
+    app: Any,
     runtime: Any,
     settings: Any,
     questions: Sequence[Mapping[str, Any]],
@@ -135,7 +135,7 @@ def measure(
     def ask(row: Mapping[str, Any]) -> dict[str, Any] | None:
         if stop.is_set():
             return None
-        return check(handler, runtime, settings, source, row["text"], sleep)
+        return check(app, runtime, settings, source, row["text"], sleep)
 
     throttled = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -221,10 +221,10 @@ def main(args: Any, topic_model_id: str) -> int:
     from types import SimpleNamespace
 
     from scripts.aws import AwsProblem
-    from scripts.evaluate import deployed_environment, import_handler
+    from scripts.evaluate import deployed_environment, import_app
     from scripts.topic_probe import load_probe_answers, load_probe_questions, report, summarise
 
-    handler = import_handler()
+    app = import_app()
     sets = {
         "INPUT": load_probe_questions(args.questions),
         "OUTPUT": load_probe_answers(args.answers),
@@ -236,17 +236,17 @@ def main(args: Any, topic_model_id: str) -> int:
 
     try:
         if args.deployed:
-            settings = handler.load_settings(deployed_environment(args.region))
+            settings = app.config.load_settings(deployed_environment(args.region))
             if not settings.topic_model_id:
                 raise AwsProblem("The deployed function checks the topics with a guardrail.")
         else:
             settings = SimpleNamespace(topic_model_id=topic_model_id, region=args.region)
         # Its price is needed for the report: a model without one stops the run before it pays.
         answer_model(settings.topic_model_id, args.region)
-        runtime = handler.client("topic-model", args.region)
+        runtime = app.clients.client("topic-model", args.region)
         rows = {
             name: measure(
-                handler,
+                app,
                 runtime,
                 settings,
                 texts,
@@ -257,7 +257,7 @@ def main(args: Any, topic_model_id: str) -> int:
             )
             for name, texts in sets.items()
         }
-    except (AwsProblem, handler.ConfigurationError, KeyError) as problem:
+    except (AwsProblem, app.errors.ConfigurationError, KeyError) as problem:
         print(f"error: {problem}", file=sys.stderr)
         return 2
 
@@ -281,7 +281,7 @@ def main(args: Any, topic_model_id: str) -> int:
                     "topic_check": "model",
                     "deployed": args.deployed,
                     "model": model,
-                    "prompt": handler.topic_model.gate_prompt(),
+                    "prompt": app.topic_model.gate_prompt(),
                     "summaries": summaries,
                     "rows": rows,
                 },

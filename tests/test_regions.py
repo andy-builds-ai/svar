@@ -5,7 +5,7 @@ fallback in Frankfurt, the topic guardrail through the EU profile, as the code s
 import json
 
 import aws_cdk as cdk
-import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py)
+import config
 import page
 import pytest
 from aws_cdk.assertions import Template
@@ -19,13 +19,13 @@ from infra.answer_models import (
     region_answer_guardrail_uses_profile,
     region_models,
 )
-from infra.stacks.andur_stack import (
+from infra.stacks.andur_stack import AndurStack
+from infra.stacks.answer_function import (
     ANSWER_MAX_CONCURRENCY,
-    GUARDRAIL_PROFILE_REGIONS,
     PAGE_LAYER_FOLDER,
     PAGE_LOAD_CONCURRENCY,
-    AndurStack,
 )
+from infra.stacks.guardrails import GUARDRAIL_PROFILE_REGIONS
 from tests.test_stack import (
     deploy_context,
     get_att,
@@ -203,9 +203,9 @@ def test_the_fallback_tells_the_function_its_model_and_frankfurt_prices(
     assert variables["PRICE_DATE"] == FRANKFURT_PRICE_DATE
     assert "TOPIC_MODEL_ID" not in variables
     assert set(variables) == {
-        *handler.ENVIRONMENT_VARIABLES.values(),
-        *handler.TOPIC_GUARDRAIL_VARIABLES.values(),
-        *handler.PAGE_VARIABLES.values(),
+        *config.ENVIRONMENT_VARIABLES.values(),
+        *config.TOPIC_GUARDRAIL_VARIABLES.values(),
+        *config.PAGE_VARIABLES.values(),
     }
 
 
@@ -294,9 +294,9 @@ def test_frankfurt_tells_the_function_both_models_and_frankfurt_prices(
     assert variables["PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS"] == "0.0002"
     assert variables["PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS"] == "0.00079"
     assert set(variables) == {
-        *handler.ENVIRONMENT_VARIABLES.values(),
-        *handler.TOPIC_MODEL_VARIABLES.values(),
-        *handler.PAGE_VARIABLES.values(),
+        *config.ENVIRONMENT_VARIABLES.values(),
+        *config.TOPIC_MODEL_VARIABLES.values(),
+        *config.PAGE_VARIABLES.values(),
     }
     (drain,) = template.find_resources("Custom::AndurDeployDrain").values()
     assert drain["Properties"]["GuardrailVersions"] == [

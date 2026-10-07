@@ -6,7 +6,7 @@ on the evaluation sets' questions as well; it creates and deletes nothing. Elsew
 of `DENIED_TOPICS` go into a guardrail of their own,
 `PROBE_NAME`, built the way the stack builds the topic guardrail: same order,
 same tier, same EU guardrail profile. Every question goes through
-`ApplyGuardrail` as INPUT after the handler's `QUESTION_FRAME`, and every answer
+`ApplyGuardrail` as INPUT after the function's `QUESTION_FRAME`, and every answer
 as OUTPUT without its citations after its `ANSWER_FRAME`, the way the function
 hands both to the topic guardrail: each on its own, without the other and
 without the sources. The probe guardrail is deleted at the end, also when the
@@ -26,19 +26,19 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from app.denied_topics import DENIED_TOPICS
 from infra.answer_models import region_models
-from infra.stacks.andur_stack import (
+from infra.stacks.answer_function import PRICE_TOPIC_PER_1K_UNITS
+from infra.stacks.guardrails import (
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
-    DENIED_TOPICS,
     GUARDRAIL_PROFILE_ID,
     GUARDRAIL_PROFILE_REGIONS,
-    PRICE_TOPIC_PER_1K_UNITS,
     TOPICS_TIER,
 )
 from scripts import utf8_output
 from scripts.aws import REGION, AwsProblem, client, error_code, explained
-from scripts.evaluate import deployed_environment, import_handler
+from scripts.evaluate import deployed_environment, import_app
 
 QUESTIONS_FILE = Path(__file__).with_name("topic-questions.json")
 ANSWERS_FILE = Path(__file__).with_name("topic-answers.json")
@@ -103,10 +103,10 @@ def judged_text(source: str, text: str) -> str:
     """The text the topics judge, made by the function's own functions: a question after its
     frame (`question_for_topics`), an answer without its citations after its frame
     (`answer_for_topics`); empty for an answer of citations alone."""
-    handler = import_handler()
+    app = import_app()
     if source == "OUTPUT":
-        return handler.answer_for_topics(text)
-    return handler.question_for_topics(text)
+        return app.topic_check.answer_for_topics(text)
+    return app.topic_check.question_for_topics(text)
 
 
 def load_probe_set(path: Path, field: str) -> list[dict[str, Any]]:

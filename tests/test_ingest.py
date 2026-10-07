@@ -14,28 +14,30 @@ from typing import Any
 
 import pytest
 
-from scripts import ingest
+from scripts import ingest, layout
 from scripts.aws import AwsProblem
 from scripts.ingest import (
-    MAX_SECTION_WORDS,
-    MIN_SECTION_WORDS,
-    Document,
     check_sidecar,
     count_documents,
-    count_sections,
     delete_keys,
-    detect_encoding,
     discover,
     format_counts,
     job_succeeded,
     main,
-    object_key,
     run_ingestion_job,
+    stale_keys,
+    upload,
+)
+from scripts.layout import (
+    MAX_SECTION_WORDS,
+    MIN_SECTION_WORDS,
+    Document,
+    count_sections,
+    detect_encoding,
+    object_key,
     section_filename,
     slugify,
     split_markdown,
-    stale_keys,
-    upload,
     upload_items,
 )
 
@@ -103,9 +105,9 @@ def test_section_filename_keeps_the_original_stem() -> None:
 
 
 def test_bucket_prefix_matches_the_prefix_the_data_source_crawls() -> None:
-    from infra.stacks.andur_stack import WORKSPACE_PREFIX
+    from infra.stacks.knowledge_base import WORKSPACE_PREFIX
 
-    assert ingest.BUCKET_PREFIX == WORKSPACE_PREFIX
+    assert layout.BUCKET_PREFIX == WORKSPACE_PREFIX
 
 
 # --- Sidecar check -------------------------------------------------------
@@ -179,7 +181,7 @@ def test_invalid_sidecar_names_the_problem(tmp_path: Path, data: Any, expected: 
 
 
 def test_discover_finds_documents_in_all_layers(tmp_path: Path) -> None:
-    for layer in ingest.LAYERS:
+    for layer in layout.LAYERS:
         add_document(tmp_path, "quillmoor", layer)
     add_document(tmp_path, "pellwick", "human")
     (tmp_path / "README.md").write_text("about this folder", encoding="utf-8")
@@ -840,7 +842,7 @@ def items_as_before(document: Document) -> list[tuple[str, bytes, str]]:
     suffix = document.path.suffix.lower()
     if suffix != ".md":
         key = object_key(document.workspace, document.layer, document.path.name)
-        return [(key, document.path.read_bytes(), ingest.CONTENT_TYPES[suffix])]
+        return [(key, document.path.read_bytes(), layout.CONTENT_TYPES[suffix])]
     sections = split_markdown(document.path.read_text(encoding="utf-8"))
     return [
         (
@@ -848,7 +850,7 @@ def items_as_before(document: Document) -> list[tuple[str, bytes, str]]:
                 document.workspace, document.layer, section_filename(document.path.stem, n, slug)
             ),
             text.encode("utf-8"),
-            ingest.CONTENT_TYPES[".md"],
+            layout.CONTENT_TYPES[".md"],
         )
         for n, (slug, text) in enumerate(sections, start=1)
     ]

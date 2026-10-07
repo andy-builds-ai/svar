@@ -9,7 +9,10 @@ survive, and so must ``quillmoor``.
 import hashlib
 from typing import Any
 
-import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py)
+import budget
+import errors
+import intake
+import plans
 import pytest
 
 from scripts import workspace
@@ -316,16 +319,16 @@ def test_a_bad_name_is_refused_before_any_aws_call(name: str) -> None:
 def test_the_name_rule_is_the_answer_functions(name: str) -> None:
     """A name the function refuses would get a key nobody can use."""
     try:
-        handler.requested_workspace({"workspace": name})
+        intake.requested_workspace({"workspace": name})
         accepted = True
-    except handler.BadRequest:
+    except errors.BadRequest:
         accepted = False
     assert (workspace.name_problem(name) is None) == accepted
 
 
 def test_the_budget_key_is_the_answer_functions() -> None:
-    assert workspace.BUDGET_KEY_ATTRIBUTE == handler.BUDGET_KEY_ATTRIBUTE
-    assert workspace.key_hash("abc") == handler.key_hash("abc")
+    assert workspace.BUDGET_KEY_ATTRIBUTE == budget.BUDGET_KEY_ATTRIBUTE
+    assert workspace.key_hash("abc") == budget.key_hash("abc")
 
 
 @pytest.mark.parametrize("path", ["/andur/api-keys/", "andur/api-keys", ""])
@@ -363,7 +366,7 @@ def test_keys_are_random() -> None:
 
 def test_the_description_names_the_header_the_function_reads() -> None:
     """It once said ``Authorization: Bearer <key>`` — the one header CloudFront replaces."""
-    assert handler.KEY_HEADER in workspace.KEY_DESCRIPTION
+    assert intake.KEY_HEADER in workspace.KEY_DESCRIPTION
     assert "Authorization" not in workspace.KEY_DESCRIPTION
 
 
@@ -404,12 +407,12 @@ def test_add_reads_only_the_key_path_from_the_stack() -> None:
 def test_the_plans_and_names_are_the_answer_functions() -> None:
     assert workspace.PLAN_CHOICES == (
         "demo",
-        *(plan.name for plan in handler.plans.PLANS),
+        *(plan.name for plan in plans.PLANS),
     )
-    assert workspace.PLAN_ATTRIBUTE == handler.PLAN_ATTRIBUTE
-    assert workspace.BUDGET_TTL_ATTRIBUTE == handler.BUDGET_TTL_ATTRIBUTE
+    assert workspace.PLAN_ATTRIBUTE == budget.PLAN_ATTRIBUTE
+    assert workspace.BUDGET_TTL_ATTRIBUTE == budget.BUDGET_TTL_ATTRIBUTE
     assert workspace.BUDGET_WORKSPACE_ATTRIBUTE == "workspace"
-    assert "workspace = if_not_exists(workspace, :workspace)" in handler.BUDGET_UPDATE_EXPRESSION
+    assert "workspace = if_not_exists(workspace, :workspace)" in budget.BUDGET_UPDATE_EXPRESSION
 
 
 def test_add_with_a_plan_puts_the_new_key_on_it(capsys: pytest.CaptureFixture[str]) -> None:

@@ -1,4 +1,4 @@
-"""Tests for the answer function (app/handler.py), without AWS.
+"""Tests for the answer function (app/), without AWS.
 
 Every AWS client is a small fake, and every Bedrock response a hand-built
 dict in the shape Bedrock returns — the pattern of the learning chatbot's
@@ -26,16 +26,29 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import answering
+import aws as aws_module
+import budget
+import citations
+import clients
+import clocks
+import config
+import errors
+import guardrails
 import handler  # app/handler.py
+import intake
+import keys
+import llm
+import log
+import plans
+import pricing
+import prompts
 import pytest
-from handler import (
-    ANSWER_TEMPERATURE,
-    KEY_HEADER,
-    MAX_ANSWER_TOKENS,
-    MAX_QUESTION_CHARACTERS,
-    MAX_SOURCE_CHARACTERS,
-    SECONDS_PER_DAY,
-    SECONDS_PER_HOUR,
+import retrieval
+import sentences
+import topic_check
+from config import SECONDS_PER_DAY, SECONDS_PER_HOUR
+from errors import (
     BadRequest,
     BudgetSpent,
     ConfigurationError,
@@ -44,6 +57,9 @@ from handler import (
     RetrievalError,
     Unauthorized,
 )
+from intake import KEY_HEADER, MAX_QUESTION_CHARACTERS
+from llm import ANSWER_TEMPERATURE, MAX_ANSWER_TOKENS
+from prompts import MAX_SOURCE_CHARACTERS
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -70,15 +86,15 @@ ENVIRONMENT = {
     "PRICE_GROUNDING_PER_1K_UNITS": "0.10",
     "PRICE_DATE": "2026-09-23",
 }
-SETTINGS = handler.load_settings(ENVIRONMENT)
+SETTINGS = config.load_settings(ENVIRONMENT)
 
 # The sentences of a request that names no language: the English ones.
-NO_SOURCES_ANSWER = handler.NO_SOURCES_ANSWERS["en"]
-NOT_IN_SOURCES_ANSWER = handler.NOT_IN_SOURCES_ANSWERS["en"]
-NOT_CONFIGURED_MESSAGE = handler.NOT_CONFIGURED_MESSAGES["en"]
-QUESTIONS_SPENT_MESSAGE = handler.QUESTIONS_SPENT_MESSAGES["en"]
-WINDOW_CLOSED_MESSAGE = handler.WINDOW_CLOSED_MESSAGES["en"]
-BUDGET_SPENT_MESSAGE = handler.BUDGET_SPENT_MESSAGES["en"]
+NO_SOURCES_ANSWER = sentences.NO_SOURCES_ANSWERS["en"]
+NOT_IN_SOURCES_ANSWER = sentences.NOT_IN_SOURCES_ANSWERS["en"]
+NOT_CONFIGURED_MESSAGE = sentences.NOT_CONFIGURED_MESSAGES["en"]
+QUESTIONS_SPENT_MESSAGE = sentences.QUESTIONS_SPENT_MESSAGES["en"]
+WINDOW_CLOSED_MESSAGE = sentences.WINDOW_CLOSED_MESSAGES["en"]
+BUDGET_SPENT_MESSAGE = sentences.BUDGET_SPENT_MESSAGES["en"]
 KEYS = {"quillmoor": "quillmoor-key-0001", "pellwick": "pellwick-key-0002"}
 
 
@@ -438,7 +454,7 @@ class ConditionReader:
     Written the way `apply_update` is written, and for the same reason: what
     the handler sends is a string, and a fake that reproduces its *meaning*
     from memory proves nothing about the string. Spelled out by hand, a
-    ``<`` that turned into ``<=`` in `handler.BUDGET_CONDITION` would leave
+    ``<`` that turned into ``<=`` in `budget.BUDGET_CONDITION` would leave
     every test green while the deployed budget let an eleventh question
     through. Read from the text, the same change turns tests red.
 
@@ -549,7 +565,7 @@ class FakeDynamoDB:
         if self.error and len(self.calls) >= self.error_from_call:
             raise self.error
         assert_every_placeholder_is_used(kwargs)
-        key = kwargs["Key"][handler.BUDGET_KEY_ATTRIBUTE]["S"]
+        key = kwargs["Key"][budget.BUDGET_KEY_ATTRIBUTE]["S"]
         before = self.items.get(key, {})
         values = kwargs.get("ExpressionAttributeValues", {})
         condition = kwargs.get("ConditionExpression")
@@ -588,13 +604,13 @@ class FakeWallClock(FakeClock):
 def cold_start(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     """Every test starts as a fresh function instance: no keys read, a clock of its own."""
     clock = FakeClock()
-    monkeypatch.setattr(handler, "_key_cache", {})
-    monkeypatch.setattr(handler, "_failed_reads", {})
-    monkeypatch.setattr(handler, "_unknown_reads", [])
-    monkeypatch.setattr(handler, "_wrong_key_reads", [])
-    monkeypatch.setattr(handler, "clock", clock)
-    monkeypatch.setattr(handler, "wall_clock", FakeWallClock())
-    handler.log_sdk_versions.cache_clear()
+    monkeypatch.setattr(keys, "_key_cache", {})
+    monkeypatch.setattr(keys, "_failed_reads", {})
+    monkeypatch.setattr(keys, "_unknown_reads", [])
+    monkeypatch.setattr(keys, "_wrong_key_reads", [])
+    monkeypatch.setattr(clocks, "clock", clock)
+    monkeypatch.setattr(clocks, "wall_clock", FakeWallClock())
+    clients.log_sdk_versions.cache_clear()
     return clock
 
 
@@ -602,7 +618,7 @@ def cold_start(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
 def budget_clock(monkeypatch: pytest.MonkeyPatch) -> FakeWallClock:
     """The budget's clock, for a test that has to move time forward."""
     clock = FakeWallClock()
-    monkeypatch.setattr(handler, "wall_clock", clock)
+    monkeypatch.setattr(clocks, "wall_clock", clock)
     return clock
 
 
@@ -611,7 +627,7 @@ def aws(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """The function's environment, its keys and one fake client per service."""
     for name, value in ENVIRONMENT.items():
         monkeypatch.setenv(name, value)
-    clients: dict[str, Any] = {
+    fakes: dict[str, Any] = {
         "ssm": FakeSSM(parameters(KEYS)),
         "bedrock-agent-runtime": FakeAgentRuntime(
             [hit(), hit(layer="inbox", name="draft--01.md", text="Draft.")]
@@ -620,8 +636,8 @@ def aws(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "guardrail": FakeGuardrail(),
         "dynamodb": FakeDynamoDB(),
     }
-    monkeypatch.setattr(handler, "client", lambda service, region: clients[service])
-    return clients
+    monkeypatch.setattr(clients, "client", lambda service, region: fakes[service])
+    return fakes
 
 
 def event(
@@ -684,34 +700,34 @@ def test_settings_come_from_the_environment() -> None:
 )
 def test_a_budget_setting_must_be_a_sensible_whole_number(variable: str, value: str) -> None:
     with pytest.raises(ConfigurationError, match=variable):
-        handler.load_settings({**ENVIRONMENT, variable: value})
+        config.load_settings({**ENVIRONMENT, variable: value})
 
 
 @pytest.mark.parametrize("value", ["²", "٣", "１０"])
 def test_a_digit_that_is_not_an_ascii_digit_names_the_variable_too(value: str) -> None:
     """`isdigit()` alone says yes to these, and `int()` then says no with a bare ValueError."""
     with pytest.raises(ConfigurationError, match="QUESTION_LIMIT"):
-        handler.load_settings({**ENVIRONMENT, "QUESTION_LIMIT": value})
+        config.load_settings({**ENVIRONMENT, "QUESTION_LIMIT": value})
 
 
 def test_the_item_must_outlast_the_window_it_holds() -> None:
     """An item that goes first hands the key a fresh budget while the old one runs."""
     with pytest.raises(ConfigurationError, match="KEEP_DAYS"):
-        handler.load_settings({**ENVIRONMENT, "WINDOW_HOURS": "24", "KEEP_DAYS": "1"})
-    handler.load_settings({**ENVIRONMENT, "WINDOW_HOURS": "23", "KEEP_DAYS": "1"})
+        config.load_settings({**ENVIRONMENT, "WINDOW_HOURS": "24", "KEEP_DAYS": "1"})
+    config.load_settings({**ENVIRONMENT, "WINDOW_HOURS": "23", "KEEP_DAYS": "1"})
 
 
 @pytest.mark.parametrize("variable", sorted(ENVIRONMENT))
 def test_a_missing_setting_is_named(variable: str) -> None:
     environment = {**ENVIRONMENT, variable: "  "}
     with pytest.raises(ConfigurationError, match=variable):
-        handler.load_settings(environment)
+        config.load_settings(environment)
 
 
 @pytest.mark.parametrize("value", ["0", "31", "101", "six", "-1", "6.5"])
 def test_number_of_results_must_be_a_sensible_whole_number(value: str) -> None:
     with pytest.raises(ConfigurationError, match="NUMBER_OF_RESULTS"):
-        handler.load_settings({**ENVIRONMENT, "NUMBER_OF_RESULTS": value})
+        config.load_settings({**ENVIRONMENT, "NUMBER_OF_RESULTS": value})
 
 
 def test_the_most_passages_a_deployment_may_ask_for_fit_the_grounding_source() -> None:
@@ -721,8 +737,8 @@ def test_the_most_passages_a_deployment_may_ask_for_fit_the_grounding_source() -
     file: if that fits, every configurable number of results does.
     """
     long_name = "a-rather-long-file-name-for-a-document--" + "x" * 60 + ".md"
-    results = [hit(name=long_name, text="word " * 2000) for _ in range(handler.MAX_RESULTS)]
-    assert len(handler.build_sources(results)) < 100_000
+    results = [hit(name=long_name, text="word " * 2000) for _ in range(config.MAX_RESULTS)]
+    assert len(prompts.build_sources(results)) < 100_000
 
 
 def test_guardrail_and_prices_come_from_the_environment() -> None:
@@ -732,7 +748,7 @@ def test_guardrail_and_prices_come_from_the_environment() -> None:
         "2",
     )
     assert (SETTINGS.topic_guardrail_id, SETTINGS.topic_guardrail_version) == ("gr-topics", "3")
-    assert SETTINGS.prices == handler.Prices(
+    assert SETTINGS.prices == config.Prices(
         input_tokens=Decimal("0.00015"),
         output_tokens=Decimal("0.00065"),
         topic_units=Decimal("0.15"),
@@ -748,7 +764,7 @@ def test_guardrail_and_prices_come_from_the_environment() -> None:
 @pytest.mark.parametrize("value", ["DRAFT", "", "1.0", "v1", "²"])
 def test_the_guardrail_version_is_a_number_and_never_the_draft(variable: str, value: str) -> None:
     with pytest.raises(ConfigurationError, match=variable):
-        handler.load_settings({**ENVIRONMENT, variable: value})
+        config.load_settings({**ENVIRONMENT, variable: value})
 
 
 @pytest.mark.parametrize(
@@ -764,7 +780,7 @@ def test_the_guardrail_version_is_a_number_and_never_the_draft(variable: str, va
 @pytest.mark.parametrize("value", ["cheap", "-0.1", "11", "NaN", "Infinity", "0,15"])
 def test_a_price_must_be_a_plain_decimal_in_range(variable: str, value: str) -> None:
     with pytest.raises(ConfigurationError, match=variable):
-        handler.load_settings({**ENVIRONMENT, variable: value})
+        config.load_settings({**ENVIRONMENT, variable: value})
 
 
 @pytest.mark.parametrize(
@@ -772,22 +788,22 @@ def test_a_price_must_be_a_plain_decimal_in_range(variable: str, value: str) -> 
 )
 def test_the_price_date_is_a_real_iso_date(value: str) -> None:
     with pytest.raises(ConfigurationError, match="PRICE_DATE"):
-        handler.load_settings({**ENVIRONMENT, "PRICE_DATE": value})
+        config.load_settings({**ENVIRONMENT, "PRICE_DATE": value})
 
 
 @pytest.mark.parametrize("path", ["/andur/api-keys/", "andur/api-keys"])
 def test_key_path_has_a_leading_slash_and_no_trailing_one(path: str) -> None:
     with pytest.raises(ConfigurationError, match="API_KEY_PARAMETER_PATH"):
-        handler.load_settings({**ENVIRONMENT, "API_KEY_PARAMETER_PATH": path})
+        config.load_settings({**ENVIRONMENT, "API_KEY_PARAMETER_PATH": path})
 
 
 def test_workspace_rule_and_layers_match_the_fill_script() -> None:
     """The handler cannot import scripts/ (Lambda gets app/ only), so a test keeps them equal."""
-    ingest = pytest.importorskip("scripts.ingest")
+    layout = pytest.importorskip("scripts.layout")
 
-    assert handler.WORKSPACE_NAME.pattern == ingest.WORKSPACE_NAME.pattern
-    assert handler.LAYERS == ingest.LAYERS
-    assert handler.MAX_WORKSPACE_CHARACTERS == ingest.MAX_WORKSPACE_CHARACTERS
+    assert intake.WORKSPACE_NAME.pattern == layout.WORKSPACE_NAME.pattern
+    assert citations.LAYERS == layout.LAYERS
+    assert intake.MAX_WORKSPACE_CHARACTERS == layout.MAX_WORKSPACE_CHARACTERS
 
 
 # --- Reading the request -------------------------------------------------
@@ -796,14 +812,14 @@ def test_workspace_rule_and_layers_match_the_fill_script() -> None:
 @pytest.mark.parametrize("method", ["GET", "PUT", "OPTIONS", ""])
 def test_only_post_is_accepted(method: str) -> None:
     with pytest.raises(MethodNotAllowed):
-        handler.require_post({"requestContext": {"http": {"method": method}}})
+        intake.require_post({"requestContext": {"http": {"method": method}}})
 
 
 def test_body_is_read_as_json_also_when_base64_encoded() -> None:
     body = {"question": "How?", "workspace": "quillmoor"}
     encoded = base64.b64encode(json.dumps(body).encode()).decode()
-    assert handler.read_body({"body": json.dumps(body)}) == body
-    assert handler.read_body({"body": encoded, "isBase64Encoded": True}) == body
+    assert intake.read_body({"body": json.dumps(body)}) == body
+    assert intake.read_body({"body": encoded, "isBase64Encoded": True}) == body
 
 
 @pytest.mark.parametrize(
@@ -820,18 +836,18 @@ def test_body_is_read_as_json_also_when_base64_encoded() -> None:
 )
 def test_a_body_that_is_no_json_object_is_a_bad_request(request_event: dict[str, Any]) -> None:
     with pytest.raises(BadRequest):
-        handler.read_body(request_event)
+        intake.read_body(request_event)
 
 
 def test_a_number_past_the_digit_limit_is_a_bad_request_not_a_crash() -> None:
     """Python refuses to turn more than 4,300 digits into an int (ValueError)."""
     with pytest.raises(BadRequest, match="not valid JSON"):
-        handler.read_body({"body": '{"question": ' + "1" * 5000 + "}"})
+        intake.read_body({"body": '{"question": ' + "1" * 5000 + "}"})
 
 
 def test_a_body_nested_past_the_recursion_limit_is_a_bad_request_not_a_crash() -> None:
     with pytest.raises(BadRequest, match="not valid JSON"):
-        handler.read_body({"body": "[" * 100_000 + "]" * 100_000})
+        intake.read_body({"body": "[" * 100_000 + "]" * 100_000})
 
 
 @pytest.mark.parametrize(
@@ -855,14 +871,14 @@ def test_a_body_nested_past_the_recursion_limit_is_a_bad_request_not_a_crash() -
 )
 def test_workspace_must_be_a_valid_name(body: dict[str, Any]) -> None:
     with pytest.raises(BadRequest):
-        handler.requested_workspace(body)
+        intake.requested_workspace(body)
 
 
 def test_a_workspace_name_at_the_limit_passes_and_one_over_it_does_not() -> None:
-    at_limit = "a" * handler.MAX_WORKSPACE_CHARACTERS
-    assert handler.requested_workspace({"workspace": at_limit}) == at_limit
-    with pytest.raises(BadRequest, match=str(handler.MAX_WORKSPACE_CHARACTERS)):
-        handler.requested_workspace({"workspace": "a" * (handler.MAX_WORKSPACE_CHARACTERS + 1)})
+    at_limit = "a" * intake.MAX_WORKSPACE_CHARACTERS
+    assert intake.requested_workspace({"workspace": at_limit}) == at_limit
+    with pytest.raises(BadRequest, match=str(intake.MAX_WORKSPACE_CHARACTERS)):
+        intake.requested_workspace({"workspace": "a" * (intake.MAX_WORKSPACE_CHARACTERS + 1)})
 
 
 def test_an_outsized_workspace_name_is_400_and_reaches_neither_log_nor_answer(
@@ -882,9 +898,9 @@ def test_an_outsized_workspace_name_is_400_and_reaches_neither_log_nor_answer(
 
 
 def test_question_is_stripped_and_limited() -> None:
-    assert handler.requested_question({"question": "  How?  "}) == "How?"
+    assert intake.requested_question({"question": "  How?  "}) == "How?"
     assert (
-        len(handler.requested_question({"question": "x" * MAX_QUESTION_CHARACTERS}))
+        len(intake.requested_question({"question": "x" * MAX_QUESTION_CHARACTERS}))
         == MAX_QUESTION_CHARACTERS
     )
     for body in (
@@ -894,19 +910,19 @@ def test_question_is_stripped_and_limited() -> None:
         {"question": "x" * (MAX_QUESTION_CHARACTERS + 1)},
     ):
         with pytest.raises(BadRequest):
-            handler.requested_question(body)
+            intake.requested_question(body)
 
 
 def test_the_key_is_read_from_its_own_header_in_any_case() -> None:
-    assert handler.request_key({KEY_HEADER.lower(): "abc"}) == "abc"
-    assert handler.request_key({KEY_HEADER.upper(): "  abc "}) == "abc"
-    assert handler.request_key({"X-aNdUr-KeY": "abc"}) == "abc"
+    assert intake.request_key({KEY_HEADER.lower(): "abc"}) == "abc"
+    assert intake.request_key({KEY_HEADER.upper(): "  abc "}) == "abc"
+    assert intake.request_key({"X-aNdUr-KeY": "abc"}) == "abc"
 
 
 def test_a_key_in_the_authorization_header_is_not_a_key() -> None:
     """CloudFront overwrites that header on its way to the function; nothing may read it."""
     with pytest.raises(Unauthorized):
-        handler.request_key({"authorization": "Bearer abc"})
+        intake.request_key({"authorization": "Bearer abc"})
 
 
 @pytest.mark.parametrize(
@@ -915,7 +931,7 @@ def test_a_key_in_the_authorization_header_is_not_a_key() -> None:
 )
 def test_no_key_header_is_unauthorized(headers: dict[str, str] | None) -> None:
     with pytest.raises(Unauthorized):
-        handler.request_key(headers)
+        intake.request_key(headers)
 
 
 def test_the_401_does_not_announce_an_authentication_scheme() -> None:
@@ -965,7 +981,7 @@ def test_an_unknown_workspace_is_401_with_the_same_sentence_as_a_wrong_key(
     wrong = call(event({"question": "How?", "workspace": "pellwick"}, key="wrong-key"))
     assert unknown == (401, {"error": "This key does not open the workspace nobody."})
     assert wrong == (401, {"error": "This key does not open the workspace pellwick."})
-    assert handler._key_cache["nobody"].key is None
+    assert keys._key_cache["nobody"].key is None
     assert aws["dynamodb"].calls == []
 
 
@@ -978,7 +994,7 @@ def test_an_unknown_workspace_is_remembered_for_the_reread_interval(
         cold_start.advance(0.4)
     assert len(aws["ssm"].calls) == 1
 
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     assert call(nobody)[0] == 401
     assert len(aws["ssm"].calls) == 2
 
@@ -991,7 +1007,7 @@ def test_a_workspace_added_after_it_was_asked_for_works_within_the_reread_interv
     aws["ssm"].parameters.update(parameters({"newcomer": "newcomer-key-0003"}))
 
     assert call(newcomer)[0] == 401
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     assert call(newcomer)[0] == 200
 
 
@@ -1001,14 +1017,14 @@ def test_invented_names_are_forgotten_once_they_hold_back_nothing(
     """Each new name costs one read; what was learned about it is dropped after the reread
     interval, so a stream of invented names does not grow the cache."""
     call(event())
-    for number in range(handler.UNKNOWN_KEY_READS - 1):
+    for number in range(keys.UNKNOWN_KEY_READS - 1):
         call(event({"question": "How?", "workspace": f"invented-{number}"}))
-    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS
-    assert len(handler._key_cache) == handler.UNKNOWN_KEY_READS
+    assert len(aws["ssm"].calls) == keys.UNKNOWN_KEY_READS
+    assert len(keys._key_cache) == keys.UNKNOWN_KEY_READS
 
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     call(event({"question": "How?", "workspace": "one-more"}))
-    assert set(handler._key_cache) == {"quillmoor", "one-more"}
+    assert set(keys._key_cache) == {"quillmoor", "one-more"}
 
 
 def test_many_workspaces_cost_no_extra_calls(aws: dict[str, Any]) -> None:
@@ -1032,7 +1048,7 @@ def test_each_workspace_keeps_its_key_for_the_cache_time(
     call(event())
     cold_start.advance(100)
     call(pellwick)
-    cold_start.advance(handler.KEY_CACHE_SECONDS - 100 - 1)
+    cold_start.advance(keys.KEY_CACHE_SECONDS - 100 - 1)
     call(event())
     call(pellwick)
     assert len(aws["ssm"].calls) == 2
@@ -1054,17 +1070,17 @@ def test_the_key_is_read_at_most_once_per_request(
     that is the one read `aws.KEY_READS_PER_REQUEST` counts."""
     import aws as aws_module
 
-    read = handler.read_workspace_key
+    read = keys.read_workspace_key
 
     def slow(path: str, workspace: str, region: str) -> str | None:
         cold_start.advance(aws_module.call_seconds("ssm"))
         return read(path, workspace, region)
 
-    monkeypatch.setattr(handler, "read_workspace_key", slow)
+    monkeypatch.setattr(keys, "read_workspace_key", slow)
     assert call(event(key="wrong-key"))[0] == 401
     assert len(aws["ssm"].calls) == 1
 
-    cold_start.advance(handler.KEY_CACHE_SECONDS)
+    cold_start.advance(keys.KEY_CACHE_SECONDS)
     assert call(event(key="wrong-key"))[0] == 401
     assert len(aws["ssm"].calls) == 2
     assert aws_module.KEY_READS_PER_REQUEST == 1
@@ -1072,25 +1088,25 @@ def test_the_key_is_read_at_most_once_per_request(
 
 def test_keys_are_compared_in_constant_time(monkeypatch: pytest.MonkeyPatch) -> None:
     compared: list[tuple[bytes, bytes]] = []
-    real_compare = handler.hmac.compare_digest
+    real_compare = keys.hmac.compare_digest
 
     def counting(a: bytes, b: bytes) -> bool:
         compared.append((a, b))
         return real_compare(a, b)
 
-    monkeypatch.setattr(handler.hmac, "compare_digest", counting)
-    assert handler.same_key(KEYS["quillmoor"], KEYS["quillmoor"])
-    assert not handler.same_key("schlüssel", KEYS["quillmoor"])
-    assert not handler.same_key("", KEYS["quillmoor"])
+    monkeypatch.setattr(keys.hmac, "compare_digest", counting)
+    assert keys.same_key(KEYS["quillmoor"], KEYS["quillmoor"])
+    assert not keys.same_key("schlüssel", KEYS["quillmoor"])
+    assert not keys.same_key("", KEYS["quillmoor"])
     assert len(compared) == 3
-    assert not handler.same_key(KEYS["quillmoor"], None)
+    assert not keys.same_key(KEYS["quillmoor"], None)
 
 
 def test_only_a_checked_workspace_name_names_a_key(aws: dict[str, Any]) -> None:
     """The name ends up in a parameter path; it must not leave the key path."""
     for name in ("../other", "a/b", "Quillmoor", ""):
         with pytest.raises(ValueError):
-            handler.read_workspace_key("/andur/api-keys", name, "eu-west-1")
+            keys.read_workspace_key("/andur/api-keys", name, "eu-west-1")
     assert aws["ssm"].calls == []
 
 
@@ -1099,7 +1115,7 @@ def test_a_new_key_works_at_once_without_waiting_for_expiry(
 ) -> None:
     assert call(event())[0] == 200
     aws["ssm"].parameters.update(parameters({"quillmoor": "replaced-key-0004"}))
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
 
     assert call(event(key="replaced-key-0004"))[0] == 200
     assert call(event())[0] == 401
@@ -1110,13 +1126,13 @@ def test_a_flood_of_wrong_keys_rereads_at_most_once_per_interval(
     aws: dict[str, Any], cold_start: FakeClock
 ) -> None:
     call(event())
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     for _ in range(20):
         assert call(event(key="wrong"))[0] == 401
         cold_start.advance(0.1)
     assert len(aws["ssm"].calls) == 2
 
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     call(event(key="wrong"))
     assert len(aws["ssm"].calls) == 3
 
@@ -1127,11 +1143,11 @@ def test_a_deleted_key_stops_working_once_it_expires(
     assert call(event())[0] == 200
     del aws["ssm"].parameters["/andur/api-keys/quillmoor"]
 
-    cold_start.advance(handler.KEY_CACHE_SECONDS - 1)
+    cold_start.advance(keys.KEY_CACHE_SECONDS - 1)
     assert call(event())[0] == 200
     cold_start.advance(1)
     assert call(event())[0] == 401
-    assert handler._key_cache["quillmoor"].key is None
+    assert keys._key_cache["quillmoor"].key is None
 
 
 #: What AWS says when a role may not read a parameter: it names the role and the account.
@@ -1153,7 +1169,7 @@ def test_an_unreadable_store_without_a_cached_key_lets_nobody_in(
     status, body = call(event())
     assert status == 500
     assert body == {"error": NOT_CONFIGURED_MESSAGE}
-    assert "quillmoor" not in handler._key_cache
+    assert "quillmoor" not in keys._key_cache
     (line,) = [line for line in log_lines(caplog) if line["event"] == "keys-unreadable"]
     assert line["workspace"] == "quillmoor"
     (failed,) = [line for line in log_lines(caplog) if line["event"] == "failed"]
@@ -1161,7 +1177,7 @@ def test_an_unreadable_store_without_a_cached_key_lets_nobody_in(
     assert KEYS["quillmoor"] not in caplog.text
 
     aws["ssm"].error = None
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     assert call(event())[0] == 200
 
 
@@ -1190,7 +1206,7 @@ def test_an_uncached_name_whose_read_failed_waits_before_the_next_read(
     assert call(event())[0] == 500
     assert len(aws["ssm"].calls) == 1
 
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS - 1)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS - 1)
     assert call(event())[0] == 500
     assert len(aws["ssm"].calls) == 1
 
@@ -1199,9 +1215,9 @@ def test_an_uncached_name_whose_read_failed_waits_before_the_next_read(
     assert len(aws["ssm"].calls) == 2
 
     aws["ssm"].error = None
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     assert call(event())[0] == 200
-    assert handler._failed_reads == {}
+    assert keys._failed_reads == {}
 
 
 def test_a_failed_read_is_remembered_from_when_it_failed(
@@ -1210,13 +1226,13 @@ def test_a_failed_read_is_remembered_from_when_it_failed(
     """A read that times out after 22 seconds still holds back the next one for the
     whole interval, not for what is left of it after the timeout."""
     aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
-    read = handler.read_workspace_key
+    read = keys.read_workspace_key
 
     def slow(path: str, workspace: str, region: str) -> str | None:
         cold_start.advance(22)
         return read(path, workspace, region)
 
-    monkeypatch.setattr(handler, "read_workspace_key", slow)
+    monkeypatch.setattr(keys, "read_workspace_key", slow)
     assert call(event())[0] == 500
     assert call(event())[0] == 500
     assert len(aws["ssm"].calls) == 1
@@ -1231,9 +1247,9 @@ def test_an_expired_key_that_cannot_be_read_ends_at_its_maximum_age(
     del aws["ssm"].parameters["/andur/api-keys/quillmoor"]
     aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
 
-    cold_start.advance(handler.KEY_CACHE_SECONDS)
+    cold_start.advance(keys.KEY_CACHE_SECONDS)
     assert call(event())[0] == 200
-    cold_start.advance(handler.KEY_MAX_AGE_SECONDS - handler.KEY_CACHE_SECONDS - 1)
+    cold_start.advance(keys.KEY_MAX_AGE_SECONDS - keys.KEY_CACHE_SECONDS - 1)
     assert call(event())[0] == 200
     reads = len(aws["ssm"].calls)
 
@@ -1242,17 +1258,17 @@ def test_an_expired_key_that_cannot_be_read_ends_at_its_maximum_age(
     assert call(event()) == (500, {"error": NOT_CONFIGURED_MESSAGE})
     assert len(aws["ssm"].calls) == reads
     # The brake is over: one more read, and it fails too.
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS - 1)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS - 1)
     assert call(event()) == (500, {"error": NOT_CONFIGURED_MESSAGE})
     assert len(aws["ssm"].calls) == reads + 1
 
     aws["ssm"].error = None
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     assert call(event())[0] == 401
 
 
 def test_the_maximum_age_is_three_cache_times() -> None:
-    assert handler.KEY_MAX_AGE_SECONDS == 3 * handler.KEY_CACHE_SECONDS == 900
+    assert keys.KEY_MAX_AGE_SECONDS == 3 * keys.KEY_CACHE_SECONDS == 900
 
 
 def test_reads_for_workspaces_without_a_cached_key_are_capped_per_instance(
@@ -1261,13 +1277,13 @@ def test_reads_for_workspaces_without_a_cached_key_are_capped_per_instance(
     """Invented names cannot spend the account's Parameter Store reads, and a customer
     whose key is cached never notices them."""
     assert call(event())[0] == 200
-    for number in range(handler.UNKNOWN_KEY_READS - 1):
+    for number in range(keys.UNKNOWN_KEY_READS - 1):
         assert call(event({"question": "How?", "workspace": f"invented-{number}"}))[0] == 401
-    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS
+    assert len(aws["ssm"].calls) == keys.UNKNOWN_KEY_READS
 
     response = respond(event({"question": "How?", "workspace": "one-too-many"}))
     assert response["statusCode"] == 503
-    assert response["headers"]["Retry-After"] == str(handler.KEY_RELOAD_MIN_SECONDS)
+    assert response["headers"]["Retry-After"] == str(keys.KEY_RELOAD_MIN_SECONDS)
     assert json.loads(response["body"]) == {
         "error": "Too many keys are being checked right now; try again in a few seconds."
     }
@@ -1277,11 +1293,11 @@ def test_reads_for_workspaces_without_a_cached_key_are_capped_per_instance(
         "Sekunden erneut."
     }
     assert call(event())[0] == 200
-    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS
+    assert len(aws["ssm"].calls) == keys.UNKNOWN_KEY_READS
 
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     assert call(event({"question": "How?", "workspace": "one-too-many"}))[0] == 401
-    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS + 1
+    assert len(aws["ssm"].calls) == keys.UNKNOWN_KEY_READS + 1
 
 
 def test_a_cached_key_due_for_a_reread_is_not_capped(
@@ -1290,14 +1306,14 @@ def test_a_cached_key_due_for_a_reread_is_not_capped(
     """Rereading a key the instance holds, expired or not the presented one, is the brake
     of its own workspace, not the cap for names without a key."""
     assert call(event())[0] == 200
-    cold_start.advance(handler.KEY_CACHE_SECONDS)
-    for number in range(handler.UNKNOWN_KEY_READS):
+    cold_start.advance(keys.KEY_CACHE_SECONDS)
+    for number in range(keys.UNKNOWN_KEY_READS):
         call(event({"question": "How?", "workspace": f"invented-{number}"}))
     assert call(event({"question": "How?", "workspace": "one-too-many"}))[0] == 503
 
     assert call(event())[0] == 200
     assert aws["ssm"].calls[-1] == QUILLMOOR_READ
-    assert len(aws["ssm"].calls) == handler.UNKNOWN_KEY_READS + 2
+    assert len(aws["ssm"].calls) == keys.UNKNOWN_KEY_READS + 2
 
 
 def test_rereads_for_wrong_keys_are_capped_across_workspaces(
@@ -1305,25 +1321,25 @@ def test_rereads_for_wrong_keys_are_capped_across_workspaces(
 ) -> None:
     """Wrong keys sent round many real workspaces cannot spend the account's reads;
     over the cap the cached key decides, and a wrong key is still a 401."""
-    names = [f"shop-{number}" for number in range(handler.WRONG_KEY_READS + 1)]
+    names = [f"shop-{number}" for number in range(keys.WRONG_KEY_READS + 1)]
     for name in names:
         aws["ssm"].parameters[f"/andur/api-keys/{name}"] = f"{name}-key"
-    for start in range(0, len(names), handler.UNKNOWN_KEY_READS):
-        for name in names[start : start + handler.UNKNOWN_KEY_READS]:
+    for start in range(0, len(names), keys.UNKNOWN_KEY_READS):
+        for name in names[start : start + keys.UNKNOWN_KEY_READS]:
             assert call(event({"question": "How?", "workspace": name}, key=f"{name}-key"))[0] == 200
-        cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+        cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     reads = len(aws["ssm"].calls)
 
     for name in names:
         assert call(event({"question": "How?", "workspace": name}, key="wrong-key"))[0] == 401
-    assert len(aws["ssm"].calls) == reads + handler.WRONG_KEY_READS
+    assert len(aws["ssm"].calls) == reads + keys.WRONG_KEY_READS
 
     assert (
         call(event({"question": "How?", "workspace": names[-1]}, key=f"{names[-1]}-key"))[0] == 200
     )
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     assert call(event({"question": "How?", "workspace": names[-1]}, key="wrong-key"))[0] == 401
-    assert len(aws["ssm"].calls) == reads + handler.WRONG_KEY_READS + 1
+    assert len(aws["ssm"].calls) == reads + keys.WRONG_KEY_READS + 1
 
 
 def timeout_errors() -> list[Exception]:
@@ -1358,7 +1374,7 @@ def test_a_key_read_that_times_out_with_a_cached_key_keeps_the_old_one(
     caplog.set_level(logging.INFO, logger="andur")
     assert call(event())[0] == 200
     aws["ssm"].error = timeout_errors()[index]
-    cold_start.advance(handler.KEY_CACHE_SECONDS)
+    cold_start.advance(keys.KEY_CACHE_SECONDS)
 
     assert call(event())[0] == 200
     assert call(event(key="wrong"))[0] == 401
@@ -1379,14 +1395,14 @@ def test_an_expired_key_that_cannot_be_read_again_keeps_working(
     caplog.set_level(logging.INFO, logger="andur")
     call(event())
     aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
-    cold_start.advance(handler.KEY_CACHE_SECONDS)
+    cold_start.advance(keys.KEY_CACHE_SECONDS)
 
     assert call(event())[0] == 200
     assert len(aws["ssm"].calls) == 2
     (line,) = [line for line in log_lines(caplog) if line["event"] == "keys-reload-failed"]
     assert (line["workspace"], line["stale"]) == ("quillmoor", True)
 
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS - 1)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS - 1)
     assert call(event())[0] == 200
     assert len(aws["ssm"].calls) == 2
 
@@ -1402,7 +1418,7 @@ def test_a_failed_reread_still_answers_a_wrong_key_with_401(
     caplog.set_level(logging.INFO, logger="andur")
     call(event())
     aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
 
     assert call(event(key="wrong"))[0] == 401
     assert call(event())[0] == 200
@@ -1416,7 +1432,7 @@ def test_an_unknown_workspace_stays_unknown_while_the_store_cannot_be_read(
     nobody = event({"question": "How?", "workspace": "nobody"})
     assert call(nobody)[0] == 401
     aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     assert call(nobody)[0] == 401
 
 
@@ -1427,11 +1443,11 @@ def test_an_expired_key_still_stops_working_once_the_store_can_be_read_again(
     assert call(event())[0] == 200
     del aws["ssm"].parameters["/andur/api-keys/quillmoor"]
     aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
-    cold_start.advance(handler.KEY_CACHE_SECONDS)
+    cold_start.advance(keys.KEY_CACHE_SECONDS)
     assert call(event())[0] == 200
 
     aws["ssm"].error = None
-    cold_start.advance(handler.KEY_RELOAD_MIN_SECONDS)
+    cold_start.advance(keys.KEY_RELOAD_MIN_SECONDS)
     assert call(event())[0] == 401
 
 
@@ -1446,7 +1462,7 @@ def test_missing_boto3_is_a_configuration_error(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(aws_module, "client", no_sdk)
     with pytest.raises(ConfigurationError, match="boto3"):
-        handler.client("ssm", "us-east-1")
+        clients.client("ssm", "us-east-1")
 
 
 def test_the_modules_import_and_read_requests_without_boto3() -> None:
@@ -1454,8 +1470,8 @@ def test_the_modules_import_and_read_requests_without_boto3() -> None:
     code = (
         "import sys; sys.modules['boto3'] = None; sys.modules['botocore'] = None\n"
         "sys.path.insert(0, 'app')\n"
-        "import handler\n"
-        "print(handler.requested_workspace({'workspace': 'quillmoor'}))\n"
+        "import handler, intake\n"
+        "print(intake.requested_workspace({'workspace': 'quillmoor'}))\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", code], cwd=REPOSITORY_ROOT, capture_output=True, text=True
@@ -1469,11 +1485,11 @@ def test_the_modules_import_and_read_requests_without_boto3() -> None:
 
 def budget_item(aws: dict[str, Any], key: str = KEYS["quillmoor"]) -> dict[str, Any]:
     """The table item of one key, found the way the handler finds it."""
-    return aws["dynamodb"].items[handler.key_hash(key)]
+    return aws["dynamodb"].items[budget.key_hash(key)]
 
 
 def number(item: dict[str, Any], name: str) -> int | None:
-    return handler.budget_number(item, name)
+    return budget.budget_number(item, name)
 
 
 def test_a_key_is_hashed_and_the_key_itself_never_leaves_the_function(aws: dict[str, Any]) -> None:
@@ -1483,14 +1499,14 @@ def test_a_key_is_hashed_and_the_key_itself_never_leaves_the_function(aws: dict[
     assert call(event())[0] == 200
     (update,) = aws["dynamodb"].calls
     assert update["Key"] == {
-        handler.BUDGET_KEY_ATTRIBUTE: {"S": hashlib.sha256(KEYS["quillmoor"].encode()).hexdigest()}
+        budget.BUDGET_KEY_ATTRIBUTE: {"S": hashlib.sha256(KEYS["quillmoor"].encode()).hexdigest()}
     }
     assert KEYS["quillmoor"] not in json.dumps(update)
     assert KEYS["quillmoor"] not in json.dumps(aws["dynamodb"].items, default=str)
 
 
 def test_the_first_question_opens_the_window_and_counts_one(aws: dict[str, Any]) -> None:
-    started = int(handler.wall_clock())
+    started = int(clocks.wall_clock())
     assert call(event())[0] == 200
 
     item = budget_item(aws)
@@ -1499,7 +1515,7 @@ def test_the_first_question_opens_the_window_and_counts_one(aws: dict[str, Any])
     assert number(item, "first_used_at") == started
     assert number(item, "window_seconds") == 48 * SECONDS_PER_HOUR
     assert number(item, "expires_at") == started + 48 * SECONDS_PER_HOUR
-    assert number(item, handler.BUDGET_TTL_ATTRIBUTE) == started + 365 * 24 * SECONDS_PER_HOUR
+    assert number(item, budget.BUDGET_TTL_ATTRIBUTE) == started + 365 * 24 * SECONDS_PER_HOUR
     assert item["workspace"] == {"S": "quillmoor"}
 
 
@@ -1552,8 +1568,8 @@ def test_a_budget_set_before_the_first_question_overrides_the_defaults(
     aws: dict[str, Any], budget_clock: "FakeWallClock"
 ) -> None:
     """Two questions and a six-hour window, written the way the CLI command writes them."""
-    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
-        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+    aws["dynamodb"].items[budget.key_hash(KEYS["quillmoor"])] = {
+        budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(KEYS["quillmoor"])},
         "question_limit": {"N": "2"},
         "window_seconds": {"N": str(6 * SECONDS_PER_HOUR)},
         "keep_seconds": {"N": str(7 * 24 * SECONDS_PER_HOUR)},
@@ -1563,7 +1579,7 @@ def test_a_budget_set_before_the_first_question_overrides_the_defaults(
     assert call(event())[0] == 200
     item = budget_item(aws)
     assert number(item, "expires_at") == started + 6 * SECONDS_PER_HOUR
-    assert number(item, handler.BUDGET_TTL_ATTRIBUTE) == started + 7 * 24 * SECONDS_PER_HOUR
+    assert number(item, budget.BUDGET_TTL_ATTRIBUTE) == started + 7 * 24 * SECONDS_PER_HOUR
     assert call(event())[0] == 200
 
     status, body = call(event())
@@ -1577,7 +1593,7 @@ def test_deleting_the_item_gives_the_key_a_fresh_budget(aws: dict[str, Any]) -> 
         call(event())
     assert call(event())[0] == 402
 
-    del aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])]
+    del aws["dynamodb"].items[budget.key_hash(KEYS["quillmoor"])]
     assert call(event())[0] == 200
     assert number(budget_item(aws), "questions_used") == 1
 
@@ -1726,7 +1742,7 @@ def test_a_spent_key_is_logged_as_refused_with_the_reason_and_without_the_key(
     assert line["workspace"] == "quillmoor"
     assert line["error"] == QUESTIONS_SPENT_MESSAGE.format(limit=10)
     assert KEYS["quillmoor"] not in caplog.text
-    assert handler.key_hash(KEYS["quillmoor"]) not in caplog.text
+    assert budget.key_hash(KEYS["quillmoor"]) not in caplog.text
 
 
 def test_which_half_ran_out_is_read_from_the_item_the_condition_refused() -> None:
@@ -1741,15 +1757,15 @@ def test_which_half_ran_out_is_read_from_the_item_the_condition_refused() -> Non
         "questions_used": {"N": "10"},
         "question_limit": {"N": "10"},
     }
-    assert handler.spent_message(closed, now) == handler.WINDOW_CLOSED_MESSAGES
-    assert handler.spent_message(spent, now) == {
+    assert budget.spent_message(closed, now) == sentences.WINDOW_CLOSED_MESSAGES
+    assert budget.spent_message(spent, now) == {
         language: text.format(limit=10)
-        for language, text in handler.QUESTIONS_SPENT_MESSAGES.items()
+        for language, text in sentences.QUESTIONS_SPENT_MESSAGES.items()
     }
-    assert handler.spent_message({}, now) == handler.BUDGET_SPENT_MESSAGES
+    assert budget.spent_message({}, now) == sentences.BUDGET_SPENT_MESSAGES
     assert (
-        handler.spent_message({"questions_used": {"S": "many"}}, now)
-        == handler.BUDGET_SPENT_MESSAGES
+        budget.spent_message({"questions_used": {"S": "many"}}, now)
+        == sentences.BUDGET_SPENT_MESSAGES
     )
 
 
@@ -1760,19 +1776,19 @@ def test_the_spent_status_is_none_of_the_three_it_could_be_mistaken_for() -> Non
 
 
 def test_the_update_writes_the_attributes_the_condition_and_the_table_watch() -> None:
-    assert f"{handler.BUDGET_TTL_ATTRIBUTE} = " in handler.BUDGET_UPDATE_EXPRESSION
-    assert "first_used_at = " in handler.BUDGET_UPDATE_EXPRESSION
-    assert "first_used_at" in handler.BUDGET_CONDITION
-    assert handler.BUDGET_UPDATE_EXPRESSION.startswith("SET ")
+    assert f"{budget.BUDGET_TTL_ATTRIBUTE} = " in budget.BUDGET_UPDATE_EXPRESSION
+    assert "first_used_at = " in budget.BUDGET_UPDATE_EXPRESSION
+    assert "first_used_at" in budget.BUDGET_CONDITION
+    assert budget.BUDGET_UPDATE_EXPRESSION.startswith("SET ")
 
 
-#: `handler.BUDGET_CONDITION` with one operator changed, the two changes that
+#: `budget.BUDGET_CONDITION` with one operator changed, the two changes that
 #: would cost real money: a key that gets an eleventh question, and a window
 #: that stays open one second past its end. Each is a single character.
-ONE_TOO_MANY = handler.BUDGET_CONDITION.replace(
+ONE_TOO_MANY = budget.BUDGET_CONDITION.replace(
     "questions_used < question_limit", "questions_used <= question_limit"
 )
-ONE_SECOND_TOO_LONG = handler.BUDGET_CONDITION.replace("expires_at > :now", "expires_at >= :now")
+ONE_SECOND_TOO_LONG = budget.BUDGET_CONDITION.replace("expires_at > :now", "expires_at >= :now")
 
 
 def test_a_condition_that_allowed_one_question_too_many_would_show_here(
@@ -1786,7 +1802,7 @@ def test_a_condition_that_allowed_one_question_too_many_would_show_here(
     which is what proves the tests are reading the condition the handler
     sends rather than a copy of its meaning.
     """
-    monkeypatch.setattr(handler, "BUDGET_CONDITION", ONE_TOO_MANY)
+    monkeypatch.setattr(budget, "BUDGET_CONDITION", ONE_TOO_MANY)
     for asked in range(1, 11):
         assert call(event())[0] == 200, f"question {asked}"
     assert call(event())[0] == 200
@@ -1797,7 +1813,7 @@ def test_a_condition_that_held_the_window_open_a_second_too_long_would_show_here
     aws: dict[str, Any], budget_clock: "FakeWallClock", monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The same for the other half: ``>`` against ``>=`` at the exact second."""
-    monkeypatch.setattr(handler, "BUDGET_CONDITION", ONE_SECOND_TOO_LONG)
+    monkeypatch.setattr(budget, "BUDGET_CONDITION", ONE_SECOND_TOO_LONG)
     assert call(event())[0] == 200
     budget_clock.advance(48 * SECONDS_PER_HOUR)
     assert call(event())[0] == 200
@@ -1812,9 +1828,9 @@ def test_an_item_that_lost_an_attribute_does_not_lock_its_key_out(aws: dict[str,
     days by default. The message said nothing either, because there was no
     limit in the item to name.
     """
-    started = int(handler.wall_clock())
-    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
-        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+    started = int(clocks.wall_clock())
+    aws["dynamodb"].items[budget.key_hash(KEYS["quillmoor"])] = {
+        budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(KEYS["quillmoor"])},
         "first_used_at": {"N": str(started)},
         "questions_used": {"N": "3"},
         "expires_at": {"N": str(started + 48 * SECONDS_PER_HOUR)},
@@ -1837,8 +1853,8 @@ def test_an_item_whose_own_window_outlasts_it_has_its_end_pushed_out(
     key would start over with ten questions. The counting write hands back
     what it wrote, and the second write puts the end past the window.
     """
-    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
-        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+    aws["dynamodb"].items[budget.key_hash(KEYS["quillmoor"])] = {
+        budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(KEYS["quillmoor"])},
         "window_seconds": {"N": str(7 * SECONDS_PER_DAY)},
         "keep_seconds": {"N": str(SECONDS_PER_DAY)},
     }
@@ -1850,7 +1866,7 @@ def test_an_item_whose_own_window_outlasts_it_has_its_end_pushed_out(
         started + 7 * SECONDS_PER_DAY + int(ENVIRONMENT["KEEP_DAYS"]) * SECONDS_PER_DAY
     )
     assert number(item, "expires_at") == started + 7 * SECONDS_PER_DAY
-    assert number(item, handler.BUDGET_TTL_ATTRIBUTE) == end_of_the_item
+    assert number(item, budget.BUDGET_TTL_ATTRIBUTE) == end_of_the_item
     counted, repaired = aws["dynamodb"].calls
     assert "ConditionExpression" in counted and "ConditionExpression" not in repaired
 
@@ -1866,8 +1882,8 @@ def test_the_repair_holds_and_is_not_written_a_second_time(
     those repairs is throttled. Raising ``keep_seconds`` with it is what
     makes the counting update arrive at the same number by itself.
     """
-    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
-        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+    aws["dynamodb"].items[budget.key_hash(KEYS["quillmoor"])] = {
+        budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(KEYS["quillmoor"])},
         "window_seconds": {"N": str(7 * SECONDS_PER_DAY)},
         "keep_seconds": {"N": str(SECONDS_PER_DAY)},
     }
@@ -1882,7 +1898,7 @@ def test_the_repair_holds_and_is_not_written_a_second_time(
 
     item = budget_item(aws)
     assert number(item, "expires_at") == started + 7 * SECONDS_PER_DAY
-    assert number(item, handler.BUDGET_TTL_ATTRIBUTE) == end_of_the_item
+    assert number(item, budget.BUDGET_TTL_ATTRIBUTE) == end_of_the_item
     # Count, repair, count — and no repair behind the second question.
     assert len(aws["dynamodb"].calls) == 3
 
@@ -1892,8 +1908,8 @@ def test_a_repair_that_does_not_get_through_does_not_cost_the_answer(
 ) -> None:
     """The question is paid for by then, so a second write that fails goes to the log."""
     caplog.set_level(logging.INFO, logger="andur")
-    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
-        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+    aws["dynamodb"].items[budget.key_hash(KEYS["quillmoor"])] = {
+        budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(KEYS["quillmoor"])},
         "window_seconds": {"N": str(7 * SECONDS_PER_DAY)},
         "keep_seconds": {"N": str(SECONDS_PER_DAY)},
     }
@@ -1905,7 +1921,7 @@ def test_a_repair_that_does_not_get_through_does_not_cost_the_answer(
     assert line["detail"] == "ClientError: ThrottlingException"
 
 
-#: `handler.BUDGET_CONDITION` as it was before plans, copied by hand on 2026-10-01.
+#: `budget.BUDGET_CONDITION` as it was before plans, copied by hand on 2026-10-01.
 #: The demo budget is this condition, with nothing but the plan check in front.
 DEMO_CONDITION_BEFORE_PLANS = (
     "attribute_not_exists(first_used_at)"
@@ -1919,7 +1935,7 @@ DEMO_CONDITION_BEFORE_PLANS = (
 
 
 def test_the_demo_condition_is_the_one_before_plans_behind_the_plan_check() -> None:
-    assert handler.BUDGET_CONDITION == (
+    assert budget.BUDGET_CONDITION == (
         f"attribute_not_exists(#plan) AND ({DEMO_CONDITION_BEFORE_PLANS})"
     )
 
@@ -1938,14 +1954,14 @@ def key_on_plan(
     """Preset the key's item the way `python -m scripts.workspace plan` writes it, with
     counts already spent, such as ``day_2026_10_01=599`` for ``day_2026-10-01``."""
     item: dict[str, Any] = {
-        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(key)},
+        budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(key)},
         "plan": {"S": plan},
         "workspace": {"S": "quillmoor"},
     }
     for name, used in counts.items():
         period, _, rest = name.partition("_")
         item[f"{period}_{rest.replace('_', '-')}"] = {"N": str(used)}
-    aws["dynamodb"].items[handler.key_hash(key)] = item
+    aws["dynamodb"].items[budget.key_hash(key)] = item
     return item
 
 
@@ -1958,24 +1974,24 @@ def german_call(request_event: dict[str, Any] | None = None) -> tuple[int, dict[
     return call(request_event or event(in_("de")))
 
 
-BETRIEB = handler.plans.plan_named("betrieb")
-FIRMA = handler.plans.plan_named("firma")
+BETRIEB = plans.plan_named("betrieb")
+FIRMA = plans.plan_named("firma")
 
 
 def test_the_plans_are_the_ones_decided_on_2026_10_01() -> None:
-    assert [tuple(plan) for plan in handler.plans.PLANS] == [
+    assert [tuple(plan) for plan in plans.PLANS] == [
         ("betrieb", 6000, 600),
         ("firma", 15000, 1500),
     ]
-    assert handler.plans.DEMO not in {plan.name for plan in handler.plans.PLANS}
+    assert plans.DEMO not in {plan.name for plan in plans.PLANS}
 
 
 def test_every_plan_allows_less_a_day_than_a_month() -> None:
-    names = [plan.name for plan in handler.plans.PLANS]
+    names = [plan.name for plan in plans.PLANS]
     assert len(names) == len(set(names))
-    for plan in handler.plans.PLANS:
+    for plan in plans.PLANS:
         assert 0 < plan.questions_per_day <= plan.questions_per_month
-        assert handler.WORKSPACE_NAME.match(plan.name)
+        assert intake.WORKSPACE_NAME.match(plan.name)
 
 
 @pytest.mark.parametrize(
@@ -1993,7 +2009,7 @@ def test_every_plan_allows_less_a_day_than_a_month() -> None:
 )
 def test_summer_time_begins_and_ends_on_the_last_sunday(year: int, month: int, day: int) -> None:
     """The dates the clocks changed or will change in Germany."""
-    assert handler.last_sunday(year, month) == date(year, month, day)
+    assert budget.last_sunday(year, month) == date(year, month, day)
 
 
 @pytest.mark.parametrize(
@@ -2022,7 +2038,7 @@ def test_summer_time_begins_and_ends_on_the_last_sunday(year: int, month: int, d
 )
 def test_the_day_is_the_german_calendar_day(utc: str, german_day: str) -> None:
     now = int(datetime.fromisoformat(utc).replace(tzinfo=UTC).timestamp())
-    assert handler.german_date(now).isoformat() == german_day
+    assert budget.german_date(now).isoformat() == german_day
 
 
 def test_the_german_day_is_the_time_zone_databases_every_half_hour_for_five_years() -> None:
@@ -2036,14 +2052,14 @@ def test_the_german_day_is_the_time_zone_databases_every_half_hour_for_five_year
     moment = datetime(2026, 1, 1, tzinfo=UTC)
     while moment.year < 2031:
         now = int(moment.timestamp())
-        assert handler.german_date(now) == moment.astimezone(berlin).date(), moment
+        assert budget.german_date(now) == moment.astimezone(berlin).date(), moment
         moment += timedelta(minutes=30)
 
 
 def test_a_key_on_a_plan_counts_its_day_and_its_month_and_keeps_no_end(
     aws: dict[str, Any], budget_clock: "FakeWallClock"
 ) -> None:
-    key_on_plan(aws)[handler.BUDGET_TTL_ATTRIBUTE] = {"N": "1"}
+    key_on_plan(aws)[budget.BUDGET_TTL_ATTRIBUTE] = {"N": "1"}
     at(budget_clock, "2026-10-01T09:00:00+02:00")
 
     assert call(event())[0] == 200
@@ -2053,7 +2069,7 @@ def test_a_key_on_a_plan_counts_its_day_and_its_month_and_keeps_no_end(
     assert number(item, "day_2026-10-01") == 2
     # A plan item is never removed by the table's TTL: a key that lost it would fall
     # back to the demo budget.
-    assert handler.BUDGET_TTL_ATTRIBUTE not in item
+    assert budget.BUDGET_TTL_ATTRIBUTE not in item
     assert "questions_used" not in item and "first_used_at" not in item
     assert item["workspace"] == {"S": "quillmoor"}
 
@@ -2063,10 +2079,10 @@ def test_a_plan_question_is_two_writes_and_never_a_read(aws: dict[str, Any]) -> 
     key_on_plan(aws)
     assert call(event())[0] == 200
     demo, counted = aws["dynamodb"].calls
-    assert demo["ConditionExpression"] == handler.BUDGET_CONDITION
-    assert counted["ConditionExpression"] == handler.PLAN_CONDITION
+    assert demo["ConditionExpression"] == budget.BUDGET_CONDITION
+    assert counted["ConditionExpression"] == budget.PLAN_CONDITION
     assert "ReturnValues" not in counted
-    assert len(aws["dynamodb"].calls) == handler.aws.BUDGET_WRITES_PER_REQUEST
+    assert len(aws["dynamodb"].calls) == aws_module.BUDGET_WRITES_PER_REQUEST
 
 
 def test_the_last_question_of_the_day_goes_through_and_the_next_is_429(
@@ -2078,10 +2094,10 @@ def test_the_last_question_of_the_day_goes_through_and_the_next_is_429(
     assert call(event())[0] == 200
     status, body = call(event())
     assert status == 429
-    assert body == {"error": handler.DAY_QUOTA_MESSAGES["en"].format(limit="600")}
+    assert body == {"error": sentences.DAY_QUOTA_MESSAGES["en"].format(limit="600")}
     status, body = german_call()
     assert status == 429
-    assert body == {"error": handler.DAY_QUOTA_MESSAGES["de"].format(limit="600")}
+    assert body == {"error": sentences.DAY_QUOTA_MESSAGES["de"].format(limit="600")}
     assert len(aws["bedrock-runtime"].calls) == 1
     item = budget_item(aws)
     assert number(item, "day_2026-10-01") == 600
@@ -2097,9 +2113,9 @@ def test_the_last_question_of_the_month_goes_through_and_the_next_is_429(
     assert call(event())[0] == 200
     status, body = call(event())
     assert status == 429
-    assert body == {"error": handler.MONTH_QUOTA_MESSAGES["en"].format(limit="6,000")}
+    assert body == {"error": sentences.MONTH_QUOTA_MESSAGES["en"].format(limit="6,000")}
     status, body = german_call()
-    assert body == {"error": handler.MONTH_QUOTA_MESSAGES["de"].format(limit="6.000")}
+    assert body == {"error": sentences.MONTH_QUOTA_MESSAGES["de"].format(limit="6.000")}
     assert number(budget_item(aws), "month_2026-10") == 6000
 
 
@@ -2111,26 +2127,26 @@ def test_a_month_that_is_used_up_says_so_even_when_the_day_is_too(
     at(budget_clock, "2026-10-20T15:00:00+02:00")
     assert call(event()) == (
         429,
-        {"error": handler.MONTH_QUOTA_MESSAGES["en"].format(limit="6,000")},
+        {"error": sentences.MONTH_QUOTA_MESSAGES["en"].format(limit="6,000")},
     )
 
 
 def test_the_quota_message_says_what_a_customer_needs_and_nothing_about_a_new_key() -> None:
-    for messages in (handler.MONTH_QUOTA_MESSAGES, handler.DAY_QUOTA_MESSAGES):
+    for messages in (sentences.MONTH_QUOTA_MESSAGES, sentences.DAY_QUOTA_MESSAGES):
         assert "contact person" in messages["en"]
         assert "Ansprechpartner" in messages["de"]
         assert "new key" not in messages["en"]
         assert "neuen" not in messages["de"]
-    assert "this month" in handler.MONTH_QUOTA_MESSAGES["en"]
-    assert "diesen Monat" in handler.MONTH_QUOTA_MESSAGES["de"]
-    assert "today" in handler.DAY_QUOTA_MESSAGES["en"]
-    assert "heute" in handler.DAY_QUOTA_MESSAGES["de"]
+    assert "this month" in sentences.MONTH_QUOTA_MESSAGES["en"]
+    assert "diesen Monat" in sentences.MONTH_QUOTA_MESSAGES["de"]
+    assert "today" in sentences.DAY_QUOTA_MESSAGES["en"]
+    assert "heute" in sentences.DAY_QUOTA_MESSAGES["de"]
 
 
 def test_a_full_quota_is_429_and_a_spent_demo_still_402() -> None:
     """429 says: later. A demo key that is spent stays spent, so it keeps its 402."""
-    assert handler.QuotaReached.status == 429
-    assert handler.QuotaReached.headers == {}
+    assert errors.QuotaReached.status == 429
+    assert errors.QuotaReached.headers == {}
     assert BudgetSpent.status == 402
 
 
@@ -2154,9 +2170,9 @@ def test_a_full_day_ends_at_german_midnight_to_the_second(
     at(budget_clock, first_second)
     assert call(event())[0] == 200
     item = budget_item(aws)
-    assert number(item, handler.day_count(day + timedelta(days=1))) == 1
-    assert number(item, handler.day_count(day)) == 600
-    assert number(item, handler.month_count(day)) == 2001
+    assert number(item, budget.day_count(day + timedelta(days=1))) == 1
+    assert number(item, budget.day_count(day)) == 600
+    assert number(item, budget.month_count(day)) == 2001
 
 
 def test_a_full_month_ends_at_german_midnight_on_the_first(
@@ -2194,13 +2210,13 @@ def test_many_days_and_months_count_one_after_the_other(
     for _ in range(70):
         for _ in range(3):
             assert call(event())[0] == 200
-            month = handler.month_count(handler.german_date(int(budget_clock())))
+            month = budget.month_count(budget.german_date(int(budget_clock())))
             asked[month] = asked.get(month, 0) + 1
         budget_clock.advance(SECONDS_PER_DAY)
     item = budget_item(aws)
-    today = handler.german_date(int(budget_clock()) - SECONDS_PER_DAY)
-    assert number(item, handler.month_count(today)) == asked[handler.month_count(today)]
-    assert number(item, handler.day_count(today)) == 3
+    today = budget.german_date(int(budget_clock()) - SECONDS_PER_DAY)
+    assert number(item, budget.month_count(today)) == asked[budget.month_count(today)]
+    assert number(item, budget.day_count(today)) == 3
 
 
 def test_questions_at_the_limit_at_the_same_time_pass_only_up_to_it(
@@ -2309,7 +2325,7 @@ def test_a_long_tail_of_old_counts_is_cleared_a_few_at_a_time(
 
     assert call(event())[0] == 200
     left = [name for name in budget_item(aws) if name.startswith("day_2026-09")]
-    assert len(left) == 15 - handler.MAX_STALE_COUNTS
+    assert len(left) == 15 - budget.MAX_STALE_COUNTS
     assert call(event())[0] == 200
     assert not [name for name in budget_item(aws) if name.startswith("day_2026-09")]
 
@@ -2325,7 +2341,7 @@ def test_a_spent_demo_key_put_on_a_plan_asks_again_and_loses_its_end(
 
     assert call(event())[0] == 200
     item = budget_item(aws)
-    assert handler.BUDGET_TTL_ATTRIBUTE not in item
+    assert budget.BUDGET_TTL_ATTRIBUTE not in item
     assert number(item, "questions_used") == 10
 
 
@@ -2345,7 +2361,7 @@ def test_a_new_plan_takes_its_limits_and_keeps_the_months_count(
     budget_item(aws)["plan"] = {"S": "betrieb"}
     assert call(event()) == (
         429,
-        {"error": handler.MONTH_QUOTA_MESSAGES["en"].format(limit="6,000")},
+        {"error": sentences.MONTH_QUOTA_MESSAGES["en"].format(limit="6,000")},
     )
 
 
@@ -2401,8 +2417,8 @@ def test_missing_counts_are_a_fresh_period_and_the_item_needs_nothing_else(
     aws: dict[str, Any],
 ) -> None:
     """A plan item written with the plan alone, no workspace, no counts."""
-    aws["dynamodb"].items[handler.key_hash(KEYS["quillmoor"])] = {
-        handler.BUDGET_KEY_ATTRIBUTE: {"S": handler.key_hash(KEYS["quillmoor"])},
+    aws["dynamodb"].items[budget.key_hash(KEYS["quillmoor"])] = {
+        budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(KEYS["quillmoor"])},
         "plan": {"S": "firma"},
     }
     assert call(event())[0] == 200
@@ -2442,7 +2458,7 @@ def test_a_condition_that_allowed_the_601st_question_would_show_here(
 ) -> None:
     """As for the demo: the tests read the plan condition the handler sends."""
     monkeypatch.setattr(
-        handler, "PLAN_CONDITION", handler.PLAN_CONDITION.replace("#day <", "#day <=")
+        budget, "PLAN_CONDITION", budget.PLAN_CONDITION.replace("#day <", "#day <=")
     )
     key_on_plan(aws, day_2026_10_01=600)
     at(budget_clock, "2026-10-01T09:00:00+02:00")
@@ -2460,9 +2476,9 @@ def test_a_refused_plan_question_is_logged_with_its_reason_and_without_the_key(
     assert call(event())[0] == 429
     (line,) = [line for line in log_lines(caplog) if line["event"] == "refused"]
     assert line["status"] == 429
-    assert line["error"] == handler.DAY_QUOTA_MESSAGES["en"].format(limit="600")
+    assert line["error"] == sentences.DAY_QUOTA_MESSAGES["en"].format(limit="600")
     assert KEYS["quillmoor"] not in caplog.text
-    assert handler.key_hash(KEYS["quillmoor"]) not in caplog.text
+    assert budget.key_hash(KEYS["quillmoor"]) not in caplog.text
 
 
 def test_two_keys_on_plans_count_apart(aws: dict[str, Any], budget_clock: "FakeWallClock") -> None:
@@ -2480,7 +2496,7 @@ def test_two_keys_on_plans_count_apart(aws: dict[str, Any], budget_clock: "FakeW
 
 def test_retrieval_is_filtered_to_the_workspace() -> None:
     runtime = FakeAgentRuntime([hit()])
-    assert handler.retrieve_passages(runtime, "KB1", "How?", "pellwick", 6) == [hit()]
+    assert retrieval.retrieve_passages(runtime, "KB1", "How?", "pellwick", 6) == [hit()]
     (call_arguments,) = runtime.calls
     assert call_arguments["knowledgeBaseId"] == "KB1"
     assert call_arguments["retrievalQuery"] == {"text": "How?"}
@@ -2493,20 +2509,20 @@ def test_retrieval_is_filtered_to_the_workspace() -> None:
 def test_a_failed_retrieval_is_a_retrieval_error() -> None:
     runtime = FakeAgentRuntime(error=client_error("ThrottlingException", operation="Retrieve"))
     with pytest.raises(RetrievalError, match="throttled") as error:
-        handler.retrieve_passages(runtime, "KB1", "How?", "quillmoor", 6)
+        retrieval.retrieve_passages(runtime, "KB1", "How?", "quillmoor", 6)
     assert error.value.status == 502
 
 
 def test_passages_of_another_workspace_are_dropped() -> None:
     results = [hit(), hit(workspace="pellwick"), {"content": {"text": "no metadata"}}]
-    kept, dropped = handler.keep_workspace(results, "quillmoor")
+    kept, dropped = retrieval.keep_workspace(results, "quillmoor")
     assert kept == [hit()]
     assert dropped == 2
 
 
 def test_source_carries_file_layer_workspace_score_words_and_excerpt() -> None:
     long_text = "# Title\n\n" + "word " * 200
-    source = handler.to_source(3, hit(layer="agent", name="summary--02-x.md", text=long_text))
+    source = retrieval.to_source(3, hit(layer="agent", name="summary--02-x.md", text=long_text))
     assert source["number"] == 3
     assert source["file"] == "summary--02-x.md"
     assert source["layer"] == "agent"
@@ -2515,16 +2531,16 @@ def test_source_carries_file_layer_workspace_score_words_and_excerpt() -> None:
     assert source["words"] == 202
     assert source["cited"] is False
     assert source["excerpt"].endswith(" ...")
-    assert len(source["excerpt"]) <= handler.EXCERPT_CHARACTERS + 4
+    assert len(source["excerpt"]) <= retrieval.EXCERPT_CHARACTERS + 4
     assert "\n" not in source["excerpt"]
 
 
 def test_source_file_name_leaves_out_the_bucket_and_its_account_id() -> None:
-    assert "000000000000" not in json.dumps(handler.to_source(1, hit()))
+    assert "000000000000" not in json.dumps(retrieval.to_source(1, hit()))
 
 
 def test_source_of_an_incomplete_hit_does_not_fail() -> None:
-    assert handler.to_source(1, {}) == {
+    assert retrieval.to_source(1, {}) == {
         "number": 1,
         "file": "unknown",
         "layer": "unknown",
@@ -2538,7 +2554,7 @@ def test_source_of_an_incomplete_hit_does_not_fail() -> None:
 
 def test_sources_are_numbered_with_layer_and_file() -> None:
     table = "| Plan | Price |\n|---|---|\n| Team | €19 |"
-    sources = handler.build_sources(
+    sources = prompts.build_sources(
         [hit(text="First passage."), hit(layer="inbox", name="draft--01.md", text=table)]
     )
     assert sources.startswith(
@@ -2554,10 +2570,10 @@ def test_the_message_marks_sources_and_question_for_the_guardrail() -> None:
     a phone number in a document would be masked before the model saw it,
     and a document about taxes would be refused as a tax question.
     """
-    content = handler.build_content("What does Team cost?", [hit(text="First passage.")])
+    content = prompts.build_content("What does Team cost?", [hit(text="First passage.")])
     sources, label, question = content
     assert sources["guardContent"]["text"]["qualifiers"] == ["grounding_source"]
-    assert sources["guardContent"]["text"]["text"] == handler.build_sources(
+    assert sources["guardContent"]["text"]["text"] == prompts.build_sources(
         [hit(text="First passage.")]
     )
     assert label == {"text": "\n\nQuestion:"}
@@ -2571,13 +2587,13 @@ def test_the_message_marks_sources_and_question_for_the_guardrail() -> None:
 def test_the_longest_question_fits_the_guardrail_query() -> None:
     """A guardrail query may be 1,000 characters; the question block holds the question alone."""
     question = "x" * MAX_QUESTION_CHARACTERS
-    (_, _, block) = handler.build_content(question, [hit()])
+    (_, _, block) = prompts.build_content(question, [hit()])
     assert len(block["guardContent"]["text"]["text"]) <= 1000
 
 
 def test_an_outlier_passage_is_cut_in_the_prompt_with_a_note() -> None:
     outlier = "word " * 2000
-    prompt = handler.build_sources([hit(text=outlier), hit(text="Short.")])
+    prompt = prompts.build_sources([hit(text=outlier), hit(text="Short.")])
     first_block = prompt.split("\n\n[2]")[0]
     assert len(first_block) < MAX_SOURCE_CHARACTERS + 200
     assert (
@@ -2588,23 +2604,23 @@ def test_an_outlier_passage_is_cut_in_the_prompt_with_a_note() -> None:
 
 def test_a_passage_at_the_limit_is_not_cut() -> None:
     text = "x" * MAX_SOURCE_CHARACTERS
-    assert handler.capped(text) == text
+    assert prompts.capped(text) == text
 
 
 def test_system_prompt_holds_the_rules_the_response_relies_on() -> None:
-    assert NOT_IN_SOURCES_ANSWER in handler.system_prompt("en")
-    assert "[1]" in handler.system_prompt("en")
-    assert "only from the numbered sources" in handler.system_prompt("en")
+    assert NOT_IN_SOURCES_ANSWER in prompts.system_prompt("en")
+    assert "[1]" in prompts.system_prompt("en")
+    assert "only from the numbered sources" in prompts.system_prompt("en")
     # Nova Pro answered "[1][2]" alone in 3 of 13 tries on 03.10.2026; the relevance
     # check withholds such an answer. With this rule: 0 of 10.
-    assert "numbers in brackets alone are not an answer" in handler.system_prompt("en")
+    assert "numbers in brackets alone are not an answer" in prompts.system_prompt("en")
 
 
 def test_the_not_in_sources_sentence_is_for_a_question_the_sources_answer_no_part_of() -> None:
     """Qwen3 235B wrote only that sentence to c32, whose deposit the sources carry, in 6 of 16
     runs with the previous wording (a second rule for a part-answered question) and in 0 of 20
     with this one, which first asks for each part (07.10.2026, docs/decisions.md)."""
-    prompt = handler.system_prompt("en")
+    prompt = prompts.system_prompt("en")
     assert "If the sources answer at least one part, answer that part with its source" in prompt
     assert "say in one short sentence which part they do not answer" in prompt
     rule = "If they answer no part, reply with exactly this sentence and nothing else:"
@@ -2619,10 +2635,10 @@ def test_the_not_in_sources_sentence_is_for_a_question_the_sources_answer_no_par
 def test_model_gets_system_rules_message_token_limit_and_guardrail() -> None:
     bedrock = FakeBedrockRuntime()
     content = [{"text": "Sources: ..."}]
-    handler.ask_model(bedrock, SETTINGS, content)
+    llm.ask_model(bedrock, SETTINGS, content)
     (arguments,) = bedrock.calls
     assert arguments["modelId"] == ENVIRONMENT["MODEL_ID"]
-    assert arguments["system"] == [{"text": handler.system_prompt("en")}]
+    assert arguments["system"] == [{"text": prompts.system_prompt("en")}]
     assert arguments["messages"] == [{"role": "user", "content": content}]
     assert arguments["inferenceConfig"] == {
         "maxTokens": MAX_ANSWER_TOKENS,
@@ -2639,7 +2655,7 @@ def test_model_gets_system_rules_message_token_limit_and_guardrail() -> None:
 def test_a_blocked_model_is_an_llm_error_with_a_hint() -> None:
     bedrock = FakeBedrockRuntime(error=client_error("AccessDeniedException"))
     with pytest.raises(LLMError, match="may not be open to this function") as error:
-        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
+        llm.ask_model(bedrock, SETTINGS, [{"text": "p"}])
     assert error.value.status == 502
 
 
@@ -2649,7 +2665,7 @@ def test_a_model_timeout_is_an_llm_error() -> None:
         error=exceptions.ReadTimeoutError(endpoint_url="https://bedrock-runtime")
     )
     with pytest.raises(LLMError, match="timeout"):
-        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
+        llm.ask_model(bedrock, SETTINGS, [{"text": "p"}])
 
 
 class SequencedBedrockRuntime(FakeBedrockRuntime):
@@ -2670,7 +2686,7 @@ class SequencedBedrockRuntime(FakeBedrockRuntime):
 def pauses(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """The pauses the handler takes, instead of taking them."""
     taken: list[float] = []
-    monkeypatch.setattr(handler, "pause", taken.append)
+    monkeypatch.setattr(clocks, "pause", taken.append)
     return taken
 
 
@@ -2682,8 +2698,8 @@ def test_a_rejected_model_call_is_made_once_more_and_logged(
 ) -> None:
     caplog.set_level(logging.INFO, logger="andur")
     bedrock = SequencedBedrockRuntime([client_error(code)])
-    record = handler.RequestRecord()
-    response = handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+    record = log.RequestRecord()
+    response = llm.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
     assert response == bedrock.response
     assert len(bedrock.calls) == 2 and bedrock.calls[0] == bedrock.calls[1]
     assert pauses == [2]
@@ -2698,9 +2714,9 @@ def test_a_second_rejection_is_an_llm_error_and_there_is_no_third_call(
 ) -> None:
     errors = [client_error("ServiceUnavailableException") for _ in range(3)]
     bedrock = SequencedBedrockRuntime(errors)
-    record = handler.RequestRecord()
+    record = log.RequestRecord()
     with pytest.raises(LLMError, match="the service is unavailable") as error:
-        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+        llm.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
     assert error.value.status == 502
     assert len(bedrock.calls) == 2 and pauses == [2]
     assert record.model_rejections == 2
@@ -2713,7 +2729,7 @@ def test_a_timed_out_model_call_is_never_made_again(pauses: list[float]) -> None
         [exceptions.ReadTimeoutError(endpoint_url="https://bedrock-runtime")]
     )
     with pytest.raises(LLMError, match="timeout"):
-        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
+        llm.ask_model(bedrock, SETTINGS, [{"text": "p"}])
     assert len(bedrock.calls) == 1 and pauses == []
 
 
@@ -2726,16 +2742,16 @@ def test_a_call_that_may_have_run_or_is_no_documented_rejection_is_not_made_agai
     """An internal error may come after the model has begun; the others are no Converse
     errors, so nothing documents that the call did not run."""
     bedrock = SequencedBedrockRuntime([client_error(code)])
-    record = handler.RequestRecord()
+    record = log.RequestRecord()
     with pytest.raises(LLMError):
-        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+        llm.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
     assert len(bedrock.calls) == 1 and pauses == [] and record.model_rejections == 0
 
 
 def test_an_access_error_is_not_made_again(pauses: list[float]) -> None:
     bedrock = SequencedBedrockRuntime([client_error("AccessDeniedException")])
     with pytest.raises(LLMError, match="may not be open"):
-        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}])
+        llm.ask_model(bedrock, SETTINGS, [{"text": "p"}])
     assert len(bedrock.calls) == 1 and pauses == []
 
 
@@ -2750,14 +2766,14 @@ def test_the_second_model_call_starts_only_while_cloudfront_still_waits(
     """At second 30 there is still time for the pause, the call, the topic check of the answer
     and the excerpts."""
     caplog.set_level(logging.INFO, logger="andur")
-    record = handler.RequestRecord()
+    record = log.RequestRecord()
     cold_start.advance(elapsed)
     bedrock = SequencedBedrockRuntime([client_error("ServiceUnavailableException")])
     if calls == 2:
-        handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+        llm.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
     else:
         with pytest.raises(LLMError, match="unavailable"):
-            handler.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
+            llm.ask_model(bedrock, SETTINGS, [{"text": "p"}], record)
     assert len(bedrock.calls) == calls
     (line,) = [line for line in log_lines(caplog) if line["event"] == "converse-rejected"]
     assert line["retry"] is (calls == 2)
@@ -2766,12 +2782,12 @@ def test_the_second_model_call_starts_only_while_cloudfront_still_waits(
 
 
 def test_extract_answer_returns_the_text() -> None:
-    assert handler.extract_answer(bedrock_response([{"text": "Hello."}])) == "Hello."
+    assert llm.extract_answer(bedrock_response([{"text": "Hello."}])) == "Hello."
 
 
 def test_extract_answer_skips_a_block_without_text() -> None:
     response = bedrock_response([{"reasoningContent": {}}, {"text": "Second block."}])
-    assert handler.extract_answer(response) == "Second block."
+    assert llm.extract_answer(response) == "Second block."
 
 
 @pytest.mark.parametrize(
@@ -2785,26 +2801,26 @@ def test_extract_answer_skips_a_block_without_text() -> None:
 def test_extract_answer_marks_an_answer_the_model_did_not_finish(
     stop_reason: str, note: str
 ) -> None:
-    result = handler.extract_answer(bedrock_response([{"text": "Start"}], stop_reason=stop_reason))
+    result = llm.extract_answer(bedrock_response([{"text": "Start"}], stop_reason=stop_reason))
     assert result.startswith("Start\n\n[")
     assert note in result
 
 
 def test_extract_answer_raises_without_any_text_block() -> None:
     with pytest.raises(LLMError, match="tool_use"):
-        handler.extract_answer(bedrock_response([{"toolUse": {}}], stop_reason="tool_use"))
+        llm.extract_answer(bedrock_response([{"toolUse": {}}], stop_reason="tool_use"))
 
 
 @pytest.mark.parametrize("text", ["", "   ", "\n\t\n"])
 def test_an_empty_answer_is_an_llm_error(text: str) -> None:
     with pytest.raises(LLMError, match="no text") as error:
-        handler.extract_answer(bedrock_response([{"text": text}]))
+        llm.extract_answer(bedrock_response([{"text": text}]))
     assert error.value.status == 502
 
 
 def test_extract_answer_raises_on_an_empty_response() -> None:
     with pytest.raises(LLMError, match="unknown"):
-        handler.extract_answer({})
+        llm.extract_answer({})
 
 
 # --- Guardrail and cost --------------------------------------------------
@@ -2876,7 +2892,7 @@ UNGROUNDED = {
 
 
 def test_a_guardrail_that_did_nothing_reports_its_scores_and_units() -> None:
-    assert handler.read_guardrail(bedrock_response([{"text": "A [1]."}])) == {
+    assert guardrails.read_guardrail(bedrock_response([{"text": "A [1]."}])) == {
         "action": "none",
         "policies": [],
         "grounding_score": 0.93,
@@ -2896,7 +2912,7 @@ def test_a_refused_topic_is_blocked_and_named() -> None:
         "guardrail_intervened",
         guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED),
     )
-    guardrail = handler.read_guardrail(response)
+    guardrail = guardrails.read_guardrail(response)
     assert (guardrail["action"], guardrail["policies"]) == ("blocked", ["topic:Tax advice"])
     assert guardrail["question_refused"] is True
 
@@ -2907,7 +2923,7 @@ def test_masked_personal_details_are_named_by_type_and_never_by_what_matched() -
         "guardrail_intervened",
         guardrail_trace(output_assessment=PHONE_MASKED),
     )
-    guardrail = handler.read_guardrail(response)
+    guardrail = guardrails.read_guardrail(response)
     assert (guardrail["action"], guardrail["policies"]) == ("masked", ["pii:NAME", "pii:PHONE"])
     assert "Ada Quill" not in json.dumps(guardrail) and "7946" not in json.dumps(guardrail)
 
@@ -2918,7 +2934,7 @@ def test_an_ungrounded_answer_is_blocked_with_its_score() -> None:
         "guardrail_intervened",
         guardrail_trace(output_assessment=UNGROUNDED),
     )
-    guardrail = handler.read_guardrail(response)
+    guardrail = guardrails.read_guardrail(response)
     assert (guardrail["action"], guardrail["policies"]) == ("blocked", ["grounding"])
     assert guardrail["question_refused"] is False
     assert (guardrail["grounding_score"], guardrail["relevance_score"]) == (0.12, 0.9)
@@ -2929,14 +2945,14 @@ def test_blocking_outranks_masking() -> None:
     response = bedrock_response(
         [{"text": "Withheld."}], "guardrail_intervened", guardrail_trace(output_assessment=both)
     )
-    guardrail = handler.read_guardrail(response)
+    guardrail = guardrails.read_guardrail(response)
     assert guardrail["action"] == "blocked"
     assert guardrail["policies"] == ["grounding", "pii:NAME", "pii:PHONE"]
 
 
 def test_an_intervention_without_a_trace_is_named_as_such_and_its_units_are_unknown() -> None:
     response = bedrock_response([{"text": "Stopped."}], "guardrail_intervened", trace={})
-    guardrail = handler.read_guardrail(response)
+    guardrail = guardrails.read_guardrail(response)
     assert guardrail["action"] == "intervened"
     assert guardrail["units"] is None
     assert (guardrail["grounding_score"], guardrail["relevance_score"]) == (None, None)
@@ -2945,13 +2961,13 @@ def test_an_intervention_without_a_trace_is_named_as_such_and_its_units_are_unkn
 def test_a_masked_answer_says_so_and_a_blocked_one_is_the_guardrail_message_alone() -> None:
     masked = bedrock_response([{"text": "Call {PHONE} [1]."}], "guardrail_intervened")
     assert (
-        handler.extract_answer(masked, "masked")
-        == "Call {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["en"]["masked"]
+        llm.extract_answer(masked, "masked")
+        == "Call {PHONE} [1].\n\n" + llm.GUARDRAIL_NOTES["en"]["masked"]
     )
     blocked = bedrock_response([{"text": "Andur does not advise on this."}], "guardrail_intervened")
-    assert handler.extract_answer(blocked, "blocked") == "Andur does not advise on this."
-    assert handler.extract_answer(blocked, "intervened").endswith(
-        handler.STOP_NOTES["en"]["guardrail_intervened"]
+    assert llm.extract_answer(blocked, "blocked") == "Andur does not advise on this."
+    assert llm.extract_answer(blocked, "intervened").endswith(
+        llm.STOP_NOTES["en"]["guardrail_intervened"]
     )
 
 
@@ -2964,25 +2980,25 @@ def test_the_cost_is_tokens_and_units_times_their_prices_rounded_to_six_places()
     }
     # 1624 x 0.00015 + 50 x 0.00065 + 2 x 0.15 + 1 x 0.10 + 3 x 0.10, per thousand
     # = (0.2436 + 0.0325 + 0.3 + 0.1 + 0.3) / 1000 = 0.0009761
-    assert handler.answer_cost(SETTINGS.prices, usage, units) == 0.000976
-    assert handler.answer_cost(SETTINGS.prices, usage, None) is None
-    zero = {name: 0 for name in handler.PRICED_UNITS}
+    assert pricing.answer_cost(SETTINGS.prices, usage, units) == 0.000976
+    assert pricing.answer_cost(SETTINGS.prices, usage, None) is None
+    zero = {name: 0 for name in pricing.PRICED_UNITS}
     assert (
-        handler.answer_cost(SETTINGS.prices, {"input_tokens": 0, "output_tokens": 0}, zero) == 0.0
+        pricing.answer_cost(SETTINGS.prices, {"input_tokens": 0, "output_tokens": 0}, zero) == 0.0
     )
 
 
 def test_the_cost_is_rounded_half_even_at_the_sixth_place() -> None:
     """Decimal arithmetic, so 0.1 + 0.2 is 0.3 here and the rounding is exact."""
-    prices = handler.Prices(Decimal("0.0000025"), Decimal(0), Decimal(0), Decimal(0), Decimal(0))
-    none = {name: 0 for name in handler.PRICED_UNITS}
-    assert handler.answer_cost(prices, {"input_tokens": 1000, "output_tokens": 0}, none) == 0.000002
-    assert handler.answer_cost(prices, {"input_tokens": 3000, "output_tokens": 0}, none) == 0.000008
+    prices = config.Prices(Decimal("0.0000025"), Decimal(0), Decimal(0), Decimal(0), Decimal(0))
+    none = {name: 0 for name in pricing.PRICED_UNITS}
+    assert pricing.answer_cost(prices, {"input_tokens": 1000, "output_tokens": 0}, none) == 0.000002
+    assert pricing.answer_cost(prices, {"input_tokens": 3000, "output_tokens": 0}, none) == 0.000008
 
 
 def test_usage_is_read_from_the_response() -> None:
-    assert handler.read_usage(bedrock_response([])) == {"input_tokens": 1624, "output_tokens": 50}
-    assert handler.read_usage({}) == {"input_tokens": 0, "output_tokens": 0}
+    assert llm.read_usage(bedrock_response([])) == {"input_tokens": 1624, "output_tokens": 50}
+    assert llm.read_usage({}) == {"input_tokens": 0, "output_tokens": 0}
 
 
 @pytest.mark.parametrize(
@@ -3004,7 +3020,7 @@ def test_usage_is_read_from_the_response() -> None:
     ],
 )
 def test_cited_numbers(answer: str, expected: set[int]) -> None:
-    assert handler.cited_numbers(answer, 6) == expected
+    assert citations.cited_numbers(answer, 6) == expected
 
 
 def test_cited_layers_come_from_cited_sources_only_most_trusted_first() -> None:
@@ -3014,8 +3030,8 @@ def test_cited_layers_come_from_cited_sources_only_most_trusted_first() -> None:
         {"layer": "agent", "cited": False},
         {"layer": "inbox", "cited": True},
     ]
-    assert handler.cited_layers(sources) == ["human", "inbox"]
-    assert handler.cited_layers([]) == []
+    assert citations.cited_layers(sources) == ["human", "inbox"]
+    assert citations.cited_layers([]) == []
 
 
 # --- The whole request ---------------------------------------------------
@@ -3072,7 +3088,7 @@ def test_a_tax_question_comes_back_as_the_guardrail_message_and_is_still_a_200(
     status, body = call(event())
     assert status == 200
     # The handler's sentence, not the one AWS sent back.
-    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS["en"]
+    assert body["answer"] == sentences.QUESTION_REFUSED_ANSWERS["en"]
     assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Tax advice"]}
     # One topic unit at 0.15 per thousand on the model call and one for the topic check of the
     # question, nothing else: no excerpt was masked.
@@ -3265,10 +3281,10 @@ def test_excerpt_units_count_as_pii_units() -> None:
         "sensitiveInformationPolicyUnits": 1,
         "contextualGroundingPolicyUnits": 3,
     }
-    assert handler.add_units(units, 2)["sensitiveInformationPolicyUnits"] == 3
+    assert pricing.add_units(units, 2)["sensitiveInformationPolicyUnits"] == 3
     assert units["sensitiveInformationPolicyUnits"] == 1
-    assert handler.add_units(units, None) is None
-    assert handler.add_units(None, 2) is None
+    assert pricing.add_units(units, None) is None
+    assert pricing.add_units(None, 2) is None
 
 
 def test_the_unmasked_answer_in_the_trace_reaches_neither_body_nor_log(
@@ -3282,10 +3298,7 @@ def test_the_unmasked_answer_in_the_trace_reaches_neither_body_nor_log(
     )
     status, body = call(event())
     assert status == 200
-    assert (
-        body["answer"]
-        == "Call {NAME} on {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES["en"]["masked"]
-    )
+    assert body["answer"] == "Call {NAME} on {PHONE} [1].\n\n" + llm.GUARDRAIL_NOTES["en"]["masked"]
     for text in (json.dumps(body), caplog.text):
         assert "Ada Quill" not in text and "7946" not in text
 
@@ -3441,7 +3454,7 @@ def test_a_bug_is_500_without_a_traceback_in_the_body(
     def broken(*_: Any) -> Any:
         raise ZeroDivisionError("a bug")
 
-    monkeypatch.setattr(handler, "answer_question", broken)
+    monkeypatch.setattr(answering, "answer_question", broken)
     status, body = call(event())
     assert status == 500
     assert "ZeroDivisionError" not in body["error"]
@@ -3568,7 +3581,7 @@ def test_a_crash_is_one_json_line_with_the_traceback_as_a_field(
     def broken(*_: Any) -> Any:
         raise ZeroDivisionError("a bug")
 
-    monkeypatch.setattr(handler, "answer_question", broken)
+    monkeypatch.setattr(answering, "answer_question", broken)
     call(event())
     (record,) = [
         record
@@ -3602,7 +3615,7 @@ def test_every_log_line_is_single_line_json(
 ASKED_IN = [(None, "en"), ("en", "en"), ("de", "de"), ("fr", "en")]
 
 SENTENCE_TABLES = {
-    name: getattr(handler, name)
+    name: getattr(sentences, name)
     for name in (
         "NO_SOURCES_ANSWERS",
         "NOT_IN_SOURCES_ANSWERS",
@@ -3636,14 +3649,14 @@ def placeholders(text: str) -> set[str]:
 @pytest.mark.parametrize("name", sorted(SENTENCE_TABLES))
 def test_every_sentence_is_in_both_languages_with_the_same_placeholders(name: str) -> None:
     table = SENTENCE_TABLES[name]
-    assert set(table) == set(handler.LANGUAGES) == {"en", "de"}
+    assert set(table) == set(sentences.LANGUAGES) == {"en", "de"}
     assert table["de"] != table["en"]
     assert placeholders(table["de"]) == placeholders(table["en"])
 
 
 @pytest.mark.parametrize("name", ["STOP_NOTES", "GUARDRAIL_NOTES"])
 def test_every_note_is_in_both_languages(name: str) -> None:
-    notes = getattr(handler, name)
+    notes = getattr(llm, name)
     assert set(notes) == {"en", "de"}
     assert set(notes["de"]) == set(notes["en"])
     for reason, english in notes["en"].items():
@@ -3655,8 +3668,12 @@ def test_every_note_is_in_both_languages(name: str) -> None:
 
 def test_every_error_read_after_the_body_has_a_german_sentence() -> None:
     """The German sentence is the second argument. Only the two checks that run before the
-    body is read, when the language is not known yet, have none."""
-    tree = ast.parse((REPOSITORY_ROOT / "app" / "handler.py").read_text(encoding="utf-8"))
+    body is read, when the language is not known yet, have none. Read in every module of the
+    function, where an error is raised by its name or as ``errors.<name>``."""
+    modules = sorted((REPOSITORY_ROOT / "app").glob("*.py"))
+    tree = ast.Module(
+        body=[ast.parse(path.read_text(encoding="utf-8")) for path in modules], type_ignores=[]
+    )
     public = {
         "BadRequest",
         "Unauthorized",
@@ -3672,7 +3689,7 @@ def test_every_error_read_after_the_body_has_a_german_sentence() -> None:
         for node in ast.walk(function):
             if not (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)):
                 continue
-            name = getattr(node.exc.func, "id", None)
+            name = getattr(node.exc.func, "id", None) or getattr(node.exc.func, "attr", None)
             if name in public:
                 raised += 1
                 expected = 1 if function.name in before_the_body else 2
@@ -3695,8 +3712,8 @@ def test_every_error_read_after_the_body_has_a_german_sentence() -> None:
     ],
 )
 def test_the_language_is_one_of_ours_or_english(given: Any, expected: str) -> None:
-    assert handler.requested_language({"language": given}) == expected
-    assert handler.requested_language({}) == "en"
+    assert intake.requested_language({"language": given}) == expected
+    assert intake.requested_language({}) == "en"
 
 
 # --- The handler's own sentences, by the language asked ---
@@ -3709,7 +3726,7 @@ def test_no_passage_found_is_said_in_the_language_asked(
     aws["bedrock-agent-runtime"].results = []
     status, body = call(event(in_(asked)))
     assert status == 200
-    assert body["answer"] == handler.NO_SOURCES_ANSWERS[spoken]
+    assert body["answer"] == sentences.NO_SOURCES_ANSWERS[spoken]
 
 
 def test_the_model_is_told_to_say_not_in_the_sources_in_the_language_asked(
@@ -3718,9 +3735,9 @@ def test_the_model_is_told_to_say_not_in_the_sources_in_the_language_asked(
     for asked, spoken, other in [(None, "en", "de"), ("en", "en", "de"), ("de", "de", "en")]:
         call(event(in_(asked)))
         prompt = aws["bedrock-runtime"].calls[-1]["system"][0]["text"]
-        assert prompt == handler.system_prompt(spoken)
-        assert handler.NOT_IN_SOURCES_ANSWERS[spoken] in prompt
-        assert handler.NOT_IN_SOURCES_ANSWERS[other] not in prompt
+        assert prompt == prompts.system_prompt(spoken)
+        assert sentences.NOT_IN_SOURCES_ANSWERS[spoken] in prompt
+        assert sentences.NOT_IN_SOURCES_ANSWERS[other] not in prompt
         assert "the language of the question" in prompt
 
 
@@ -3728,12 +3745,12 @@ def test_the_model_is_told_to_say_not_in_the_sources_in_the_language_asked(
 def test_a_notice_on_an_unfinished_answer_is_in_the_language_asked(
     aws: dict[str, Any], asked: str | None, spoken: str
 ) -> None:
-    for stop_reason in handler.STOP_NOTES["en"]:
+    for stop_reason in llm.STOP_NOTES["en"]:
         aws["bedrock-runtime"].response = bedrock_response(
             [{"text": "Start [1]"}], stop_reason=stop_reason
         )
         _, body = call(event(in_(asked)))
-        assert body["answer"] == f"Start [1]\n\n{handler.STOP_NOTES[spoken][stop_reason]}"
+        assert body["answer"] == f"Start [1]\n\n{llm.STOP_NOTES[spoken][stop_reason]}"
 
 
 @pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
@@ -3748,7 +3765,7 @@ def test_a_masked_answer_says_so_in_the_language_asked(
     _, body = call(event(in_(asked)))
     assert body["guardrail"]["action"] == "masked"
     assert body["answer"] == (
-        "Call {NAME} on {PHONE} [1].\n\n" + handler.GUARDRAIL_NOTES[spoken]["masked"]
+        "Call {NAME} on {PHONE} [1].\n\n" + llm.GUARDRAIL_NOTES[spoken]["masked"]
     )
 
 
@@ -3779,7 +3796,7 @@ def test_a_refused_question_is_told_in_the_language_asked(
     )
     status, body = call(event(in_(asked)))
     assert status == 200
-    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS[spoken]
+    assert body["answer"] == sentences.QUESTION_REFUSED_ANSWERS[spoken]
     assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Tax advice"]}
     assert body["sources"] == []
 
@@ -3791,7 +3808,7 @@ def test_a_withheld_answer_is_told_in_the_language_asked(
     aws["bedrock-runtime"].response = blocked_by(guardrail_trace(output_assessment=UNGROUNDED))
     status, body = call(event(in_(asked)))
     assert status == 200
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS[spoken]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS[spoken]
     assert body["guardrail"] == {"action": "blocked", "policies": ["grounding"]}
     assert len(body["sources"]) == 2
 
@@ -3805,7 +3822,7 @@ def test_an_answer_that_strays_into_a_denied_topic_is_withheld_not_refused(
         guardrail_trace(output_assessment=ADVICE_ANSWER_BLOCKED)
     )
     _, body = call(event(in_("de")))
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["de"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["de"]
     assert body["guardrail"]["policies"] == ["topic:Tax advice"]
 
 
@@ -3866,7 +3883,7 @@ def test_the_not_in_sources_sentence_reaches_the_reader_when_a_source_check_with
 ) -> None:
     """c12, c13, c17 and eight more of 07.10.2026: the right answer to a question the sources
     do not answer, withheld by the checks that judge an answer against the sources."""
-    sentence = handler.NOT_IN_SOURCES_ANSWERS[spoken]
+    sentence = sentences.NOT_IN_SOURCES_ANSWERS[spoken]
     aws["bedrock-runtime"].response = withheld_writing(sentence, assessment)
     status, body = call(event(in_(asked)))
     assert status == 200
@@ -3883,7 +3900,7 @@ def test_the_sentence_counts_with_the_spaces_around_it_and_in_the_trace_s_json(
     aws: dict[str, Any],
 ) -> None:
     """Bedrock writes the replaced message as JSON in ``modelOutput``, reasoning included."""
-    sentence = handler.NOT_IN_SOURCES_ANSWERS["de"]
+    sentence = sentences.NOT_IN_SOURCES_ANSWERS["de"]
     message = {
         "message": {
             "role": "assistant",
@@ -3907,7 +3924,7 @@ def test_the_sentence_counts_with_the_spaces_around_it_and_in_the_trace_s_json(
         "Die Quellen beantworten diese Frage nicht.",
         "Die Quellen beantworten diese Frage nicht. Es sind aber 8 % Zinsen.",
         "Die Quellen beantworten diese Frage nicht",
-        handler.NOT_IN_SOURCES_ANSWERS["en"],  # not the language asked
+        sentences.NOT_IN_SOURCES_ANSWERS["en"],  # not the language asked
         "",
     ],
 )
@@ -3916,7 +3933,7 @@ def test_any_other_text_the_grounding_check_blocked_stays_withheld(
 ) -> None:
     aws["bedrock-runtime"].response = withheld_writing(written)
     _, body = call(event(in_("de")))
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["de"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["de"]
 
 
 def test_the_sentence_stays_withheld_when_another_policy_blocked_too(aws: dict[str, Any]) -> None:
@@ -3926,9 +3943,9 @@ def test_the_sentence_stays_withheld_when_another_policy_blocked_too(aws: dict[s
         **ADVICE_ANSWER_BLOCKED,
         "contextualGroundingPolicy": UNGROUNDED["contextualGroundingPolicy"],
     }
-    aws["bedrock-runtime"].response = withheld_writing(handler.NOT_IN_SOURCES_ANSWERS["en"], both)
+    aws["bedrock-runtime"].response = withheld_writing(sentences.NOT_IN_SOURCES_ANSWERS["en"], both)
     _, body = call(event())
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["en"]
     assert body["guardrail"]["policies"] == ["topic:Tax advice", "grounding"]
 
 
@@ -3940,7 +3957,7 @@ def test_without_the_model_s_text_in_the_trace_the_answer_stays_withheld(
     del trace["guardrail"]["modelOutput"]
     aws["bedrock-runtime"].response = blocked_by(trace)
     _, body = call(event())
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["en"]
 
 
 def test_the_model_s_text_is_read_like_control_eval_reads_it() -> None:
@@ -3948,17 +3965,17 @@ def test_the_model_s_text_is_read_like_control_eval_reads_it() -> None:
         trace = {} if model_output is None else {"guardrail": {"modelOutput": model_output}}
         return {"output": {"message": {"content": [{"text": text}]}}, "trace": trace}
 
-    assert handler.written_text(response(None)) == "shown"
-    assert handler.written_text(response([])) == "shown"
-    assert handler.written_text(response(["Plain text 12"])) == "Plain text 12"
-    assert handler.written_text(response(['{"usage": {"inputTokens": 3120}}'])) is None
-    assert handler.written_text(response(['{"message": "x"}'])) is None
-    assert handler.written_text(response(['{"message": {"content": [{"image": 1}]}}'])) is None
+    assert llm.written_text(response(None)) == "shown"
+    assert llm.written_text(response([])) == "shown"
+    assert llm.written_text(response(["Plain text 12"])) == "Plain text 12"
+    assert llm.written_text(response(['{"usage": {"inputTokens": 3120}}'])) is None
+    assert llm.written_text(response(['{"message": "x"}'])) is None
+    assert llm.written_text(response(['{"message": {"content": [{"image": 1}]}}'])) is None
     two = json.dumps({"message": {"content": [{"text": "A [1]."}, {"text": "B [2]."}]}})
-    assert handler.written_text(response([two])) == "A [1].\nB [2]."
+    assert llm.written_text(response([two])) == "A [1].\nB [2]."
     # Not a text: nothing to read, rather than a crash after the model call is paid.
-    assert handler.written_text(response([None])) is None  # type: ignore[list-item]
-    assert handler.written_text(response([{"message": {}}])) is None  # type: ignore[list-item]
+    assert llm.written_text(response([None])) is None  # type: ignore[list-item]
+    assert llm.written_text(response([{"message": {}}])) is None  # type: ignore[list-item]
 
 
 def test_a_trace_entry_that_is_not_a_text_leaves_the_answer_withheld(
@@ -3969,26 +3986,26 @@ def test_a_trace_entry_that_is_not_a_text_leaves_the_answer_withheld(
     aws["bedrock-runtime"].response = blocked_by(trace)
     status, body = call(event())
     assert status == 200
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["en"]
 
 
 # --- The topic check of the answer, without its citations ---
 
 
 @pytest.mark.parametrize(
-    "citations",
+    "spelling",
     ["[1]", "[1][4]", "[1] [4]", "[1, 4]", "[1][2][4]", "[1] [2] [4]", "[1, 2, 4]", "[1][5]"],
 )
-def test_every_spelling_of_the_citations_is_taken_out_for_the_topic_check(citations: str) -> None:
+def test_every_spelling_of_the_citations_is_taken_out_for_the_topic_check(spelling: str) -> None:
     """The spellings of 04.10.2026: on the answer as the model writes it, `Private lives`
     withheld up to 48 of 69 harmless answers for one of them, and none without them."""
-    assert handler.without_citations(f"Warned {citations}") == "Warned"
-    assert handler.without_citations(f"For 35 days {citations}.") == "For 35 days."
-    assert handler.without_citations(f"Two {citations}. Three {citations}.") == "Two. Three."
+    assert citations.without_citations(f"Warned {spelling}") == "Warned"
+    assert citations.without_citations(f"For 35 days {spelling}.") == "For 35 days."
+    assert citations.without_citations(f"Two {spelling}. Three {spelling}.") == "Two. Three."
 
 
 def test_a_text_of_citations_alone_has_nothing_left_to_check() -> None:
-    assert handler.without_citations(" [1][2] [3, 4] ") == ""
+    assert citations.without_citations(" [1][2] [3, 4] ") == ""
 
 
 def test_the_topic_guardrail_reads_the_answer_without_citations_the_reader_gets_them(
@@ -4035,7 +4052,7 @@ def test_an_answer_the_topic_guardrail_blocks_is_withheld_in_the_language_asked(
     aws["guardrail"].topic_response = topic_guard_response("Private lives")
     status, body = call(event(in_(asked)))
     assert status == 200
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS[spoken]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS[spoken]
     assert "married" not in json.dumps(body)
     assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Private lives"]}
     # Withheld for a topic, the answer loses its sources like a refused question: an excerpt
@@ -4055,7 +4072,7 @@ def test_an_answer_withheld_for_a_topic_on_the_model_call_loses_its_sources_too(
         guardrail_trace(output_assessment=ADVICE_ANSWER_BLOCKED)
     )
     _, body = call(event())
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["en"]
     assert body["sources"] == [] and body["layers"] == []
 
 
@@ -4067,7 +4084,7 @@ def test_a_withheld_masked_answer_names_the_topic_and_the_masking(aws: dict[str,
     )
     aws["guardrail"].topic_response = topic_guard_response("Private lives")
     _, body = call(event())
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["en"]
     assert body["guardrail"]["action"] == "blocked"
     assert body["guardrail"]["policies"][0] == "topic:Private lives"
     assert "pii:PHONE" in body["guardrail"]["policies"]
@@ -4084,7 +4101,7 @@ def test_an_intervention_without_a_named_topic_still_withholds_the_answer(
         "assessments": [],
     }
     _, body = call(event())
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["en"]
     assert body["guardrail"] == {"action": "blocked", "policies": ["topic:unknown"]}
 
 
@@ -4163,13 +4180,13 @@ def test_the_topic_guardrail_reads_the_question_after_its_frame_before_the_model
 
 def test_the_frames_are_the_measured_ones() -> None:
     """The words the topic probe measured on 06.10.2026; another wording moves verdicts."""
-    assert handler.question_for_topics("Wie viel Skonto bekomme ich?") == (
+    assert topic_check.question_for_topics("Wie viel Skonto bekomme ich?") == (
         "Customer to business: Wie viel Skonto bekomme ich?"
     )
-    assert handler.answer_for_topics("2 % Skonto [1].") == (
+    assert topic_check.answer_for_topics("2 % Skonto [1].") == (
         "Answer from the business to a customer: 2 % Skonto."
     )
-    assert handler.answer_for_topics(" [1][2] ") == ""
+    assert topic_check.answer_for_topics(" [1][2] ") == ""
 
 
 @pytest.mark.parametrize(("asked", "spoken"), ASKED_IN)
@@ -4182,7 +4199,7 @@ def test_a_question_the_topic_guardrail_refuses_is_never_put_to_the_model(
     aws["guardrail"].question_response = topic_guard_response("Tax returns")
     status, body = call(event(in_(asked)))
     assert status == 200
-    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS[spoken]
+    assert body["answer"] == sentences.QUESTION_REFUSED_ANSWERS[spoken]
     assert body["guardrail"] == {"action": "blocked", "policies": ["topic:Tax returns"]}
     assert (body["sources"], body["layers"], body["model"]) == ([], [], None)
     assert body["usage"] == {"input_tokens": 0, "output_tokens": 0}
@@ -4210,7 +4227,7 @@ def test_an_intervention_on_the_question_without_a_named_topic_still_refuses_it(
 def test_a_refused_question_with_unknown_units_has_an_unknown_cost(aws: dict[str, Any]) -> None:
     aws["guardrail"].question_response = {**topic_guard_response("Tax returns"), "usage": {}}
     _, body = call(event())
-    assert body["answer"] == handler.QUESTION_REFUSED_ANSWERS["en"]
+    assert body["answer"] == sentences.QUESTION_REFUSED_ANSWERS["en"]
     assert body["cost_usd"] is None
 
 
@@ -4240,7 +4257,7 @@ def test_a_question_the_topic_guardrail_cannot_check_is_not_answered(
     )
     status, body = call(event(in_(asked)))
     assert status == 502
-    assert body == {"error": sentence + handler.REFUNDED_NOTES[asked], "refunded": True}
+    assert body == {"error": sentence + sentences.REFUNDED_NOTES[asked], "refunded": True}
     assert aws["bedrock-runtime"].calls == []
     (line,) = [line for line in log_lines(caplog) if line["event"] == "topic-guard-failed"]
     assert (line["source"], line["detail"]) == ("INPUT", "ClientError: AccessDeniedException")
@@ -4250,7 +4267,7 @@ def test_a_question_with_no_passages_is_not_checked(aws: dict[str, Any]) -> None
     """Nothing found, nothing asked: the sentence for no sources, and no call that costs."""
     aws["bedrock-agent-runtime"].results = []
     _, body = call(event())
-    assert body["answer"] == handler.NO_SOURCES_ANSWERS["en"]
+    assert body["answer"] == sentences.NO_SOURCES_ANSWERS["en"]
     assert aws["guardrail"].question_calls == []
     assert body["cost_usd"] == 0.0
 
@@ -4261,7 +4278,7 @@ def test_the_topic_check_adds_its_units_to_the_topic_units() -> None:
         "sensitiveInformationPolicyUnits": 1,
         "contextualGroundingPolicyUnits": 3,
     }
-    total = handler.add_units(units, 2, "topicPolicyUnits")
+    total = pricing.add_units(units, 2, "topicPolicyUnits")
     assert total == {
         "topicPolicyUnits": 3,
         "sensitiveInformationPolicyUnits": 1,
@@ -4290,7 +4307,7 @@ def test_the_guardrail_has_blocked_only_when_aws_stopped_and_the_trace_says_bloc
     aws["bedrock-runtime"].response = blocked_by({})
     _, body = call(event(in_("de")))
     assert body["guardrail"]["action"] == "intervened"
-    assert body["answer"] == f"{AWS_SENTENCE}\n\n{handler.STOP_NOTES['de']['guardrail_intervened']}"
+    assert body["answer"] == f"{AWS_SENTENCE}\n\n{llm.STOP_NOTES['de']['guardrail_intervened']}"
 
 
 def test_a_blocked_answer_needs_no_text_from_aws(aws: dict[str, Any]) -> None:
@@ -4300,7 +4317,7 @@ def test_a_blocked_answer_needs_no_text_from_aws(aws: dict[str, Any]) -> None:
     )
     status, body = call(event(in_("de")))
     assert status == 200
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["de"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["de"]
 
 
 # --- Errors, by the language asked ---
@@ -4442,16 +4459,16 @@ def test_a_crash_is_told_in_german(aws: dict[str, Any], monkeypatch: pytest.Monk
     def broken(*_: Any) -> Any:
         raise ZeroDivisionError("a bug")
 
-    monkeypatch.setattr(handler, "answer_question", broken)
-    assert call(event(in_("de"))) == (500, {"error": handler.UNEXPECTED_FAILURE_MESSAGES["de"]})
-    assert call(event(in_("en"))) == (500, {"error": handler.UNEXPECTED_FAILURE_MESSAGES["en"]})
+    monkeypatch.setattr(answering, "answer_question", broken)
+    assert call(event(in_("de"))) == (500, {"error": sentences.UNEXPECTED_FAILURE_MESSAGES["de"]})
+    assert call(event(in_("en"))) == (500, {"error": sentences.UNEXPECTED_FAILURE_MESSAGES["en"]})
 
 
 def test_a_broken_configuration_is_told_in_german(
     aws: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("NUMBER_OF_RESULTS", "zero")
-    assert call(event(in_("de"))) == (500, {"error": handler.NOT_CONFIGURED_MESSAGES["de"]})
+    assert call(event(in_("de"))) == (500, {"error": sentences.NOT_CONFIGURED_MESSAGES["de"]})
     assert call(event(in_("en"))) == (500, {"error": NOT_CONFIGURED_MESSAGE})
 
 
@@ -4480,6 +4497,6 @@ def test_an_unstopped_answer_with_a_blocked_topic_in_the_trace_is_still_checked(
     )
     aws["guardrail"].topic_response = topic_guard_response("Private lives")
     _, body = call(event())
-    assert body["answer"] == handler.ANSWER_WITHHELD_ANSWERS["en"]
+    assert body["answer"] == sentences.ANSWER_WITHHELD_ANSWERS["en"]
     assert "married" not in json.dumps(body)
     assert len(aws["guardrail"].topic_calls) == 1

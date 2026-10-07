@@ -7,7 +7,9 @@ answer, the passages it was built from and whether a person or a machine
 wrote them. It is meant for a team that keeps its handbooks, policies and
 notes in files and would rather ask than search, and one installation
 serves several companies without one ever seeing another's documents. It
-runs on AWS, defined as code, with no part that bills a monthly base fee.
+runs on AWS, defined as code, with no part that bills a monthly base fee, in
+either of two regions: Ireland (`eu-west-1`), behind CloudFront, or Frankfurt
+(`eu-central-1`), where everything stays in Germany.
 
 ![An answer in the browser to "What is the office phone number, and who answers it?": the name is masked as {NAME}, a note says personal details are masked, and the first two sources are listed, the first one cited](docs/screenshot-answer.png)
 
@@ -21,9 +23,60 @@ USD, 3425 ms in the function):
 
 ## Measured
 
-- **Where the data is:** in `eu-west-1` (Ireland) — documents, vectors,
-  questions and answers. Models run in the region or behind an EU inference
-  profile, never a global one.
+Each number names the region and the day it was measured in.
+
+### Frankfurt (`eu-central-1`), 07.10.2026
+
+A rehearsal set up a new business on the deployed stack, a fictional craft
+firm with seven German documents, and measured it there
+(`python -m scripts.rehearsal`, see
+[scripts/README.md](scripts/README.md#rehearsal--a-new-business-set-up-and-measured-step-by-step)).
+The answers below come from Qwen3 235B in the region, through the function's
+own path against the deployed stack, with the prompt in this repository.
+
+- **Where the data is:** in `eu-central-1` at all 11 places AWS reports for
+  the stack — documents bucket, embedding model, vector index, function,
+  answer model, topic model, both guardrails, budget table and log. No
+  inference profile, no guardrail profile, and Bedrock keeps no log of the
+  model calls. Every address of the page lies in `eu-central-1` by AWS's own
+  list (`ip-ranges.json`), and plain HTTP got no connection on any of them.
+- **A new business:** 31 seconds of machine time from checking its folder to
+  the first right answer — 3 for its workspace and key, 16 to upload and
+  index its documents, 8 for the first question, "Was kostet eine Stunde für
+  einen Gesellen?", answered "68 Euro" with the right document cited. Its key
+  was refused in another workspace with 401, and a search there found none of
+  its documents. The whole rehearsal, 22 steps with the measurements below,
+  took 11 minutes 12 seconds and 0.70 USD of AWS cost (at most 0.75).
+- **How often the answer is right:** 30 of 30 English questions on English
+  documents, 26 of 26 German questions on German documents and 29 of 32
+  German questions on English documents (`python -m scripts.evaluate`). On
+  the deployed function the same day, every one of the 20 answerable German
+  questions on German documents cited the document its answer comes from.
+- **Staying with the sources:** 36 of 42 questions built to tempt a model
+  (`python -m scripts.control_eval`). No answer added a figure of its own (0
+  of 34), every German question was answered in German (29 of 29), all 8
+  advice questions were refused. The six wrong ones are right answers the
+  grounding check withheld, all of them German answers to English documents.
+- **The topic check:** gpt-oss-120b in the region, on the deployed function,
+  in 957 checks over three runs: no denied question or answer let through (45
+  questions, 32 answers, 11 advice questions), and none of 87 harmless
+  questions, 87 harmless answers and 57 questions of the evaluation sets
+  refused, for 0.30 USD.
+- **The grounding check at 0.8:** of 104 made-up answers it withheld 71, and
+  it let all 19 right German answers to German documents through
+  (`python -m scripts.grounding_probe`).
+- **Cost and time per question:** 0.0021 USD on average for German questions
+  on German documents, 0.0023 for English and 0.0013 for German on English
+  documents, a median of 2.2 to 2.7 seconds from retrieval to cost line. The
+  averages count only the questions with a known cost: an answer the
+  grounding check withheld reports no model tokens and carries
+  `cost_usd: null` (14 of the 88 on the deployed function).
+
+### Ireland (`eu-west-1`), 28.09.2026
+
+- **Where the data is:** in `eu-west-1` — documents, vectors, questions and
+  answers. Models run in the region or behind an EU inference profile, never
+  a global one.
 - **How often the answer is right:** 30 fixed questions — 22 the documents
   answer, 4 the guardrail must refuse, 4 no document answers. Nova Pro, the
   configured model, got 28 right with six passages per question on
@@ -44,9 +97,12 @@ USD, 3425 ms in the function):
   on the page with Nova Pro, the first after a deploy included
   (`latency_ms`); a median of 1.8 seconds from retrieval to cost line for
   the 22 answerable questions, measured from a laptop in Germany.
-- **Tests:** 887 passing and one skipped, without AWS — 45 seconds on a
-  local laptop on 02.10.2026. The skipped one compares German time with the
-  time zone database, which that laptop does not have and CI does.
+
+### Both regions
+
+- **Tests:** 1,347 passing and one skipped, without AWS — 70 seconds on a
+  laptop on 07.10.2026. The skipped one compares German time with the time
+  zone database, which that laptop does not have and CI does.
 - **Documents:** 37 Markdown documents of two fictional companies, uploaded
   as 147 sections so that a hit is a passage, not a page.
 - **Key budget:** a demo key allows 10 questions within 48 hours of its
@@ -64,9 +120,12 @@ the answer, one that checks the question and the answer, each after a frame
 that says what it is, for the denied topics, and one that masks the excerpts
 of its sources. Every AWS call has
 a timeout, and their sum stays under the function's own; a model call AWS
-turns away is made once more while CloudFront still waits. Everything runs
-in Ireland, so the data stays in the EU. Why each of these, and every other
-decision, 78 in all, with dates: [docs/decisions.md](docs/decisions.md).
+turns away is made once more while the caller still waits. In Ireland the
+data stays in the EU; in Frankfurt it stays in Germany, which costs two
+things: no CloudFront, so the function's own URL is the address, and no
+topic guardrail that reads German without leaving the region, so a model in
+the region checks the topics. Why each of these, and every other decision,
+87 in all, with dates: [docs/decisions.md](docs/decisions.md).
 
 ## Limits
 
@@ -76,17 +135,23 @@ decision, 78 in all, with dates: [docs/decisions.md](docs/decisions.md).
 - **Citations are the model's.** One of the four answered live questions
   carried no `[n]` at all, although the grounding check scored it 1.0. The
   prompt asks for citations; the model does not always give them.
-- **The topic filter is not exact.** Of 87 harmless questions about a
-  business's own documents it refused 1 — "How much early payment discount
-  can I deduct, and by when must I pay?" — and all 45 it must refuse, three
-  runs on 06.10.2026.
+- **The topic filter is not exact.** In Ireland, of 87 harmless questions
+  about a business's own documents the topic guardrail refused 1 — "How much
+  early payment discount can I deduct, and by when must I pay?" — and all 45
+  it must refuse, three runs on 06.10.2026; in Frankfurt the topic model
+  refused none of the 87, three runs on 07.10.2026.
   The same question can get a different verdict in another run. Every change
   to the topics is measured first:
   [scripts/README.md](scripts/README.md#topic_probe--what-the-denied-topics-refuse-before-a-deploy).
-- **The grounding threshold is a starting point.** 0.7 is the value AWS
-  works its example with, not a tuned one. A correct answer scored 0.73, just
-  above it. Every answer logs both scores, so the threshold can be moved on
-  evidence.
+- **The grounding threshold is a starting point.** In Ireland, 0.7 is the
+  value AWS works its example with, not a tuned one; a correct answer scored
+  0.73, just above it. In Frankfurt it is 0.8, measured (above), and there it
+  withholds right German answers to English documents: six of the 42
+  control questions on 07.10.2026. Every answer logs both scores, so the
+  threshold can be moved on evidence.
+- **Frankfurt has no domain of its own and no WAF.** The page and `/ask` are
+  the function's URL, `https://<id>.lambda-url.eu-central-1.on.aws/`; the
+  workspace key is the gate there, as it is behind CloudFront.
 
 ## How it was built
 
@@ -97,12 +162,13 @@ the measurements are the author's.
 
 Needs Python 3.11+, Node.js, the AWS CDK (`npm install -g aws-cdk`) and AWS
 credentials. Everything goes to `eu-west-1` (Ireland), so documents, vectors
-and answers stay in the EU.
+and answers stay in the EU; `-c region=eu-central-1` on every `cdk` command
+and `--region eu-central-1` on every script keep them in Frankfurt instead.
 
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q                                  # 888 tests, no AWS needed
+pytest -q                                  # 1,348 tests, no AWS needed
 
 cdk bootstrap aws://<account>/eu-west-1    # once per account and region
 cdk deploy                                 # builds everything

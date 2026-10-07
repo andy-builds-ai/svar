@@ -10,12 +10,9 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError
 
-from infra.stacks.andur_stack import (
-    DENIED_TOPICS,
-    GUARDRAIL_NAME,
-    PRICE_TOPIC_PER_1K_UNITS,
-    TOPICS_TIER,
-)
+from app.denied_topics import DENIED_TOPICS
+from infra.stacks.answer_function import PRICE_TOPIC_PER_1K_UNITS
+from infra.stacks.guardrails import GUARDRAIL_NAME, TOPICS_TIER
 from scripts import evaluate, topic_probe
 from scripts.aws import AwsProblem
 
@@ -222,10 +219,10 @@ def test_every_answer_is_measured_without_its_citations_as_the_function_checks_i
     answers: list[dict[str, Any]],
 ) -> None:
     """The probe cuts the citations with the handler's own function, not a copy of it."""
-    handler = evaluate.import_handler()
+    app = evaluate.import_app()
     for answer in answers:
         judged = topic_probe.judged_text("OUTPUT", answer["answer"])
-        assert judged == handler.answer_for_topics(answer["answer"]), answer["id"]
+        assert judged == app.topic_check.answer_for_topics(answer["answer"]), answer["id"]
         assert "[" not in judged, answer["id"]
     by_id = {a["id"]: a for a in answers}
     assert topic_probe.judged_text("OUTPUT", by_id["q15a1"]["answer"]) == (
@@ -331,8 +328,8 @@ class FakeBedrock:
 
 def frame_of(source: str) -> str:
     """The words the handler puts before a text of this side for the topic guardrail."""
-    handler = evaluate.import_handler()
-    return handler.QUESTION_FRAME if source == "INPUT" else handler.ANSWER_FRAME
+    app = evaluate.import_app()
+    return app.topic_check.QUESTION_FRAME if source == "INPUT" else app.topic_check.ANSWER_FRAME
 
 
 class FakeRuntime:
