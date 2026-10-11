@@ -34,8 +34,8 @@ from scripts.layout import (
     WORKSPACE_NAME,
     Document,
     count_sections,
-    detect_encoding,
     format_conversions,
+    text_encoding,
     upload_items,
 )
 
@@ -116,13 +116,14 @@ def _check_layer_folder(
         else:
             document = Document(entry, workspace, layer)
             document_problems = []
-            if entry.suffix.lower() in TEXT_SUFFIXES:
-                try:
-                    document = Document(
-                        entry, workspace, layer, detect_encoding(entry.read_bytes())
-                    )
-                except (OSError, ValueError) as exc:
-                    document_problems.append(f"{entry}: {exc}")
+            try:
+                # Read here, binary files too: one that cannot be read is a problem of the
+                # folder, not a traceback in the middle of the upload.
+                data = entry.read_bytes()
+                if entry.suffix.lower() in TEXT_SUFFIXES:
+                    document = Document(entry, workspace, layer, text_encoding(data))
+            except (OSError, ValueError) as exc:
+                document_problems.append(f"{entry}: {exc}")
             if not document.sidecar.is_file():
                 document_problems.append(f"{entry}: sidecar {document.sidecar.name} is missing")
             else:

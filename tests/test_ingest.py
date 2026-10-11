@@ -707,6 +707,55 @@ def test_a_file_that_cannot_be_opened_is_a_problem_not_a_traceback(
     assert "Permission denied" in problems[0]
 
 
+def test_a_binary_file_that_cannot_be_read_is_a_problem_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A PDF goes up as it is, so nothing read it before the upload did; `main` counted its
+    sections first and ended in a traceback."""
+    locked = add_stored(tmp_path, "locked.pdf", b"%PDF-1.7")
+    read_bytes = Path.read_bytes
+
+    def refuse(path: Path) -> bytes:
+        if path == locked:
+            raise PermissionError(13, "Permission denied", str(path))
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", refuse)
+    assert ingest.main(["--source", str(tmp_path), "--check"]) == 1
+    error = capsys.readouterr().err
+    assert f"problem: {locked}: " in error and "Permission denied" in error
+    assert "1 problem(s) found. Nothing was uploaded." in error
+
+
+@pytest.mark.parametrize(
+    ("name", "data"),
+    [
+        ("empty.md", b""),
+        ("spaces.md", b" \n\t\n"),
+        ("mark-only.md", codecs.BOM_UTF8),
+        ("empty.txt", b""),
+        ("empty.html", codecs.BOM_UTF16_LE),
+        ("empty.csv", b"\r\n"),
+    ],
+)
+def test_a_text_document_without_text_is_a_problem(tmp_path: Path, name: str, data: bytes) -> None:
+    empty = add_stored(tmp_path, name, data)
+    documents, problems = discover(tmp_path)
+    assert documents == []
+    assert problems == [f"{empty}: is empty: a document needs text"]
+
+
+def test_a_document_emptied_since_the_last_upload_keeps_its_sections_in_the_bucket(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Checked as a document with no section, its earlier sections were stale, and ``--delete``
+    removed them: the folder's problem stops the run before any AWS call."""
+    add_document(tmp_path, "quillmoor", "human", name="kept.md")
+    add_stored(tmp_path, "emptied.md", b"")
+    assert ingest.main(["--source", str(tmp_path), "--delete"]) == 1
+    assert "is empty: a document needs text" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     ("data", "expected"),
     [
@@ -773,21 +822,6 @@ def test_utf_8_html_keeps_its_bytes_whatever_it_declares(tmp_path: Path) -> None
     data = b'<meta charset="windows-1252"><p>plain ascii</p>\n'
     add_stored(tmp_path, "page.html", data)
     assert uploaded_body(tmp_path) == data
-
-
-def test_an_empty_file_is_utf_8_and_goes_up_as_it_does_today(tmp_path: Path) -> None:
-    add_stored(tmp_path, "empty.txt", b"")
-    add_stored(tmp_path, "empty.md", b"")
-    documents, problems = discover(tmp_path)
-    assert problems == []
-    assert [document.encoding for document in documents] == ["utf-8", "utf-8"]
-    bodies = {
-        item.key.rsplit("/", 1)[-1]: item.body
-        for document in documents
-        for item in upload_items(document)
-        if not item.key.endswith(".json")
-    }
-    assert bodies == {"empty.txt": b""}
 
 
 def test_a_file_that_cannot_be_read_as_text_is_a_problem_not_a_traceback(

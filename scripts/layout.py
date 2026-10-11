@@ -290,6 +290,16 @@ def detect_encoding(data: bytes) -> str:
     return encoding
 
 
+def text_encoding(data: bytes) -> str:
+    """`detect_encoding` for a document that holds text. Raises ValueError for one that is
+    empty or only space: no answer can come from it, a Markdown file would go up as no
+    section at all, and ``--delete`` would then take the sections it had before for stale."""
+    encoding = detect_encoding(data)
+    if not data.decode(encoding).strip():
+        raise ValueError("is empty: a document needs text")
+    return encoding
+
+
 def decoded_text(document: Document) -> str:
     """A text document's text; an HTML one converted from another encoding declares UTF-8."""
     text = document.path.read_bytes().decode(document.encoding)
