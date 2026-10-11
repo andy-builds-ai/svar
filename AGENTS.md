@@ -6,19 +6,24 @@ how it is built, `scripts/README.md` how the scripts work.
 
 ## Setup
 
-Needs Python 3.11 or newer, Node.js (CDK synthesizes through jsii, and some
-tests run `web/markdown.js`) and the CDK CLI.
+Needs Python 3.11 or newer (CI runs 3.14, the function's runtime in Lambda),
+Node.js 22 (CDK synthesizes through jsii, and some tests run
+`web/markdown.js`) and the CDK CLI (`npm install -g aws-cdk@2.1142.0`).
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e ".[dev]" -c constraints.txt
 ```
+
+`constraints.txt` pins every package to the version the tests pass on; its
+head says how to renew it.
 
 ## Checks
 
 Run all three before you finish. CI (`.github/workflows/ci.yml`) runs the
-same. They need no AWS; the tests took about a minute.
+same, and then `cdk synth` for both regions. They need no AWS; the tests took
+about a minute.
 
 ```bash
 ruff check

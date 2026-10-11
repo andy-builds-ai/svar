@@ -7,9 +7,14 @@ answer, the passages it was built from and whether a person or a machine
 wrote them. It is meant for a team that keeps its handbooks, policies and
 notes in files and would rather ask than search, and one installation
 serves several companies without one ever seeing another's documents. It
-runs on AWS, defined as code, with no part that bills a monthly base fee, in
-either of two regions: Ireland (`eu-west-1`), behind CloudFront, or Frankfurt
-(`eu-central-1`), where everything stays in Germany.
+runs on AWS, defined as code, with no part that bills a monthly base fee.
+
+The product is the stack in Frankfurt (`eu-central-1`), where everything
+stays in Germany; a real customer's documents go there and nowhere else. The
+same code builds a second stack in Ireland (`eu-west-1`), behind CloudFront:
+the comparison track, which holds only the two fictional demo companies. Two
+stacks from one code base are how models and topic checks are measured
+against each other.
 
 ![An answer in the browser to "What is the office phone number, and who answers it?": the name is masked as {NAME}, a note says personal details are masked, and the first two sources are listed, the first one cited](docs/screenshot-answer.png)
 
@@ -100,8 +105,8 @@ own path against the deployed stack, with the prompt in this repository.
 
 ### Both regions
 
-- **Tests:** 1,347 passing and one skipped, without AWS — 70 seconds on a
-  laptop on 07.10.2026. The skipped one compares German time with the time
+- **Tests:** 1,415 passing and one skipped, without AWS — 81 seconds on a
+  laptop on 11.10.2026. The skipped one compares German time with the time
   zone database, which that laptop does not have and CI does.
 - **Documents:** 37 Markdown documents of two fictional companies, uploaded
   as 147 sections so that a hit is a passage, not a page.
@@ -120,11 +125,11 @@ the answer, one that checks the question and the answer, each after a frame
 that says what it is, for the denied topics, and one that masks the excerpts
 of its sources. Every AWS call has
 a timeout, and their sum stays under the function's own; a model call AWS
-turns away is made once more while the caller still waits. In Ireland the
-data stays in the EU; in Frankfurt it stays in Germany, which costs two
-things: no CloudFront, so the function's own URL is the address, and no
-topic guardrail that reads German without leaving the region, so a model in
-the region checks the topics. Why each of these, and every other decision,
+turns away is made once more while the caller still waits. In Frankfurt the
+data stays in Germany, which costs two things: no CloudFront, so the
+function's own URL is the address, and no topic guardrail that reads German
+without leaving the region, so a model in the region checks the topics. In
+Ireland the data stays in the EU. Why each of these, and every other decision,
 87 in all, with dates: [docs/decisions.md](docs/decisions.md).
 
 ## Limits
@@ -160,28 +165,34 @@ the measurements are the author's.
 
 ## Try it
 
-Needs Python 3.11+, Node.js, the AWS CDK (`npm install -g aws-cdk`) and AWS
-credentials. Everything goes to `eu-west-1` (Ireland), so documents, vectors
-and answers stay in the EU; `-c region=eu-central-1` on every `cdk` command
-and `--region eu-central-1` on every script keep them in Frankfurt instead.
+Needs Python 3.11+ (tested on 3.14, the function's runtime in Lambda),
+Node.js 22, the AWS CDK CLI (`npm install -g aws-cdk@2.1142.0`) and AWS
+credentials. `constraints.txt` pins every Python package to the version the
+tests pass on. The commands build the product stack in Frankfurt, so
+documents, vectors and answers stay in Germany. Without
+`-c region=eu-central-1` and `--region eu-central-1`, and with `eu-west-1` in
+the `cdk bootstrap` line, the same commands build the comparison stack in
+Ireland instead.
 
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
-pip install -e ".[dev]"
-pytest -q                                  # 1,348 tests, no AWS needed
+pip install -e ".[dev]" -c constraints.txt
+pytest -q                                  # 1,416 tests, no AWS needed
 
-cdk bootstrap aws://<account>/eu-west-1    # once per account and region
-cdk deploy                                 # builds everything
-python -m scripts.workspace add quillmoor > /dev/null   # stores the workspace's key
-python -m scripts.ingest                   # uploads the demo corpus and syncs
-python -m scripts.ask "How do I export project data?" --workspace quillmoor
-cdk destroy                                # removes it; the documents bucket stays
+cdk bootstrap aws://<account>/eu-central-1          # once per account and region
+cdk deploy -c region=eu-central-1                   # builds everything
+python -m scripts.workspace --region eu-central-1 add quillmoor > /dev/null   # stores the workspace's key
+python -m scripts.ingest --region eu-central-1      # uploads the demo corpus and syncs
+python -m scripts.ask "How do I export project data?" --workspace quillmoor --region eu-central-1
+cdk destroy -c region=eu-central-1                  # removes it; the documents bucket stays
 ```
 
-Then open the stack output `WebUrl` in a browser; the page asks for a
-workspace and its key. How to get a key, what every field and status means,
-and how to ask with curl: [docs/operating.md](docs/operating.md) and
-[app/README.md](app/README.md).
+A new AWS account whose Lambda limit is 10 concurrent executions needs
+`-c answer_max_concurrency=none` on the `cdk` commands as well
+([docs/operating.md](docs/operating.md#another-region)). Then open the stack
+output `WebUrl` in a browser; the page asks for a workspace and its key. How
+to get a key, what every field and status means, and how to ask with curl:
+[docs/operating.md](docs/operating.md) and [app/README.md](app/README.md).
 
 ## Further reading
 
@@ -199,4 +210,6 @@ and how to ask with curl: [docs/operating.md](docs/operating.md) and
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE).
+Proprietary, all rights reserved: using, copying or passing on the code needs
+the author's written permission, see [LICENSE](LICENSE). The demo documents
+in `knowledge/` are CC0 ([knowledge/README.md](knowledge/README.md)).

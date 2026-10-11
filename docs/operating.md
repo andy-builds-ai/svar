@@ -4,14 +4,16 @@ Deploy, fill, ask, test and tear down.
 
 ## Deploy
 
-Needs Python 3.11+, Node.js, the AWS CDK (`npm install -g aws-cdk`) and AWS
-credentials for the target account. Everything goes to `eu-west-1`
-(Ireland) unless `-c region=` names another region of `REGIONS` in
-`infra/answer_models.py` ([Another region](#another-region)).
+Needs Python 3.11+ (tested on 3.14), Node.js 22, the AWS CDK CLI
+(`npm install -g aws-cdk@2.1142.0`) and AWS credentials for the target
+account. Everything goes to `eu-west-1` (Ireland), the comparison stack,
+unless `-c region=` names another region of `REGIONS` in
+`infra/answer_models.py`; the product stack is the one in `eu-central-1`
+([Another region](#another-region)).
 
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev]" -c constraints.txt
 
 cdk bootstrap aws://<account>/eu-west-1   # once per account and region
 cdk deploy                                # builds or updates everything

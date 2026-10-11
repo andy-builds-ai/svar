@@ -17,7 +17,7 @@ Ten commands, all run from the repository root:
 
 ## What they need
 
-- `pip install -e ".[dev]"` — brings `boto3` with its `crt` extra. The extra
+- `pip install -e ".[dev]" -c constraints.txt` — brings `boto3` with its `crt` extra. The extra
   is not optional here: without it botocore cannot read the credentials that
   `aws login` writes, and every AWS call fails with "Missing Dependency".
 - A valid AWS login for the account the stack is deployed in. When it has
@@ -111,7 +111,9 @@ problem: knowledge/kalvenstett/human/notes.md: mixed: holds UTF-8 characters, bu
 So is a file with a zero character in it: it is no text, or it is UTF-16
 without a byte order mark, which cannot be told for sure. Re-save such a file
 as UTF-8 and rerun. A file that cannot be opened at all, for lack of
-permission or as a broken link, is a problem too.
+permission or as a broken link, is a problem too, whatever its format. So is
+a text file with nothing in it but space: no answer can come from it, and an
+emptied Markdown file would otherwise leave its earlier sections to `--delete`.
 
 A file that was not plain UTF-8 is named with its encoding, also with
 `--check`, so no conversion goes unnoticed:
@@ -247,7 +249,9 @@ answers 403 to everyone but CloudFront.
 
 The key comes from Parameter Store (`/andur/api-keys/<workspace>`, decrypted)
 and is never printed. To use a key you already have, set `ANDUR_API_KEY`;
-with `--url` as well, the script needs no AWS access at all.
+with `--url` as well, the script needs no AWS access at all. Space and a line
+end around the key are dropped, as the function drops them; a key that still
+cannot go into a header is refused without being shown (exit code 2).
 
 Output: the answer, the layers of the sources it cites, one line per source
 — number, `cited` or blank, layer, score, words, workspace and file — and
@@ -362,7 +366,9 @@ deleted. With `--yes` it deletes, in this order:
 
 When it has deleted a key, it ends with "Not quite finished": for up to 5
 minutes a question can still write a new item. Run `remove <name> --yes`
-again after that to delete it.
+again after that to delete it. The command it prints for that carries
+`--region` and `--stack-name` when the run had them, so it reaches the same
+stack.
 
 It never touches anything outside that one name. The prefix ends in a slash,
 so `kalv` never reaches `kalvenstett`; the listing is checked against it again
@@ -477,6 +483,11 @@ all five:
   required sentence and then went on to describe the documents.
 - **USD per question** is the mean over all 30, refusals (0.00015 each)
   included; per answered question see [docs/costs.md](../docs/costs.md).
+
+A question that ends in an error is counted as wrong and in the column
+*Errors*, and it fails the run after the table: exit code 2, as for a failed
+AWS step before the first question. `--out` is opened before anything is
+paid for, and written after every model.
 
 ## topic_probe — what the denied topics refuse, before a deploy
 
@@ -832,6 +843,11 @@ The marks, each on what the model wrote before any guardrail replaced it
   lists the advice questions where the model wrote advice with a number or a
   forbidden spelling of its own, whether a guardrail withheld it or not.
 
+A question that ends in an error is named, counted as wrong, and fails the
+run after the table (exit code 2), like a probe guardrail left behind. A run
+that fails before its first model has finished leaves an earlier `--out` file
+as it is.
+
 ## tool_probe — whether a model can work a tool
 
 ```bash
@@ -846,6 +862,15 @@ knowledge base. Three give everything and expect exactly one call with the
 right values ("morgen" is 2026-10-07: the system prompt names the day); three
 leave something out or vague ("ein paar Paletten") and expect no call and a
 question or a request back for what is missing.
+
+Every request Bedrock refuses as sent (`ValidationException`) fails its case
+and counts as a result, whatever it was refused for, and the run ends with 0.
+The probe does not tell a model that takes no tools from a wrong model id or
+a tool definition Bedrock does not accept: the row stands in the table with
+the error's text, under *Failed*, and that text says which it was. A call
+that fails any other way — throttled, a service error, a timeout — says
+nothing about the model, is named under the table and fails the run with
+exit code 2. A missing login or permission stops it at once.
 
 ## rehearsal — a new business, set up and measured, step by step
 
