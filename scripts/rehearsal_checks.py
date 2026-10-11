@@ -324,12 +324,15 @@ def residency(ctx: Context) -> list[tuple[str, str]]:
             (f"{name} {model}", f"profile {prefix}" if prefix in PROFILE_PREFIXES else region)
         )
     guardrails = (
-        ("GUARDRAIL_ID", "answer guardrail"),
-        ("EXCERPT_GUARDRAIL_ID", "excerpt guardrail"),
+        ("GUARDRAIL_ID", "GUARDRAIL_VERSION", "answer guardrail"),
+        ("EXCERPT_GUARDRAIL_ID", "EXCERPT_GUARDRAIL_VERSION", "excerpt guardrail"),
     )
-    for variable, name in guardrails:
+    for identifier, version, name in guardrails:
         with explained(f"Reading the {name}"):
-            guardrail = ctx.client("bedrock").get_guardrail(guardrailIdentifier=variables[variable])
+            # The version the function calls; without one Bedrock describes the draft.
+            guardrail = ctx.client("bedrock").get_guardrail(
+                guardrailIdentifier=variables[identifier], guardrailVersion=variables[version]
+            )
         profile = guardrail.get("crossRegionDetails", {}).get("guardrailProfileId")
         places.append(
             (name, f"profile {profile}" if profile else arn_region(guardrail["guardrailArn"]))

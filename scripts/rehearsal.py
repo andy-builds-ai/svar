@@ -33,7 +33,8 @@ from pathlib import Path
 from infra.answer_models import REGIONS, answer_model
 from scripts import utf8_output
 from scripts.aws import STACK_NAME, client
-from scripts.layout import document_of
+from scripts.ingest import discover
+from scripts.layout import SIDECAR_SUFFIX, document_of, upload_items
 from scripts.rehearsal_checks import (
     check_address_region,
     check_deploy_time,
@@ -45,6 +46,7 @@ from scripts.rehearsal_checks import (
     workspace_key_environment,
 )
 from scripts.rehearsal_runner import (
+    REPOSITORY,
     Context,
     Result,
     Runner,
@@ -60,6 +62,9 @@ from scripts.rehearsal_runner import (
 #: cannot pass: its addresses are edge locations worldwide.
 RUN_REGIONS = tuple(region for region, models in REGIONS.items() if not models.behind_cloudfront)
 DEFAULT_REGION = "eu-central-1"
+
+#: The folder `python -m scripts.ingest` uploads without ``--source``: the demo workspaces.
+DEMO_SOURCE = REPOSITORY / "knowledge"
 
 
 def deployed_model_name(region: str) -> str:
@@ -97,7 +102,11 @@ _HIT_FILE = re.compile(r"^\d+\. score \S+  workspace=(\S+)  layer=\S+  (.+)$", r
 def no_hits_of_workspace(output: str, ctx: Context) -> str:
     """retrieve in another workspace finds hits there, and none of them is a section of the new
     workspace's documents, whatever its metadata says: the search filter reads the metadata,
-    so only the file names show a document filed under the wrong workspace."""
+    so only the file names show a document filed under the wrong workspace.
+
+    A file the other workspace's own folder goes up as is its own, also when both workspaces
+    have a document of that name ("preise"). What the names cannot show: a file of the new
+    workspace filed there under exactly a name the other one uses too."""
     hits = _HIT_FILE.findall(output)
     if not hits:
         raise StepFailed(f"no hit in {ctx.other_workspace}: nothing to tell apart")
@@ -105,7 +114,10 @@ def no_hits_of_workspace(output: str, ctx: Context) -> str:
         file
         for workspace, file in hits
         if workspace == ctx.workspace
-        or any(document_of(name) in ctx.documents for name in file_names(file))
+        or (
+            not file_names(file) & ctx.other_files
+            and any(document_of(name) in ctx.documents for name in file_names(file))
+        )
     )
     if ours:
         raise StepFailed(f"{ctx.workspace}'s {ours} show up in {ctx.other_workspace}")
@@ -380,11 +392,22 @@ def document_names(source: Path, workspace: str) -> frozenset[str]:
     folder = source / workspace
     if not folder.is_dir():
         return frozenset()
-    sidecar = ".metadata.json"
     return frozenset(
         unicodedata.normalize("NFC", path.stem)
         for path in folder.rglob("*")
-        if path.is_file() and not path.name.endswith(sidecar)
+        if path.is_file() and not path.name.endswith(SIDECAR_SUFFIX)
+    )
+
+
+def uploaded_names(source: Path, workspace: str) -> frozenset[str]:
+    """The names of the files the workspace's documents under `source` go up as: one for each
+    section of a Markdown document, any other document whole. Empty without such a folder."""
+    documents, _ = discover(source, workspace)
+    return frozenset(
+        item.key.rsplit("/", 1)[-1]
+        for document in documents
+        for item in upload_items(document)
+        if not item.key.endswith(SIDECAR_SUFFIX)
     )
 
 
@@ -423,6 +446,7 @@ def main(argv: list[str] | None = None) -> int:
         clients=lambda service: client(service, args.region),
         fact=args.fact,
         documents=document_names(args.source, args.workspace),
+        other_files=uploaded_names(DEMO_SOURCE, args.other_workspace),
     )
     tag = datetime.now().strftime("%Y%m%d-%H%M%S")
     begin = time.monotonic()

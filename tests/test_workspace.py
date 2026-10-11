@@ -743,6 +743,65 @@ def test_many_documents_are_deleted_in_batches_and_only_those() -> None:
     account.neighbours_untouched()
 
 
+def test_the_window_is_named_also_when_the_ingestion_job_cannot_start(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The key is deleted before the job starts: whoever reads only the job's error would not
+    learn that a question can still write a budget item for five minutes."""
+    account = Account()
+
+    def throttled(**_: Any) -> dict[str, Any]:
+        raise FakeClientError("ThrottlingException")
+
+    account.agent.start_ingestion_job = throttled  # type: ignore[method-assign]
+    assert run(account, "remove", TARGET, "--yes") == 2
+    captured = capsys.readouterr()
+    assert f"{PATH}/{TARGET}" not in account.ssm.parameters
+    assert "Not quite finished" in captured.out and f"remove {TARGET} --yes" in captured.out
+    assert captured.err.startswith("error: ")
+
+
+@pytest.mark.parametrize(
+    ("options", "printed"),
+    [
+        ((), f"python -m scripts.workspace remove {TARGET} --yes"),
+        (
+            ("--region", "eu-central-1"),
+            f"python -m scripts.workspace --region eu-central-1 remove {TARGET} --yes",
+        ),
+        (
+            ("--stack-name", "OtherStack", "--region", "eu-central-1"),
+            "python -m scripts.workspace --region eu-central-1 --stack-name OtherStack "
+            f"remove {TARGET} --yes",
+        ),
+    ],
+    ids=["default", "another-region", "another-stack"],
+)
+def test_the_command_to_run_again_names_the_stack_this_run_worked_on(
+    options: tuple[str, ...], printed: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Copied without its region, the command would delete the key, the budget and the
+    documents of the same name in the default region's stack."""
+    assert run(Account(), *options, "remove", TARGET, "--yes") == 0
+    assert f"Run `{printed}` again" in capsys.readouterr().out
+    again = workspace.parse_args(printed.split()[3:])
+    first = workspace.parse_args([*options, "remove", TARGET, "--yes"])
+    assert (again.region, again.stack_name) == (first.region, first.stack_name)
+    assert (again.command, again.workspace, again.yes) == ("remove", TARGET, True)
+
+
+def test_the_other_commands_a_message_names_carry_the_stack_too(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    account = Account()
+    del account.ssm.parameters[f"{PATH}/{TARGET}"]
+    assert run(account, "--region", "eu-central-1", "plan", TARGET, "firma") == 2
+    assert (
+        f"`python -m scripts.workspace --region eu-central-1 add {TARGET} --plan firma`"
+        in capsys.readouterr().err
+    )
+
+
 def test_a_failed_ingestion_job_is_exit_code_3() -> None:
     account = Account()
     account.agent.status = "FAILED"

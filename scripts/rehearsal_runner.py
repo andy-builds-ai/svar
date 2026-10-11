@@ -41,6 +41,8 @@ class Context:
     fact: str | None = None
     #: The new workspace's document names, without their suffix: a section file begins with one.
     documents: frozenset[str] = frozenset()
+    #: The file names the other workspace's own documents go up as, from the demo folder.
+    other_files: frozenset[str] = frozenset()
     outputs: dict[str, str] = field(default_factory=dict)
     account: str | None = None
     started: datetime = field(default_factory=lambda: datetime.now(UTC))

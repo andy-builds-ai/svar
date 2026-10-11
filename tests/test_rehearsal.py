@@ -1,6 +1,7 @@
 """The rehearsal run: its plan, how it runs and times the steps, and its checks, without AWS."""
 
 import http.client
+import json
 import sys
 import threading
 from datetime import UTC, datetime, timedelta
@@ -10,8 +11,9 @@ from typing import Any
 import pytest
 
 from app.page import SECURITY_HEADERS
-from scripts import layout, rehearsal, rehearsal_checks, rehearsal_runner
+from scripts import ingest, layout, rehearsal, rehearsal_checks, rehearsal_runner
 from scripts.rehearsal_runner import Context, Result, Runner, Step, StepFailed
+from tests.test_ingest import sidecar_for
 
 REGION = "eu-central-1"
 
@@ -698,6 +700,48 @@ def test_a_search_elsewhere_must_find_hits_and_none_of_the_new_documents(
         rehearsal.no_hits_of_workspace("0 hit(s) for 'q' (workspace=quillmoor):\n", ctx)
 
 
+def test_a_document_named_alike_in_both_workspaces_is_no_alarm(tmp_path: Path) -> None:
+    """Both have a "pricing": the hit is the other workspace's own file, which its folder goes
+    up as. A file named like the new one's document that the other folder does not produce
+    is still found, an earlier version filed there included."""
+    ctx = context(tmp_path)
+    ctx.documents = frozenset({"preise", "pricing"})
+    ctx.other_files = frozenset({"faq--03-projects.md", "pricing.pdf"})
+    assert rehearsal.no_hits_of_workspace(OTHER, ctx) == (
+        "2 hit(s) in quillmoor, none of kalvenstett's documents"
+    )
+    misfiled = OTHER.replace("faq--03-projects.md", "pricing--01-old-heading.md")
+    with pytest.raises(StepFailed, match=r"kalvenstett's \['pricing--01-old-heading.md'\]"):
+        rehearsal.no_hits_of_workspace(misfiled, ctx)
+    ctx.other_files = frozenset()
+    with pytest.raises(StepFailed, match=r"kalvenstett's \['pricing.pdf'\] show up"):
+        rehearsal.no_hits_of_workspace(OTHER, ctx)
+
+
+def test_the_other_workspaces_own_files_are_named_as_the_upload_names_them(
+    tmp_path: Path,
+) -> None:
+    human = tmp_path / "quillmoor" / "human"
+    human.mkdir(parents=True)
+    sidecar = json.dumps(sidecar_for("quillmoor", "human"))
+    (human / "faq.md").write_text("# FAQ\n\n## Projects\n\nText.\n", encoding="utf-8")
+    (human / "pricing.pdf").write_bytes(b"%PDF-1.7")
+    for name in ("faq.md", "pricing.pdf"):
+        (human / f"{name}.metadata.json").write_text(sidecar, encoding="utf-8")
+    assert rehearsal.uploaded_names(tmp_path, "quillmoor") == {
+        "faq--01-projects.md",
+        "pricing.pdf",
+    }
+    assert rehearsal.uploaded_names(tmp_path, "nobody") == frozenset()
+    assert rehearsal.uploaded_names(tmp_path / "missing", "quillmoor") == frozenset()
+
+
+def test_the_demo_folder_is_the_one_ingest_uploads_by_default() -> None:
+    assert rehearsal.DEMO_SOURCE == rehearsal.REPOSITORY / ingest.parse_args([]).source
+    names = rehearsal.uploaded_names(rehearsal.DEMO_SOURCE, "quillmoor")
+    assert any(name.startswith("admin-billing-and-plans--01-") for name in names)
+
+
 def test_the_new_documents_are_named_from_the_source(tmp_path: Path) -> None:
     human = tmp_path / "kalvenstett" / "human"
     human.mkdir(parents=True)
@@ -790,7 +834,9 @@ def residency_clients(
                         "MODEL_ID": model,
                         "TOPIC_MODEL_ID": "openai.gpt-oss-120b-1:0",
                         "GUARDRAIL_ID": "a",
+                        "GUARDRAIL_VERSION": "3",
                         "EXCERPT_GUARDRAIL_ID": "b",
+                        "EXCERPT_GUARDRAIL_VERSION": "5",
                     }
                 },
             }
@@ -832,6 +878,18 @@ def test_residency_names_every_place_and_writes_its_table(tmp_path: Path) -> Non
         "| model invocation log | off |",
     ):
         assert line in table
+
+
+def test_residency_reads_the_guardrail_versions_the_function_calls(tmp_path: Path) -> None:
+    """Without a version Bedrock describes the draft, which the function never calls and
+    which may have another profile than the version in use."""
+    clients = residency_clients()
+    rehearsal_checks.check_residency(context(tmp_path, clients, **OUTPUTS))
+    read = [kwargs for name, kwargs in clients["bedrock"].calls if name == "get_guardrail"]
+    assert read == [
+        {"guardrailIdentifier": "a", "guardrailVersion": "3"},
+        {"guardrailIdentifier": "b", "guardrailVersion": "5"},
+    ]
 
 
 @pytest.mark.parametrize(

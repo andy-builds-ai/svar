@@ -457,12 +457,24 @@ def run_add(args: argparse.Namespace, settings: Mapping[str, str], connect: Any)
     if failed:
         print(f"error: the key is stored, its plan is not: {failed}", file=sys.stderr)
         print(
-            f"Run `python -m scripts.workspace plan {args.workspace} {args.plan}` before the "
-            "key is handed out.",
+            f"Run `{command(args, 'plan', args.workspace, args.plan)}` before the key is "
+            "handed out.",
             file=sys.stderr,
         )
         return 2
     return 0
+
+
+def command(args: argparse.Namespace, *words: str) -> str:
+    """This script's command line with ``words``, for the stack this run works on: the region
+    and the stack name go in when they are not the defaults. A command copied from a message
+    without them would add, change or delete in the default region's stack."""
+    options: list[str] = []
+    if args.region != REGION:
+        options += ["--region", args.region]
+    if args.stack_name != STACK_NAME:
+        options += ["--stack-name", args.stack_name]
+    return " ".join(["python -m scripts.workspace", *options, *words])
 
 
 def run_plan(args: argparse.Namespace, settings: Mapping[str, str], connect: Any) -> int:
@@ -471,7 +483,7 @@ def run_plan(args: argparse.Namespace, settings: Mapping[str, str], connect: Any
     if key is None:
         raise AwsProblem(
             f"There is no key {name}. Add one with "
-            f"`python -m scripts.workspace add {args.workspace} --plan {args.plan}`."
+            f"`{command(args, 'add', args.workspace, '--plan', args.plan)}`."
         )
     before = set_plan(
         connect("dynamodb", args.region),
@@ -500,18 +512,23 @@ def run_remove(args: argparse.Namespace, settings: Mapping[str, str], connect: A
 
     print("Deleting:")
     key_deleted = carry_out(removal, settings, ssm, dynamodb, s3)
-    job = run_ingestion_job(
-        connect("bedrock-agent", args.region), settings["KnowledgeBaseId"], settings["DataSourceId"]
-    )
-    for line in format_job(job):
-        print(line)
-    if key_deleted:
-        print(
-            "Not quite finished: the answer function may accept the deleted key for up to "
-            f"{KEY_CACHE_MINUTES} more minutes, and a question in that time writes a new budget "
-            f"item. Run `python -m scripts.workspace remove {args.workspace} --yes` again after "
-            f"{KEY_CACHE_MINUTES} minutes to delete it."
+    try:
+        job = run_ingestion_job(
+            connect("bedrock-agent", args.region),
+            settings["KnowledgeBaseId"],
+            settings["DataSourceId"],
         )
+        for line in format_job(job):
+            print(line)
+    finally:
+        # Also when the job could not start: the key is deleted by then all the same.
+        if key_deleted:
+            print(
+                "Not quite finished: the answer function may accept the deleted key for up to "
+                f"{KEY_CACHE_MINUTES} more minutes, and a question in that time writes a new "
+                f"budget item. Run `{command(args, 'remove', args.workspace, '--yes')}` "
+                f"again after {KEY_CACHE_MINUTES} minutes to delete it."
+            )
     return 0 if job_succeeded(job) else 3
 
 
