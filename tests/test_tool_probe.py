@@ -163,3 +163,67 @@ def test_a_region_outside_the_eu_is_refused(capsys: Any) -> None:
 def test_an_expected_spelling_in_capitals_matches_too() -> None:
     """Second review, finding 11."""
     assert tool_probe.value_matches(["Hauptstraße 5"], "hauptstraße 5")
+
+
+def runtime_raising(error: Exception) -> Any:
+    class Runtime:
+        def converse(self, **_: Any) -> None:
+            raise error
+
+    return Runtime()
+
+
+def converse_error(code: str) -> Exception:
+    from botocore.exceptions import ClientError
+
+    return ClientError({"Error": {"Code": code, "Message": "no"}}, "Converse")
+
+
+def read_timeout() -> Exception:
+    from botocore.exceptions import ReadTimeoutError
+
+    return ReadTimeoutError(endpoint_url="https://bedrock-runtime")
+
+
+def test_a_request_the_model_does_not_accept_is_a_result(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every `ValidationException` fails its case and is a result, whatever Bedrock refused
+    the request for; the run itself passes. The table carries the error's text, which is
+    where a model that takes no tools is told from a wrong model id."""
+    refusing = runtime_raising(converse_error("ValidationException"))
+    monkeypatch.setattr(tool_probe, "model_client", lambda region: refusing)
+    assert tool_probe.main(["--model", tool_probe.MODELS[0].name]) == 0
+    captured = capsys.readouterr()
+    assert f"| {tool_probe.MODELS[0].name} | 0/6 |" in captured.out
+    assert "t1: error: An error occurred (ValidationException)" in captured.out
+    assert "failed calls" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        converse_error("ThrottlingException"),
+        converse_error("ServiceUnavailableException"),
+        converse_error("InternalServerException"),
+        converse_error("ModelTimeoutException"),
+        read_timeout(),
+    ],
+    ids=["throttled", "unavailable", "internal", "model-timeout", "read-timeout"],
+)
+def test_a_call_that_fails_for_any_other_reason_fails_the_run(
+    error: Exception,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Throttling, a service error or a timeout says nothing about the model; the table and
+    the file are written all the same."""
+    monkeypatch.setattr(tool_probe, "model_client", lambda region: runtime_raising(error))
+    out = tmp_path / "tools.json"
+    assert tool_probe.main(["--model", tool_probe.MODELS[0].name, "--out", str(out)]) == 2
+    captured = capsys.readouterr()
+    assert f"| {tool_probe.MODELS[0].name} | 0/6 |" in captured.out
+    assert "error: failed calls, counted as failed" in captured.err
+    (summary,) = json.loads(out.read_text(encoding="utf-8"))["summaries"]
+    assert summary["failed_calls"] == ["t1", "t2", "t3", "t4", "t5", "t6"]

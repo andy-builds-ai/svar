@@ -65,6 +65,12 @@ TOOL = {
 
 MAX_TOKENS = 1024
 
+#: The code Bedrock gives a request the model does not accept as sent, a tool it cannot take
+#: included: a result of the probe, the case failed. A call that fails with any other code or
+#: none (network, throttling, a service error, a timeout) says nothing about the model, and
+#: the run fails with it.
+REFUSED_AS_SENT = "ValidationException"
+
 #: The answer function's limits for a model call: a model that does not answer in time fails
 #: the case instead of holding the run.
 CONNECT_SECONDS, READ_SECONDS = 3, 40
@@ -203,7 +209,7 @@ def run_model(
                 toolConfig={"tools": [TOOL]},
                 inferenceConfig={"maxTokens": MAX_TOKENS, "temperature": 0},
             )
-        except Exception as exc:  # noqa: BLE001 - a model that cannot take tools is a result
+        except Exception as exc:  # noqa: BLE001 - only botocore's are read below
             if not type(exc).__module__.startswith("botocore"):
                 raise
             # A missing login or permission is no answer of the model: stop the run.
@@ -212,7 +218,15 @@ def run_model(
                 "AccessDeniedException",
             }:
                 raise AwsProblem(explain(f"Asking {model.name}", exc)) from exc
-            rows.append({"id": case["id"], "passed": False, "why": f"error: {exc}", "calls": []})
+            rows.append(
+                {
+                    "id": case["id"],
+                    "passed": False,
+                    "why": f"error: {exc}",
+                    "calls": [],
+                    "call_failed": error_code(exc) != REFUSED_AS_SENT,
+                }
+            )
             print(f"{model.name} {case['id']}: error {exc}", file=sys.stderr)
             continue
         seconds = time.perf_counter() - started
@@ -243,6 +257,7 @@ def summarise(model: AnswerModel, rows: Sequence[Mapping[str, Any]]) -> dict[str
         "model": model.name,
         "passed": f"{sum(r['passed'] for r in rows)}/{len(rows)}",
         "failed": {r["id"]: r["why"] for r in rows if not r["passed"]},
+        "failed_calls": [r["id"] for r in rows if r.get("call_failed")],
         "cost_usd": sum(r.get("cost_usd", 0.0) for r in rows),
         "median_seconds": statistics.median(timed) if timed else None,
     }
@@ -294,6 +309,11 @@ def main(argv: list[str] | None = None) -> int:
         print_table(summaries)
         return 2
     print_table(summaries)
+    failed_calls = [f"{s['model']} {name}" for s in summaries for name in s["failed_calls"]]
+    if failed_calls:
+        # The report stands; a failed call still fails the run.
+        print(f"error: failed calls, counted as failed: {', '.join(failed_calls)}", file=sys.stderr)
+        return 2
     return 0
 
 

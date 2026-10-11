@@ -361,6 +361,31 @@ def test_an_internal_error_is_not_asked_again() -> None:
         ("500", "no cash over £500.", True),
         ("45", "after 450 days", False),
         ("60 minutes", "for **60**\u00a0minutes", True),
+        ("139", "Das kostet 139,00 Euro.", True),
+        ("139", "It costs 139.00 pounds", True),
+        ("60", "£60.0", True),
+        ("139", "Das kostet 139,00.", True),
+        ("139", "139,50 Euro", False),
+        ("139", "139,05 Euro", False),
+        ("139", "139.000 Euro", False),
+        ("1", "ab 1.000 Euro", False),
+        ("13", "bis 13.00 Uhr", True),
+        ("27.10", "am 27.10. ist Schluss", True),
+        ("27.10", "am 27.10.2026", False),
+        ("27.10.2026", "am 27.10.2026", True),
+        ("12", "costs 12.5 per unit", False),
+        ("12", "kostet 12,5 Euro", False),
+        ("5", "Skonto 3,5 %", False),
+        ("500", "ab 1.500 Euro", False),
+        ("500", "from 1,500 pounds", False),
+        ("1.500", "ab 1.500 Euro.", True),
+        ("68", "Es sind 68.", True),
+        ("68", "68, h\u00f6chstens 70 Euro", True),
+        ("2026", "am 12.10.2026", False),
+        ("12.10.2026", "am 12.10.2026.", True),
+        ("den", "Die B\u00f6den sind neu", False),
+        ("den", "auf den Boden", True),
+        ("\u00d6l", "Heiz\u00f6l", False),
     ],
 )
 def test_a_fact_is_found_on_its_own_not_inside_a_longer_number(
@@ -411,7 +436,7 @@ def test_the_results_are_written_after_every_model(
     written: list[list[str]] = []
 
     def run_model(app: Any, base: Any, model: Any, questions: Any, progress: Any) -> Any:
-        if out.exists():
+        if out.read_text(encoding="utf-8"):
             written.append(list(json.loads(out.read_text(encoding="utf-8"))["runs"]))
         return [{"kind": "refuse", "correct": True, "cites_document": False, "seconds": 1.0,
                  "rejected": 0, "first_call_rejected": False, "attempts": 1,
@@ -473,3 +498,81 @@ def test_a_refusal_the_model_declines_is_right_but_not_blocked() -> None:
     assert evaluate.blocked_by_guardrail({"body": {"guardrail": {"action": "blocked"}}})
     assert not evaluate.blocked_by_guardrail(declined)
     assert not evaluate.blocked_by_guardrail({"error": "x"})
+
+
+def run_with(monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, Any]]) -> None:
+    """`evaluate.main` up to its report, with these rows in place of a paid run."""
+    monkeypatch.setattr(evaluate, "deployed_environment", lambda region: {})
+    settings = config.load_settings(ENVIRONMENT)
+    monkeypatch.setattr(config, "load_settings", lambda environ: settings)
+    monkeypatch.setattr(evaluate, "run_model", lambda *_: rows)
+
+
+ANSWERED = {"kind": "refuse", "correct": True, "cites_document": False, "seconds": 1.0,
+            "rejected": 0, "first_call_rejected": False, "attempts": 1,
+            "body": {"cost_usd": 0.00015}}  # fmt: skip
+
+
+def test_a_run_with_a_failed_call_reports_and_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """A question that ended in an error is counted as wrong; a run with one must not pass
+    as measured, or a rehearsal reports a model as checked that never answered."""
+    failed = {"kind": "answer", "correct": False, "cites_document": False, "seconds": 4.0,
+              "rejected": 0, "first_call_rejected": False, "attempts": 1,
+              "error": "The model could not answer."}  # fmt: skip
+    run_with(monkeypatch, [ANSWERED, failed])
+    out = tmp_path / "results.json"
+    assert evaluate.main(["--model", "Nova Pro", "--out", str(out)]) == 2
+    captured = capsys.readouterr()
+    assert "| Nova Pro | 1/2 |" in captured.out
+    assert captured.err.strip() == "error: 1 failed call(s), counted as wrong"
+    assert json.loads(out.read_text(encoding="utf-8"))["summaries"][0]["errors"] == 1
+
+
+def test_a_run_without_a_failed_call_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    run_with(monkeypatch, [ANSWERED])
+    assert evaluate.main(["--model", "Nova Pro"]) == 0
+
+
+def test_a_bad_out_path_ends_with_exit_2_before_anything_is_paid(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    def paid(region: str) -> dict[str, str]:
+        raise AssertionError("the run reached AWS")
+
+    monkeypatch.setattr(evaluate, "deployed_environment", paid)
+    out = tmp_path / "missing" / "results.json"
+    assert evaluate.main(["--model", "Nova Pro", "--out", str(out)]) == 2
+    assert capsys.readouterr().err.startswith(f"error: {out} cannot be written: ")
+
+
+@pytest.mark.parametrize(
+    ("questions", "name"),
+    [("evaluation-questions.json", "q14"), ("evaluation-questions-de.json", "de07")],
+)
+def test_the_code_freeze_counts_as_a_date_with_or_without_its_year(
+    questions: str, name: str
+) -> None:
+    """A day and month do not count inside a date with its year (`contains`), so the set
+    names the whole date as well."""
+    (group,) = next(
+        question["facts"]
+        for question in evaluate.load_questions(evaluate.QUESTIONS_FILE.with_name(questions))
+        if question["id"] == name
+    )
+    for answer in ("Der Code-Freeze ist am 27.10.2026 geplant.", "Code freeze: 27.10. [1]"):
+        assert any(evaluate.contains(answer, spelling) for spelling in group)
+
+
+def test_an_earlier_result_stays_when_a_run_fails_before_it_pays(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def expired(region: str) -> dict[str, str]:
+        raise evaluate.AwsProblem("Your AWS login has run out.")
+
+    monkeypatch.setattr(evaluate, "deployed_environment", expired)
+    out = tmp_path / "results.json"
+    out.write_text('{"summaries": ["paid for"]}', encoding="utf-8")
+    assert evaluate.main(["--model", "Nova Pro", "--out", str(out)]) == 2
+    assert out.read_text(encoding="utf-8") == '{"summaries": ["paid for"]}'

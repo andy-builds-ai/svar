@@ -92,11 +92,25 @@ def load_questions(path: Path) -> list[dict[str, Any]]:
     return questions
 
 
+#: Before a number: no digit and point or comma, as in "1.500" before "500".
+_NOT_AFTER_A_DIGIT_GROUP = r"(?<!\d[.,])"
+
+#: After a number: no point or comma with a digit behind it, other than one or two zeros
+#: that end there.
+_NO_DIGITS_BEHIND = r"(?![.,](?!0{1,2}(?!\d))\d)"
+
+
 def contains(text: str, fact: str) -> bool:
-    """Whether ``fact`` stands in ``text`` on its own: "12" not inside "120", "4:30" not
-    inside "14:30". Both are compared as `plain` text."""
-    pattern = rf"(?<![0-9a-z]){re.escape(plain(fact))}(?![0-9a-z])"
-    return re.search(pattern, plain(text)) is not None
+    """Whether ``fact`` stands in ``text`` on its own: "12" not inside "120", "12,5" or
+    "1.012", "4:30" not inside "14:30", "den" not inside "Böden". A number next to a point or
+    comma and a digit is part of a longer one, unless one or two zeros are all that follows:
+    "139" stands in "139,00", not in "139,50" and not in "139.000". A day and month inside a
+    date written with points count as part of it too ("27.10" not in "27.10.2026"), so a
+    question gives such a date whole as well. Both are compared as `plain` text."""
+    fact = plain(fact)
+    before = r"(?<!\w)" + (_NOT_AFTER_A_DIGIT_GROUP if fact[:1].isdigit() else "")
+    after = r"(?!\w)" + (_NO_DIGITS_BEHIND if fact[-1:].isdigit() else "")
+    return re.search(before + re.escape(fact) + after, plain(text)) is not None
 
 
 def plain(text: str) -> str:
@@ -320,6 +334,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: these would leave the EU: {outside}", file=sys.stderr)
         return 2
     questions = load_questions(args.questions)
+    if args.out:
+        # A bad path fails now, not after paying; an earlier result there stays as it is.
+        try:
+            with args.out.open("a", encoding="utf-8"):
+                pass
+        except OSError as problem:
+            print(f"error: {args.out} cannot be written: {problem}", file=sys.stderr)
+            return 2
     app = import_app()
     try:
         base = app.config.load_settings(deployed_environment(args.region))
@@ -341,6 +363,11 @@ def main(argv: list[str] | None = None) -> int:
             )
     for line in table(summaries):
         print(line)
+    failed_calls = sum(summary["errors"] for summary in summaries)
+    if failed_calls:
+        # The report stands; a failed call still fails the run.
+        print(f"error: {failed_calls} failed call(s), counted as wrong", file=sys.stderr)
+        return 2
     return 0
 
 

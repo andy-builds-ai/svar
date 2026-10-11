@@ -437,8 +437,6 @@ def main(argv: list[str] | None = None) -> int:
                 for kind, guardrail_id in probes.items()
             ]
         )
-    if args.out:
-        write(args.out, args, started, summaries, runs, passages)
     print(f"Topic tier of the probe guardrails: {args.topics_tier}.\n")
     for line in table(summaries):
         print(line)
@@ -447,7 +445,11 @@ def main(argv: list[str] | None = None) -> int:
     if failed is not None:
         print(f"error: {failed}", file=sys.stderr)
         return 2
-    return 0 if deleted else 2
+    failed_calls = sorted({name for summary in summaries for name in summary["errors"]})
+    if failed_calls:
+        print(f"error: failed calls, counted as wrong: {', '.join(failed_calls)}", file=sys.stderr)
+    # The report stands; a failed call or a probe left behind still fails the run.
+    return 0 if deleted and not failed_calls else 2
 
 
 def write(

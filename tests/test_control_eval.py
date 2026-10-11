@@ -654,3 +654,69 @@ def test_the_prices_and_date_are_the_regions_own() -> None:
     )
     assert settings.prices.input_tokens == Decimal("0.00092")
     assert settings.price_date == "2026-09-28"
+
+
+def run_with(
+    monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, Any]], probe: Any = "probe-id"
+) -> None:
+    """`control_eval.main` with these rows in place of a paid run, and ``probe`` as what
+    creating a probe guardrail gives: its id, or the problem it ends in."""
+
+    def create_probe(bedrock: Any, request: Any) -> str:
+        if isinstance(probe, Exception):
+            raise probe
+        return probe
+
+    # `main` puts its own readers in place of these two; monkeypatch takes them out again.
+    monkeypatch.setattr(app.retrieval, "retrieve_passages", app.retrieval.retrieve_passages)
+    monkeypatch.setattr(app.llm, "ask_model", app.llm.ask_model)
+    monkeypatch.setattr(control_eval, "deployed_environment", lambda region: ENVIRONMENT)
+    monkeypatch.setattr(control_eval, "client", lambda service, region: None)
+    monkeypatch.setattr(control_eval, "create_probe", create_probe)
+    monkeypatch.setattr(control_eval, "wait_until_ready", lambda *_, **__: None)
+    monkeypatch.setattr(control_eval, "delete_reporting", lambda *_: True)
+    monkeypatch.setattr(control_eval, "run_model", lambda *_: rows)
+
+
+def marked(text: str | None, **more: Any) -> dict[str, Any]:
+    """One row of a run for `TEMPTING`, with the model's text or without one."""
+    return {
+        **control_marks.grade(TEMPTING, body(text) if text else None, text, PASSAGES, app),
+        "id": "c12",
+        "kind": "unanswerable",
+        "partial": False,
+        "seconds": 1.0,
+        "language_asked": "de",
+        "model_text": text,
+        "body": body(text) if text else None,
+        **more,
+    }
+
+
+def test_a_run_that_fails_before_its_first_model_leaves_an_earlier_result(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The probe guardrail could not be made, so no model ran: an empty run must not take the
+    place of the paid one in the file."""
+    run_with(monkeypatch, [], probe=control_eval.AwsProblem("The guardrail limit is reached."))
+    out = tmp_path / "results.json"
+    out.write_text('{"summaries": ["paid for"]}', encoding="utf-8")
+    assert control_eval.main(["--model", FRANKFURT_MODELS[0].name, "--out", str(out)]) == 2
+    assert out.read_text(encoding="utf-8") == '{"summaries": ["paid for"]}'
+
+
+def test_a_run_with_a_failed_call_reports_and_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    run_with(monkeypatch, [marked(None, error="The model could not answer.")])
+    out = tmp_path / "results.json"
+    assert control_eval.main(["--model", FRANKFURT_MODELS[0].name, "--out", str(out)]) == 2
+    captured = capsys.readouterr()
+    assert f"| {FRANKFURT_MODELS[0].name} |" in captured.out
+    assert "error: failed calls, counted as wrong: c12" in captured.err
+    assert json.loads(out.read_text(encoding="utf-8"))["summaries"][0]["errors"] == ["c12"]
+
+
+def test_a_run_without_a_failed_call_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    run_with(monkeypatch, [marked(sentences.NOT_IN_SOURCES_ANSWERS["de"])])
+    assert control_eval.main(["--model", FRANKFURT_MODELS[0].name]) == 0
