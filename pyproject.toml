@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,11 +8,17 @@ version = "0.1.0"
 description = "Andur — an internal knowledge assistant on AWS: Bedrock Knowledge Bases on S3 Vectors, one deployment, one workspace per company."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
+# Not a package for an index: PyPI refuses an upload that carries this classifier.
+classifiers = ["Private :: Do Not Upload"]
+# The ranges say what the code needs; constraints.txt pins the exact versions it is tested on.
 dependencies = [
-    "aws-cdk-lib>=2.269.0",
+    # From 2.273.0 the CloudFront origin grants lambda:InvokeFunction itself, which the stack
+    # test counts.
+    "aws-cdk-lib>=2.273.0",
     "constructs>=10.0.0,<11.0.0",
-    # Used by scripts/ only, and imported lazily there. Tested with 1.43.96.
+    # Used by scripts/ only, and imported lazily there.
     # The crt extra is what lets botocore read the credentials `aws login`
     # writes (login_session profiles); without it the scripts cannot sign in.
     "boto3[crt]>=1.43.0",
