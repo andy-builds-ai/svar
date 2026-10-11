@@ -33,6 +33,7 @@ def test_the_model_call_is_tried_once_everything_else_twice() -> None:
     assert set(aws.CLIENT_LIMITS) == {
         "ssm",
         "dynamodb",
+        "budget-refund",
         "bedrock-agent-runtime",
         "bedrock-runtime",
         "guardrail",
@@ -46,6 +47,7 @@ def test_the_excerpt_guardrail_is_a_bedrock_runtime_client_with_short_limits() -
     assert aws.SERVICE_OF_CLIENT == {
         "guardrail": "bedrock-runtime",
         "topic-model": "bedrock-runtime",
+        "budget-refund": "dynamodb",
     }
     guard = aws.CLIENT_LIMITS["guardrail"]
     assert guard.connect_timeout + guard.read_timeout == 7
@@ -73,8 +75,20 @@ def test_the_budget_counter_waits_the_shortest() -> None:
         counter.connect_timeout + counter.read_timeout
         < limits.connect_timeout + limits.read_timeout
         for service, limits in aws.CLIENT_LIMITS.items()
-        if service != "dynamodb"
+        if aws.SERVICE_OF_CLIENT.get(service, service) != "dynamodb"
     )
+
+
+def test_a_refund_is_sent_once() -> None:
+    """`SET count = count - 1` cannot be repeated: had the first attempt reached the table and
+    only its answer got lost, a second would take the question back twice, and the count
+    would run behind. The refund waits no longer than a count and is no part of the worst
+    case: it is sent only while it still ends inside the function's time."""
+    refund, counter = aws.CLIENT_LIMITS["budget-refund"], aws.CLIENT_LIMITS["dynamodb"]
+    assert refund.attempts == 1
+    assert refund[:2] == counter[:2]
+    assert aws.SERVICE_OF_CLIENT["budget-refund"] == "dynamodb"
+    assert aws.call_seconds("budget-refund") == 2 + 3
 
 
 def test_worst_case_is_every_attempt_timing_out() -> None:

@@ -668,8 +668,10 @@ version is handled the same way: its `ApplyGuardrail` permission names the
 guardrail, whatever the version.
 
 What the trace says goes to the log, never what it matched: a masked phone
-number is logged as `pii:PHONE`, not as the number, and the trace's copy of
-the unmasked answer is not read at all.
+number is logged as `pii:PHONE`, not as the number. The trace's copy of the
+unmasked answer is read for one comparison only, whether a blocked answer is
+exactly the "not in the sources" sentence (`written_text` in `llm.py`); it is
+neither logged nor returned.
 
 ### What a block says, in the visitor's language
 
@@ -764,7 +766,9 @@ Both fail closed: a call that fails ends the request in 502 with the cause —
 model call, "The answer could not be checked …" after it — and nothing is
 answered or given unchecked. The log line is `topic-guard-failed` with the
 side (`INPUT` or `OUTPUT`) and the error code. The question has been counted
-by then, as with every 502.
+by then. A check of the question that fails is given back to the key, unless
+a timeout caused it or the verdict could not be read; a check of the answer
+that fails stays counted, the model has answered by then (*Keys are budgets*).
 
 Measured with `python -m scripts.topic_probe` on 06.10.2026, three runs, the
 probe guardrail built like the topic guardrail: 45 of 45 questions to refuse
@@ -984,7 +988,8 @@ of the EU.
 
 Timeouts: every AWS call has a connect and a read timeout (`CLIENT_LIMITS`
 in `aws.py`). Reading the key, counting the budget, retrieving and masking
-the excerpts are tried twice; the model call once, because a converse
+the excerpts are tried twice; a refund once, because a second attempt could
+take the question back twice; the model call once, because a converse
 that timed out may already have produced its answer, and a second attempt
 would pay for the input tokens again. The exception is a call AWS documents
 as not run — throttled over a quota, a service unable to handle it, a model

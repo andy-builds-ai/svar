@@ -59,7 +59,8 @@ def refund_question(
     which follows from the text the caller wrote. Whoever could cause any of these would
     otherwise ask without budget. A refund that fails, or that would not end before the
     function's own timeout, leaves the question counted and says so in the log: the count may
-    run ahead, never behind.
+    run ahead, never behind. That is why the refund is sent once and never repeated
+    (`CLIENT_LIMITS` in aws.py).
     """
     reason = type(error).__name__
     kept = (
@@ -74,7 +75,9 @@ def refund_question(
     if kept:
         log.log_event("budget-kept", workspace=workspace, error=reason, cause=kept)
         return False
-    latest = aws.FUNCTION_TIMEOUT_SECONDS - aws.ORIGIN_MARGIN_SECONDS - aws.call_seconds("dynamodb")
+    latest = (
+        aws.FUNCTION_TIMEOUT_SECONDS - aws.ORIGIN_MARGIN_SECONDS - aws.call_seconds("budget-refund")
+    )
     if elapsed > latest:
         log.log_event(
             "budget-kept",
@@ -85,7 +88,7 @@ def refund_question(
         )
         return False
     try:
-        clients.client("dynamodb", settings.region).update_item(
+        clients.client("budget-refund", settings.region).update_item(
             TableName=settings.budget_table,
             Key={budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(key)}},
             **refund_request(charge),

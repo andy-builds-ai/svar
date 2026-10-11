@@ -16,6 +16,9 @@ class ClientLimits(NamedTuple):
 CLIENT_LIMITS = {
     "ssm": ClientLimits(connect_timeout=3, read_timeout=5, attempts=2),
     "dynamodb": ClientLimits(connect_timeout=2, read_timeout=3, attempts=2),
+    # One attempt: a refund whose answer got lost would be sent again and take the question
+    # back twice. A count repeated the same way runs ahead, which the budget allows.
+    "budget-refund": ClientLimits(connect_timeout=2, read_timeout=3, attempts=1),
     "bedrock-agent-runtime": ClientLimits(connect_timeout=3, read_timeout=10, attempts=2),
     "bedrock-runtime": ClientLimits(connect_timeout=3, read_timeout=40, attempts=1),
     "guardrail": ClientLimits(connect_timeout=2, read_timeout=5, attempts=2),
@@ -31,7 +34,11 @@ CLIENT_LIMITS = {
 #: that confirm a topic run at once, in the second (topic_model.ROUNDS_PER_CHECK).
 TOPIC_MODEL_ROUNDS_PER_CHECK = 2
 
-SERVICE_OF_CLIENT = {"guardrail": "bedrock-runtime", "topic-model": "bedrock-runtime"}
+SERVICE_OF_CLIENT = {
+    "guardrail": "bedrock-runtime",
+    "topic-model": "bedrock-runtime",
+    "budget-refund": "dynamodb",
+}
 
 RETRY_DELAY_SECONDS = 6
 
@@ -128,6 +135,8 @@ def worst_case_seconds(behind_cloudfront: bool = True) -> int:
         "guardrail": GUARDRAIL_CALLS_PER_REQUEST,
         # Its topic checks take the place of the topic guardrail's, counted under "guardrail".
         "topic-model": 0,
+        # Sent only while it still ends inside the function's time (refunds.py).
+        "budget-refund": 0,
     }
     every_timeout = sum(calls.get(service, 1) * call_seconds(service) for service in CLIENT_LIMITS)
     with_model_retry = (

@@ -7,6 +7,7 @@ from typing import Any
 import answering
 import aws as aws_module
 import budget
+import clients
 import clocks
 import config
 import errors
@@ -220,6 +221,27 @@ def test_a_refund_that_fails_leaves_the_question_counted_and_says_so(
     assert line["detail"] == "ClientError: ProvisionedThroughputExceededException"
 
 
+def test_the_refund_is_sent_through_the_client_that_never_repeats(
+    aws: dict[str, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The count goes through the table's client with two attempts, the refund through the
+    one with a single attempt: sent twice, it would take the question back twice."""
+    asked: list[str] = []
+    through = clients.client
+    monkeypatch.setattr(
+        clients, "client", lambda service, region: asked.append(service) or through(service, region)
+    )
+    aws["bedrock-runtime"].error = client_error("AccessDeniedException")
+    status, body = call(event())
+    assert status == 502 and body["refunded"] is True
+    assert asked.count("budget-refund") == 1
+    assert asked.index("dynamodb") < asked.index("budget-refund")
+    assert aws_module.CLIENT_LIMITS["budget-refund"].attempts == 1
+    (refund,) = refund_writes(aws)
+    assert refund["UpdateExpression"] == refunds.DEMO_REFUND_EXPRESSION
+
+
 def test_a_refund_never_counts_below_zero(
     aws: dict[str, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
@@ -255,7 +277,7 @@ def test_no_refund_when_it_would_not_end_before_the_functions_timeout(
         cold_start.advance(
             aws_module.FUNCTION_TIMEOUT_SECONDS
             - aws_module.ORIGIN_MARGIN_SECONDS
-            - aws_module.call_seconds("dynamodb")
+            - aws_module.call_seconds("budget-refund")
             + 1
         )
         return real_ask(*args)

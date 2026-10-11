@@ -636,7 +636,11 @@ def aws(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "guardrail": FakeGuardrail(),
         "dynamodb": FakeDynamoDB(),
     }
-    monkeypatch.setattr(clients, "client", lambda service, region: fakes[service])
+    # The refund reaches the budget table through a client of its own (`CLIENT_LIMITS`).
+    table_of = {"budget-refund": "dynamodb"}
+    monkeypatch.setattr(
+        clients, "client", lambda service, region: fakes[table_of.get(service, service)]
+    )
     return fakes
 
 
