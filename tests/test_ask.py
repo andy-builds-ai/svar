@@ -339,6 +339,52 @@ def test_key_from_the_environment_skips_parameter_store_and_stack(
     assert request.get_header(ask.KEY_HEADER.capitalize()) == "key-from-env"
 
 
+@pytest.mark.parametrize("given", ["key-from-env\n", "  key-from-env\r\n", "key-from-env"])
+def test_a_key_with_a_line_end_around_it_is_sent_without_it(
+    given: str, deployed: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A key read from a file brings its line end; the function drops it too."""
+    monkeypatch.setenv(ask.API_KEY_ENVIRONMENT_VARIABLE, given)
+    assert ask.main(["How?", "--workspace", "quillmoor", "--url", "https://given.example/"]) == 0
+    (request,) = deployed["requests"]
+    assert request.get_header(ask.KEY_HEADER.capitalize()) == "key-from-env"
+
+
+@pytest.mark.parametrize("given", ["key-from\nenv", "key-from\x07env", "key-from-€nv"])
+def test_a_key_no_header_can_carry_is_refused_and_never_printed(
+    given: str,
+    deployed: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`http.client` raises a ValueError that quotes the header's value; a traceback of it
+    would put the key on the screen."""
+    monkeypatch.setenv(ask.API_KEY_ENVIRONMENT_VARIABLE, given)
+    assert ask.main(["How?", "--workspace", "quillmoor", "--url", "https://given.example/"]) == 2
+    assert deployed["requests"] == []
+    output = capsys.readouterr()
+    assert output.err.startswith("error: The workspace key cannot go into an HTTP header")
+    assert "key-from" not in output.out + output.err
+
+
+def test_a_key_from_parameter_store_goes_through_the_same_check(
+    deployed: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(ask, "read_key", lambda ssm, path, workspace: f"{KEY}\nsecond-line")
+    assert ask.main(["How?", "--workspace", "quillmoor"]) == 2
+    assert deployed["requests"] == []
+    assert KEY not in "".join(capsys.readouterr())
+
+
+def test_an_empty_key_in_the_environment_counts_as_none(
+    deployed: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(ask.API_KEY_ENVIRONMENT_VARIABLE, " \n")
+    assert ask.main(["How?", "--workspace", "quillmoor"]) == 0
+    (request,) = deployed["requests"]
+    assert request.get_header(ask.KEY_HEADER.capitalize()) == KEY
+
+
 def test_main_exits_2_when_an_aws_step_fails(
     deployed: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

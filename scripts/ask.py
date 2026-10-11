@@ -5,6 +5,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -53,6 +54,23 @@ def read_key(ssm: Any, key_path: str, workspace: str) -> str:
             ) from problem.__cause__
         raise
     return response["Parameter"]["Value"]
+
+
+#: What a header value may hold here: printable ASCII and Latin-1, no control character.
+_HEADER_VALUE = re.compile(r"[ -~\xa0-\xff]+")
+
+
+def header_value(key: str) -> str:
+    """The key as it goes into the header: without the space and line end around it, which the
+    function drops too (`request_key` in app/intake.py). A key that still cannot be a header
+    is an `AwsProblem` that does not repeat it; `http.client` would name the value."""
+    key = key.strip()
+    if not _HEADER_VALUE.fullmatch(key):
+        raise AwsProblem(
+            "The workspace key cannot go into an HTTP header: it is empty, or it holds a line "
+            "break, a control character or a character outside Latin-1. Nothing was sent."
+        )
+    return key
 
 
 def ask_url(web_url: str) -> str:
@@ -152,7 +170,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     utf8_output()
     args = parse_args(argv)
-    given_key = os.environ.get(API_KEY_ENVIRONMENT_VARIABLE)
+    given_key = os.environ.get(API_KEY_ENVIRONMENT_VARIABLE, "").strip()
     # The key path is only needed when the key has to come from Parameter Store.
     wanted: dict[str, str | None] = {WEB_URL_OUTPUT: args.url}
     if not given_key:
@@ -162,8 +180,9 @@ def main(argv: list[str] | None = None) -> int:
             wanted,
             lambda: read_stack_outputs(client("cloudformation", args.region), args.stack_name),
         )
-        key = given_key or read_key(
-            client("ssm", args.region), settings["ApiKeyParameterPath"], args.workspace
+        key = header_value(
+            given_key
+            or read_key(client("ssm", args.region), settings["ApiKeyParameterPath"], args.workspace)
         )
         url = ask_url(settings[WEB_URL_OUTPUT])
         status, body = send(build_request(url, key, args.question, args.workspace, args.language))
