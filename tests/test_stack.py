@@ -853,11 +853,13 @@ def distribution_config(stack: AndurStack, template: Template) -> Mapping[str, A
 def test_only_cloudfront_may_invoke_the_function_and_only_this_distribution(
     stack: AndurStack, template: Template
 ) -> None:
-    """Both permissions the documentation asks for, both bound to this distribution.
+    """Every permission on the function, each bound to this distribution.
 
-    One is added by the origin access control construct, the other by the
-    stack. Without the source condition any distribution in any account could
-    invoke the function.
+    The origin access control construct adds the two the documentation asks
+    for, `lambda:InvokeFunction` only through the URL; the stack adds
+    `lambda:InvokeFunction` once more (`allow_cloudfront_to_invoke`). Without
+    the source condition any distribution in any account could invoke the
+    function.
     """
     distribution_arn_parts = [
         "arn:",
@@ -868,14 +870,17 @@ def test_only_cloudfront_may_invoke_the_function_and_only_this_distribution(
         {"Ref": stack.get_logical_id(stack.distribution.node.default_child)},
     ]
     permissions = template.find_resources("AWS::Lambda::Permission")
-    assert len(permissions) == 2
-    actions = set()
+    granted = []
     for permission in permissions.values():
         properties = permission["Properties"]
         assert properties["Principal"] == "cloudfront.amazonaws.com"
         assert properties["SourceArn"]["Fn::Join"] == ["", distribution_arn_parts]
-        actions.add(properties["Action"])
-    assert actions == {"lambda:InvokeFunctionUrl", "lambda:InvokeFunction"}
+        granted.append((properties["Action"], properties.get("InvokedViaFunctionUrl", False)))
+    assert sorted(granted) == [
+        ("lambda:InvokeFunction", False),
+        ("lambda:InvokeFunction", True),
+        ("lambda:InvokeFunctionUrl", False),
+    ]
 
 
 def test_the_site_bucket_is_private_and_no_website(stack: AndurStack, template: Template) -> None:

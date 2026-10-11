@@ -120,7 +120,12 @@ def create_distribution(
 def allow_cloudfront_to_invoke(
     stack: "AndurStack", function: lambda_.Function, distribution: cloudfront.Distribution
 ) -> lambda_.CfnPermission:
-    """The second of the two permissions the CloudFront documentation asks for."""
+    """The second of the two permissions the CloudFront documentation asks for.
+
+    Since aws-cdk-lib 2.273.0 the origin construct grants `lambda:InvokeFunction` as well,
+    only through the URL. This one stays until a deploy has shown CloudFront reaching the
+    function without it.
+    """
     return lambda_.CfnPermission(
         stack,
         "InvokeFunctionFromCloudFront",
