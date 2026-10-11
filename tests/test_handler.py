@@ -850,7 +850,9 @@ def test_a_number_past_the_digit_limit_is_a_bad_request_not_a_crash() -> None:
 
 
 def test_a_body_nested_past_the_recursion_limit_is_a_bad_request_not_a_crash() -> None:
-    with pytest.raises(BadRequest, match="not valid JSON"):
+    """Either sentence is the refusal: json.loads gives up with RecursionError on some
+    platforms and returns the nested list, which is no JSON object, on others."""
+    with pytest.raises(BadRequest, match="not valid JSON|must be a JSON object"):
         intake.read_body({"body": "[" * 100_000 + "]" * 100_000})
 
 
