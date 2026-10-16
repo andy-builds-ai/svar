@@ -31,7 +31,7 @@ const TEXTS = {
   en: {
     title: "Ask Svar",
     heading: "Ask Svar",
-    lead_before: "A demo with three ",
+    lead_before: "A demo with ",
     lead_strong: "fictional",
     lead_after:
       " companies. Each keeps its handbooks, notes and drafts in a vault of its own, and "
@@ -41,8 +41,9 @@ const TEXTS = {
     language_label: "Language",
     access_heading: "Workspace and key",
     access_note:
-      "A key opens one workspace and carries an allowance: ten questions, and 48 hours from "
-      + "the first of them. It stays in this browser and is never part of the address.",
+      "A key opens one workspace and carries an allowance of questions; a demo key also runs "
+      + "out a set time after its first question. It stays in this browser and is never part "
+      + "of the address.",
     workspace_label: "Workspace",
     workspace_placeholder: "quillmoor",
     key_label: "Key",
@@ -82,7 +83,7 @@ const TEXTS = {
       "The request was refused before it reached Svar (403). That is a problem with the way "
       + "in, not with the key — a wrong key is answered with 401.",
     problem_too_slow:
-      "The answer took longer than this page waits (504). The question may still be running; "
+      "The service stopped waiting for the answer (504). The question may still be running; "
       + "asking again costs another question of the key's allowance.",
     problem_unreadable:
       "The service answered with status {status} and nothing this page can read.",
@@ -96,7 +97,7 @@ const TEXTS = {
   de: {
     title: "Svar fragen",
     heading: "Svar fragen",
-    lead_before: "Eine Demo mit drei ",
+    lead_before: "Eine Demo mit ",
     lead_strong: "erfundenen",
     lead_after:
       " Betrieben. Jeder hält seine Handbücher, Notizen und Entwürfe in einer eigenen Ablage, "
@@ -107,8 +108,9 @@ const TEXTS = {
     language_label: "Sprache",
     access_heading: "Arbeitsbereich und Schlüssel",
     access_note:
-      "Ein Schlüssel öffnet einen Arbeitsbereich und hat ein Kontingent: zehn Fragen und 48 "
-      + "Stunden ab der ersten. Er bleibt in diesem Browser und ist nie Teil der Adresse.",
+      "Ein Schlüssel öffnet einen Arbeitsbereich und hat ein Kontingent an Fragen; ein "
+      + "Demo-Schlüssel läuft außerdem eine feste Zeit nach der ersten Frage ab. Er bleibt in "
+      + "diesem Browser und ist nie Teil der Adresse.",
     workspace_label: "Arbeitsbereich",
     workspace_placeholder: "quillmoor",
     key_label: "Schlüssel",
@@ -149,7 +151,7 @@ const TEXTS = {
       "Die Anfrage wurde abgewiesen, bevor sie Svar erreicht hat (403). Das liegt am Weg "
       + "hinein, nicht am Schlüssel — ein falscher Schlüssel wird mit 401 beantwortet.",
     problem_too_slow:
-      "Die Antwort hat länger gedauert, als diese Seite wartet (504). Die Frage läuft "
+      "Der Dienst hat aufgehört, auf die Antwort zu warten (504). Die Frage läuft "
       + "vielleicht noch; noch einmal zu fragen kostet eine weitere Frage aus dem Kontingent "
       + "des Schlüssels.",
     problem_unreadable:

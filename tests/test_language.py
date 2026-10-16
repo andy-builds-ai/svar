@@ -95,8 +95,18 @@ def test_every_text_is_in_both_languages_with_the_same_placeholders() -> None:
 def test_the_german_texts_speak_to_the_reader_as_sie_never_du() -> None:
     german = texts()["de"]
     for key, text in german.items():
-        words = set(re.findall(r"\w+", text))
-        assert not words & {"du", "dein", "deine", "deinen", "dich", "dir"}, key
+        words = set(re.findall(r"\w+", text.lower()))
+        informal = {"du", "dein", "deine", "deinen", "deiner", "deinem", "deines", "dich", "dir"}
+        assert not words & (informal | {"euch", "euer"}), key
+
+
+def test_the_note_on_the_key_names_no_fixed_allowance() -> None:
+    # A key's questions and hours are set per key or by its plan, and /ask does not say how
+    # many are left; a number in the note would be wrong for every other key.
+    for language, table in texts().items():
+        note = table["access_note"]
+        assert not re.search(r"\d", note), language
+        assert not set(re.findall(r"\w+", note.lower())) & {"ten", "zehn"}, language
 
 
 def asked_for_in_markup() -> set[str]:

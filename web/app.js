@@ -267,7 +267,7 @@ function show(answer) {
 /* Whether a question is on its way. The disabled button is not enough: Enter
  * in the question field submits the form directly, and a form can be submitted
  * while its button is disabled. A second question would be charged against the
- * same ten-question allowance and could come back out of order, so the answer
+ * same key's allowance and could come back out of order, so the answer
  * on screen would not belong to the question in the field. */
 let asking = false;
 

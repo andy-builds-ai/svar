@@ -154,10 +154,11 @@ tests/       stack template, answer function, scripts, page
    in the log. *(done)*
 4. **Key budgets** — a key is an allowance: ten questions and 48 hours,
    counted in DynamoDB. *(done)* A paying customer's key carries a plan,
-   a quota per month and per day. *(built 01.10.2026, not deployed yet)*
+   a quota per month and per day. *(done; the first key on a plan was set
+   up in eu-central-1 on 07.10.2026)*
 5. **The page** — a page behind CloudFront, with the answer function on the
    same address. *(done)*
 6. **Guardrails** — topic, PII and hallucination filters, and the cost of
    every answer in its log line. *(done)*
 7. **Release** — screenshots and a walkthrough *(done)*. There is no tagged
-   version; Andur stays private.
+   version.

@@ -47,6 +47,16 @@ all its measurements cost 0.70 USD (at most 0.75), from the cost lines of
 the measurements; see
 [scripts/README.md](../scripts/README.md#rehearsal--a-new-business-set-up-and-measured-step-by-step).
 
+In `eu-central-1` on 14.10.2026, after that day's deploy, the same three sets
+with Qwen3 235B: 0.0024 USD per question on average for the English set,
+0.0014 for German questions on English documents and 0.0021 for German
+questions on German documents, counting the questions with a known cost; 12
+of the 88 (3, 8 and 1) carry `cost_usd: null`, answers the answer guardrail
+withheld. Three runs of the topic check by gpt-oss-120b, 957 checks,
+cost 0.30 USD again. In `eu-west-1` the same day, Nova Pro at ten passages,
+two runs of the English set: 0.0037 USD per question on average, 6 of the 30
+withheld in each run and not counted.
+
 **Ten passages since 28.09.2026** (`NUMBER_OF_RESULTS`, was 6; see
 [decisions](decisions.md)). Nova Pro, the 22 answerable questions, two runs
 through the function's own path: 0.0043 USD per answered question on average
@@ -65,7 +75,7 @@ unit and no model call, whichever model is set.
 
 In `us-east-1` on 23.09.2026, before the move, three questions to `pellwick`
 with Nemotron 3 Super, whose token prices there were 0.00015 and 0.00065 USD
-per 1,000 (a fifth below eu-west-1; the guardrail prices are the same in
+per 1,000 (a sixth below eu-west-1; the guardrail prices are the same in
 both regions):
 
 | Question | Tokens in / out | Guardrail units (topic / PII / grounding) | Model | Guardrail | `cost_usd` |
@@ -92,10 +102,8 @@ refused question costs nothing more: it returns no sources.
 Since 05.10.2026 the answer, without its citations, passes the topic
 guardrail as well: one more `ApplyGuardrail` call per answered question. An
 answer under 1,000 characters is one topic unit, 0.00015 USD (measured on 20
-answers and in the topic probe's 315 answer calls, one unit each). The
-answer guardrail no longer reads its topics in the answer; whether that
-saves the answer's topic unit there is not measured yet — a deployed
-answer's `guardrail_units` will show it. A withheld answer, a refused
+answers and in the topic probe's 315 answer calls, one unit each). A
+withheld answer, a refused
 question and an answer of citations alone make no topic check.
 
 Since 06.10.2026 the question, after its frame, passes the topic guardrail
@@ -108,8 +116,10 @@ the topic guardrail refuses costs that one unit and nothing else: no model
 call, no excerpts.
 
 **The cap:** the web address is open to anyone who has it, so the answer
-function runs at most 5 requests at the same time and Lambda turns the rest
-away with HTTP 429 before any code runs. A request without a valid key never reaches the model.
+function runs at most 5 requests at the same time in `eu-west-1` and 10 in
+`eu-central-1`, where it serves the page too and 5 more are reserved for a
+page load (`PAGE_LOAD_CONCURRENCY`), and Lambda turns the rest away with
+HTTP 429 before any code runs. A request without a valid key never reaches the model.
 That bounds the rate at which anything can arrive; what one key may spend in
 total is its budget — ten questions and 48 hours, so about 0.04 USD with
 Nova Pro at ten passages before the key is refused (0.02 to 0.08 across the
