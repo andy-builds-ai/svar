@@ -857,6 +857,66 @@ grounding check does with an answer that holds a sentence the sources do not
 carry, such as "required for jobs over 1,000 pounds", which Qwen wrote in several
 c32 answers with the old wording and the new one; the check let it pass.
 
+**2026-10-14 — The prompt's wording is a column of the model's row.** The
+wording of 07.10. ("Look at each part of the question ...") was measured
+with Qwen3 235B in Frankfurt only, and went to Ireland with the deploy of
+14.10.2026. There it is worse for Nova Pro: asked ten times each with the
+saved passages and the deployed guardrail (version 5, ten passages, through
+`evaluate`'s own path), q02 was right 2 times and q19 0 times, the other
+times only "The sources do not answer this question.", which the relevance
+check withheld; with the wording of 06.10. both were right 10 of 10. q20 was
+right 2 of 10 with both wordings. So the wording is no setting of a region
+(like `grounding_threshold`) but of the model, and it sits in the row:
+`AnswerModel.prompt` in `infra/answer_models.py`, with two names whose texts
+are in `app/prompts.py`:
+
+| Name | Text | Whose row |
+|---|---|---|
+| `each-part` | the wording of 07.10., as before | every row but Nova Pro's, so Qwen3 235B |
+| `sentence-first` | the wording of 06.10., character for character | Nova Pro, in both tables |
+
+The stack hands it to the function as `ANSWER_PROMPT`. The variable is
+optional and means `each-part` without it: `scripts/evaluate.py` reads the
+deployed function's environment, and before the deploy that brings the
+variable it would otherwise stop. `evaluate` and `control_eval` set the
+wording of each model's own row, so a run asks every model with its own
+wording, deployed or not. Nova Pro in Frankfurt's table gets
+`sentence-first` too, since it is the same model; it was not measured there
+and does not answer in Frankfurt. The other models keep what they have run
+with since 07.10.; neither wording was measured with them.
+
+Measured on 14.10.2026 with the new local code against the deployed stack in
+eu-west-1 (about 0.5 USD in all, as the runs report cost):
+
+- q02 and q19, ten times each: 10 of 10 and 10 of 10 right, never only the
+  sentence.
+- `evaluate`, Nova Pro, two full runs: 30/30 and 29/30 (q20 withheld in the
+  second), against 27/30 twice with `each-part` earlier that day.
+- q20, ten times with the prompt from before ff99b52 (03.10., without "numbers
+  in brackets alone are not an answer"): 10 of 10 right, "Up to £500 [1]". That
+  line is the only difference to the 06.10. wording, which gave 2 of 10. Not
+  changed here: the line was added because Nova Pro wrote "[1][2]" alone in 3
+  of 13 tries (03.10.), and q20 was only measured, not fixed.
+
+The measurement that "Ireland's Nova Pro needs the same before its next
+deploy" asked for (the entry of 07.10. on the sentence) is made:
+`control_eval`, 42 questions, Nova Pro in eu-west-1 with the Standard topic
+tier, once with each wording. Both 36 of 42, the same six wrong (c10, c20, c21,
+c22, c24, c32), nothing added in either (0 of 33), 8 of 8 advice questions
+refused. The partial questions c09, c11 and c25 answered their part and named
+the rest with each wording; c10, c24 and c32 failed with both. So
+`each-part` gives Nova Pro nothing here, and `sentence-first` costs it
+nothing. Each wording ran once, and Nova Pro does not write the same text
+twice; the six wrong ones are the same questions in both, which is all this
+says. That closes the condition for Nova Pro.
+
+Frankfurt does not change: the text the function sends to Qwen3 235B is the
+text of fcac888, compared character for character, in English and German,
+through the Frankfurt stack's template, its environment, the settings and the
+model call. The templates of both regions differ from those of fcac888 in two
+places: the new variable, and the hash of the function's code. Ireland answers
+with `sentence-first` from the next deploy on; the README figures follow it.
+
 **2026-10-07 — A question that fails on AWS's side is given back, never
 after a timeout.** Until now a question counted once it passed the budget,
 whatever happened after it. For a customer that means paying for an outage

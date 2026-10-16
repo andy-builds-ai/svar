@@ -37,7 +37,7 @@ question meets them:
 | `answering.py` | One question start to finish: search, topic checks, model, response |
 | `retrieval.py` | Searches the knowledge base inside one workspace |
 | `topic_check.py` | Checks question and answer for the denied topics |
-| `prompts.py` | The system rules and the message the model reads |
+| `prompts.py` | The system rules (one wording per answer model, `ANSWER_PROMPT`) and the message the model reads |
 | `llm.py` | The model call through the answer guardrail, and its response |
 | `guardrails.py` | What the guardrails did, and the masking of the excerpts |
 | `citations.py` | The source numbers an answer cites |
@@ -942,6 +942,7 @@ from files.
 |---|---|
 | `KNOWLEDGE_BASE_ID` | The stack's knowledge base. |
 | `MODEL_ID` | The region's answer model in `REGIONS` (`infra/answer_models.py`): `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile, in eu-west-1; `qwen.qwen3-235b-a22b-2507-v1:0`, Qwen3 235B in the region itself, in eu-central-1. |
+| `ANSWER_PROMPT` | Optional. The wording of the system prompt (`prompts.PROMPTS`) that the answer model's row in `infra/answer_models.py` names: `sentence-first` for Nova Pro in eu-west-1, `each-part` for Qwen3 235B in eu-central-1. Without it, `each-part`. An unknown name is refused. |
 | `REGION` | The stack's region, `eu-west-1` or `eu-central-1`. |
 | `NUMBER_OF_RESULTS` | Passages per question, `10`. Retrieve may return fewer. |
 | `API_KEY_PARAMETER_PATH` | `/andur/api-keys`. |

@@ -106,7 +106,7 @@ def converse(
     """One model call with the system rules, the message and the guardrail."""
     return bedrock_runtime.converse(
         modelId=settings.model_id,
-        system=[{"text": prompts.system_prompt(language)}],
+        system=[{"text": prompts.system_prompt(language, settings.answer_prompt)}],
         messages=[{"role": "user", "content": content}],
         inferenceConfig={"maxTokens": MAX_ANSWER_TOKENS, "temperature": ANSWER_TEMPERATURE},
         guardrailConfig={
