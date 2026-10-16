@@ -116,10 +116,13 @@ the topic guardrail refuses costs that one unit and nothing else: no model
 call, no excerpts.
 
 **The cap:** the web address is open to anyone who has it, so the answer
-function runs at most 5 requests at the same time in `eu-west-1` and 10 in
-`eu-central-1`, where it serves the page too and 5 more are reserved for a
-page load (`PAGE_LOAD_CONCURRENCY`), and Lambda turns the rest away with
-HTTP 429 before any code runs. A request without a valid key never reaches the model.
+function runs at most 5 requests at the same time in `eu-west-1`. In
+`eu-central-1`, where it serves the page too, the stack is built to reserve
+10, 5 more for a page load (`PAGE_LOAD_CONCURRENCY`); the Frankfurt account
+allows only 10 executions in all, so the stack runs there without the
+reservation and the account's limit of 10 is the cap
+([operating.md](operating.md#another-region)). Lambda turns the rest away
+with HTTP 429 before any code runs. A request without a valid key never reaches the model.
 That bounds the rate at which anything can arrive; what one key may spend in
 total is its budget — ten questions and 48 hours, so about 0.04 USD with
 Nova Pro at ten passages before the key is refused (0.02 to 0.08 across the

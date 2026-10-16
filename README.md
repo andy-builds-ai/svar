@@ -93,8 +93,13 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
   until it is spent; a leaked demo key is a leak of ten questions.
 - **In Frankfurt the function's URL is the address, without CloudFront**
   ([decisions.md:879](docs/decisions.md)): no setting keeps CloudFront's edge
-  locations inside Germany. The price: no domain of its own and no WAF; the
-  only guard against a flood is the function's reserved concurrency.
+  locations inside Germany. The price: no domain of its own and no WAF, so
+  a flood is capped only by the number of executions Lambda allows at once.
+  The stack is built to reserve 10 for the function there, 5 for questions
+  and 5 for loading the page; the Frankfurt account allows only 10
+  executions in all, so the stack runs there without the reservation, and
+  the account's limit is the cap
+  ([docs/operating.md](docs/operating.md#another-region)).
 - **In Frankfurt a model in the region checks the topics**
   ([decisions.md:654](docs/decisions.md), [:692](docs/decisions.md)),
   because the one guardrail tier that reads German needs a profile that
