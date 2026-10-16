@@ -131,7 +131,8 @@ base, and its guardrails or copies of them that a script creates and
 deletes; `topic_probe` and `grounding_probe` are also run before a deploy,
 to measure a change before it goes live
 ([decisions.md:537](docs/decisions.md)). The numbers below were measured
-after the deploy of 14.10.2026, against the deployed stack. How each works:
+after the deploy of 14.10.2026 in Frankfurt and of 16.10.2026 in Ireland,
+against the deployed stack. How each works:
 [scripts/README.md](scripts/README.md).
 
 ### Frankfurt, 14.10.2026, Qwen3 235B
@@ -165,19 +166,21 @@ measurements took 11 minutes 12 seconds.
 - The German documents of the fictional craft firm are not in this
   repository, so the German-on-German results cannot be repeated from it.
 
-### Ireland, 14.10.2026, Nova Pro: open
+### Ireland, 16.10.2026, Nova Pro
 
-Two runs after the deploy of 14.10.2026 got 27 of 30 right, 19 of the 22
-answerable questions. The cause is measured: the prompt of 07.10.2026, which
-helped Qwen3 235B with questions the sources answer only in part, makes Nova
-Pro write "The sources do not answer this question." where they do. Asked ten
-times each, two of the questions were right 10 of 10 with the prompt before
-it and 2 and 0 of 10 with it. A third question fails with both prompts, 2
-of 10 right each, and has a cause of its own, not fixed yet.
+| What | Result |
+|---|---|
+| English questions on English documents | 30 of 30 right in each of two runs; all 22 answerable ones cite the expected document |
+| Median time per question, retrieval to cost line, from a laptop in Germany | 2.9 s and 2.8 s |
 
-A fix gives Nova Pro the earlier prompt and keeps Qwen3 235B's unchanged. It
-is measured, 30 of 30 and 29 of 30 in two runs on 14.10.2026, and it is **not
-deployed and not in `main`**. Until it is, Ireland answers with 27 of 30.
+Each answer model now has the prompt it was measured with: Nova Pro the one
+of 06.10.2026, Qwen3 235B in Frankfurt its own, unchanged
+([decisions.md, 14.10.2026](docs/decisions.md)). After the deploy of
+14.10.2026 Ireland had the prompt measured with Qwen3 235B and got 27 of 30
+in two runs: it made Nova Pro write "The sources do not answer this
+question." where the sources do. One question (q20) was right only 2 of 10
+times with either prompt when asked alone on 14.10.2026; it was right in both
+runs here, which is a sample, not a fix.
 
 ## Privacy and separation
 
@@ -215,12 +218,12 @@ deployed and not in `main`**. Until it is, Ireland answers with 27 of 30.
 - **Per question in Frankfurt, 14.10.2026:** 0.0024 USD on average for the
   English questions, 0.0014 for German questions on English documents and
   0.0021 for German questions on German documents.
-- **Per question in Ireland, 14.10.2026:** 0.0037 USD on average, Nova Pro.
+- **Per question in Ireland, 16.10.2026:** 0.0038 USD on average, Nova Pro.
 - **These averages are too low.** An answer the answer guardrail withheld
   carries `cost_usd: null`, because Bedrock reports no tokens for it although
   it charges the model call ([docs/costs.md](docs/costs.md)). The averages
   count only the questions with a known cost: 3 of 30, 8 of 32 and 1 of 26
-  questions in Frankfurt and 6 of 30 in Ireland had none.
+  questions in Frankfurt and 3 of 30 in each Ireland run had none.
 - **The topic check in Frankfurt:** 0.30 USD for 957 checks.
 - **Setting up the craft firm** with all its measurements on 07.10.2026: 0.70
   USD, at most 0.75.
@@ -240,7 +243,6 @@ Prices, the counter, the page and how each number was taken:
   answers to English documents; in Ireland the threshold is 0.7, AWS's own
   example value, not a tuned one. Every answer logs both scores, so the
   threshold can be moved on evidence.
-- **Ireland answers 27 of 30** until the measured fix is deployed.
 - **The cost of a withheld answer is not counted** (above).
 - **Frankfurt has no domain of its own and no WAF.** The page and `/ask` are
   the function's URL, `https://<id>.lambda-url.eu-central-1.on.aws/`; the
