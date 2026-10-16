@@ -17,7 +17,7 @@ track; it holds only the two fictional demo companies of `knowledge/` and is
 where models and checks are measured against each other. Both were last
 deployed on 14.10.2026.
 
-![An answer on the page, with the passages it rests on and the cost line under them](docs/screenshot-answer.png)
+![An answer on the Frankfurt page, in German: the question, the answer citing [1], and the sources it rests on, each marked as written by a person](docs/screenshot-answer.png)
 
 ## How a question travels
 
