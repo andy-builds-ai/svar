@@ -644,6 +644,7 @@ def test_answer_function_is_configured_only_through_its_environment(
     assert variables == {
         "KNOWLEDGE_BASE_ID": get_att(stack, stack.knowledge_base, "KnowledgeBaseId"),
         "MODEL_ID": ANSWER_MODEL_ID,
+        "ANSWER_PROMPT": "sentence-first",
         "REGION": {"Ref": "AWS::Region"},
         "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
         "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,
@@ -667,6 +668,7 @@ def test_answer_function_is_configured_only_through_its_environment(
     assert set(variables) == {
         *config.ENVIRONMENT_VARIABLES.values(),
         *config.TOPIC_GUARDRAIL_VARIABLES.values(),
+        config.ANSWER_PROMPT_VARIABLE,
     }
 
 

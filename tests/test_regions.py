@@ -7,12 +7,18 @@ import json
 import aws_cdk as cdk
 import config
 import page
+import prompts
 import pytest
 from aws_cdk.assertions import Template
 
 from infra.answer_models import (
+    ANSWER_MODELS,
+    DEFAULT_PROMPT,
     DEFAULT_REGION,
+    FRANKFURT_MODELS,
     FRANKFURT_PRICE_DATE,
+    PROMPT_EACH_PART,
+    PROMPT_SENTENCE_FIRST,
     REGIONS,
     answer_guardrail_uses_profile,
     answer_model,
@@ -202,10 +208,12 @@ def test_the_fallback_tells_the_function_its_model_and_frankfurt_prices(
     )
     assert variables["PRICE_DATE"] == FRANKFURT_PRICE_DATE
     assert "TOPIC_MODEL_ID" not in variables
+    assert variables[config.ANSWER_PROMPT_VARIABLE] == "each-part"
     assert set(variables) == {
         *config.ENVIRONMENT_VARIABLES.values(),
         *config.TOPIC_GUARDRAIL_VARIABLES.values(),
         *config.PAGE_VARIABLES.values(),
+        config.ANSWER_PROMPT_VARIABLE,
     }
 
 
@@ -293,10 +301,12 @@ def test_frankfurt_tells_the_function_both_models_and_frankfurt_prices(
     assert variables["TOPIC_MODEL_ID"] == TOPIC_MODEL_ID
     assert variables["PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS"] == "0.0002"
     assert variables["PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS"] == "0.00079"
+    assert variables[config.ANSWER_PROMPT_VARIABLE] == "each-part"
     assert set(variables) == {
         *config.ENVIRONMENT_VARIABLES.values(),
         *config.TOPIC_MODEL_VARIABLES.values(),
         *config.PAGE_VARIABLES.values(),
+        config.ANSWER_PROMPT_VARIABLE,
     }
     (drain,) = template.find_resources("Custom::AndurDeployDrain").values()
     assert drain["Properties"]["GuardrailVersions"] == [
@@ -462,6 +472,28 @@ def test_frankfurt_checks_grounding_at_its_own_threshold_ireland_at_the_default(
         filters = answer["ContextualGroundingPolicyConfig"]["FiltersConfig"]
         expected = 0.8 if region == "eu-central-1" else 0.7
         assert grounding_filters(filters) == {"GROUNDING": expected, "RELEVANCE": 0.7}
+
+
+def test_the_table_and_the_function_name_the_same_prompt_wordings() -> None:
+    """infra/ and app/ share no code, so each lists the names itself."""
+    assert set(prompts.PROMPTS) == {PROMPT_EACH_PART, PROMPT_SENTENCE_FIRST}
+    assert prompts.DEFAULT_PROMPT == DEFAULT_PROMPT == PROMPT_EACH_PART
+    for model in (*ANSWER_MODELS, *FRANKFURT_MODELS):
+        assert model.prompt in prompts.PROMPTS, model.name
+
+
+def test_the_prompt_belongs_to_the_model_nova_pro_in_both_tables_qwen_in_frankfurt() -> None:
+    """Nova Pro: q02 and q19 right 10 of 10 times with `sentence-first`, 2 and 0 of 10 with
+    `each-part` (14.10.2026). Qwen3 235B: c32 right 20 of 20 with `each-part` (07.10.2026).
+    The other models keep the wording they have run with since 07.10.2026."""
+    for table in (ANSWER_MODELS, FRANKFURT_MODELS):
+        by_name = {model.name: model.prompt for model in table}
+        assert by_name["Nova Pro"] == PROMPT_SENTENCE_FIRST
+        assert {p for name, p in by_name.items() if name != "Nova Pro"} == {PROMPT_EACH_PART}
+    frankfurt = REGIONS["eu-central-1"]
+    assert answer_model(frankfurt.answer_model_id, "eu-central-1").prompt == PROMPT_EACH_PART
+    ireland = REGIONS["eu-west-1"]
+    assert answer_model(ireland.answer_model_id, "eu-west-1").prompt == PROMPT_SENTENCE_FIRST
 
 
 @pytest.mark.parametrize(("region", "expected"), [("eu-central-1", 0.8), ("eu-west-1", 0.7)])

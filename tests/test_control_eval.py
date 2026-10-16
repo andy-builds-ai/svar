@@ -468,6 +468,7 @@ def test_without_a_topic_probe_the_regions_topic_model_checks_at_its_price() -> 
         base, model, "eu-central-1", {"answer": "gr-a", "excerpt": "gr-e"}
     )
     assert settings.topic_model_id == "openai.gpt-oss-20b-1:0"
+    assert settings.answer_prompt == model.prompt == "each-part"
     assert (settings.topic_guardrail_id, settings.topic_guardrail_version) == (None, None)
     assert settings.prices.topic_model_input_tokens == Decimal("0.00009")
     assert settings.prices.topic_model_output_tokens == Decimal("0.0004")
@@ -475,6 +476,15 @@ def test_without_a_topic_probe_the_regions_topic_model_checks_at_its_price() -> 
         base, model, "eu-central-1", {"answer": "gr-a", "topic": "gr-t", "excerpt": "gr-e"}
     )
     assert (probed.topic_model_id, probed.topic_guardrail_id) == (None, "gr-t")
+
+
+def test_control_eval_asks_nova_pro_with_the_prompt_of_its_table_row() -> None:
+    base = config.load_settings(ENVIRONMENT)
+    nova_pro = next(m for m in ANSWER_MODELS if m.name == "Nova Pro")
+    settings = control_eval.settings_for(
+        base, nova_pro, "eu-west-1", {"answer": "gr-a", "topic": "gr-t", "excerpt": "gr-e"}
+    )
+    assert settings.answer_prompt == nova_pro.prompt == "sentence-first"
 
 
 def test_the_frankfurt_models_stay_in_the_eu_and_leave_the_stack_table_alone() -> None:

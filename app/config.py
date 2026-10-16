@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 import errors
 import page
+import prompts
 
 MAX_RESULTS = 30
 
@@ -57,6 +58,9 @@ class Settings:
     prices: Prices
     price_date: str
     topic_model_id: str | None = None
+    #: The wording of the system prompt (`prompts.PROMPTS`): the answer model's own, a column of
+    #: the table in infra/answer_models.py.
+    answer_prompt: str = prompts.DEFAULT_PROMPT
     #: Where the function serves the page itself and is the address, without CloudFront in
     #: front of it: the folder of the page's files (page.py). None behind CloudFront.
     page_folder: str | None = None
@@ -96,6 +100,10 @@ TOPIC_MODEL_VARIABLES = {
     "price_topic_model_input_tokens": "PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS",
     "price_topic_model_output_tokens": "PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS",
 }
+
+#: Optional: a function deployed before this variable existed keeps `prompts.DEFAULT_PROMPT`, and
+#: `scripts/evaluate.py` reads the deployed environment and sets the prompt of each model itself.
+ANSWER_PROMPT_VARIABLE = "ANSWER_PROMPT"
 
 #: Set only where the function is the address itself (infra/answer_models.py): then it serves
 #: the page from this folder, and no CloudFront waits in front of it.
@@ -174,6 +182,12 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
             f"KEEP_DAYS ({keep_days}) must outlast WINDOW_HOURS ({window_hours}): a budget "
             "whose item disappears before its window closes is no budget."
         )
+    answer_prompt = environ.get(ANSWER_PROMPT_VARIABLE, "").strip() or prompts.DEFAULT_PROMPT
+    if answer_prompt not in prompts.PROMPTS:
+        raise errors.ConfigurationError(
+            f"{ANSWER_PROMPT_VARIABLE} must be one of {', '.join(prompts.PROMPTS)}, "
+            f"not {answer_prompt!r}."
+        )
     variables = {**ENVIRONMENT_VARIABLES, **TOPIC_GUARDRAIL_VARIABLES}
     for name in ("guardrail_version", "excerpt_guardrail_version", "topic_guardrail_version"):
         if name in values and not (values[name].isascii() and values[name].isdigit()):
@@ -226,5 +240,6 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         prices=prices,
         price_date=price_day(values["price_date"]),
         topic_model_id=values.get("topic_model_id"),
+        answer_prompt=answer_prompt,
         page_folder=environ.get(page.PAGE_FOLDER_VARIABLE, "").strip() or None,
     )

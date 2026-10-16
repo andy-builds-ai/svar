@@ -358,6 +358,7 @@ def create_answer_function(
             **({} if page_layer is None else {PAGE_FOLDER_VARIABLE: PAGE_LAYER_FOLDER}),
             "KNOWLEDGE_BASE_ID": knowledge_base.attr_knowledge_base_id,
             "MODEL_ID": stack.answer_model_id,
+            "ANSWER_PROMPT": stack.answer_model.prompt,
             "REGION": Aws.REGION,
             "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
             "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,

@@ -2,8 +2,9 @@
 
 The questions run through `answer_question` in app/answering.py — retrieval, the
 prompt, `converse` with the guardrail, the excerpt guardrail and the cost line
-— with the deployed function's own settings. Only the model and its token
-prices change per model; the guardrail prices stay the deployed ones. No key
+— with the deployed function's own settings. Only the model, its token prices
+and the wording of its system prompt (the `prompt` of its table row) change per
+model; the guardrail prices stay the deployed ones. No key
 and no budget are involved, so a run costs model and guardrail calls only.
 """
 
@@ -148,13 +149,20 @@ def score(question: Mapping[str, Any], body: Mapping[str, Any], app: Any) -> dic
 
 
 def settings_for(base: Any, model: AnswerModel, price_date: str = PRICE_DATE) -> Any:
-    """The deployed settings with this model and its token prices, read on ``price_date``."""
+    """The deployed settings with this model, its token prices read on ``price_date`` and the
+    wording of the system prompt of its table row."""
     prices = dataclasses.replace(
         base.prices,
         input_tokens=Decimal(model.input_per_1k),
         output_tokens=Decimal(model.output_per_1k),
     )
-    return dataclasses.replace(base, model_id=model.model_id, prices=prices, price_date=price_date)
+    return dataclasses.replace(
+        base,
+        model_id=model.model_id,
+        answer_prompt=model.prompt,
+        prices=prices,
+        price_date=price_date,
+    )
 
 
 def ask(app: Any, settings: Any, question: Mapping[str, Any]) -> dict[str, Any]:

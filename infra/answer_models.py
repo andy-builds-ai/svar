@@ -6,6 +6,15 @@ model never travels without its price, and never without the price of its region
 
 from typing import NamedTuple
 
+#: The names of the system prompt's wordings, which live in `app/prompts.py` (only app/ goes into
+#: the function, and a model id never goes into app/). A test holds both lists together.
+#: "each-part": the sentence for "not in the sources" only if the sources answer no part of the
+#: question (07.10.2026, measured with Qwen3 235B). "sentence-first": the sentence whenever the
+#: sources do not answer the question (06.10.2026, measured with Nova Pro).
+PROMPT_EACH_PART = "each-part"
+PROMPT_SENTENCE_FIRST = "sentence-first"
+DEFAULT_PROMPT = PROMPT_EACH_PART
+
 
 class AnswerModel(NamedTuple):
     name: str
@@ -14,6 +23,9 @@ class AnswerModel(NamedTuple):
     #: `PRICE_DATE`; in `FRANKFURT_MODELS` for eu-central-1, read on `FRANKFURT_PRICE_DATE`.
     input_per_1k: str
     output_per_1k: str
+    #: The wording of the system prompt this model answers with: it belongs to the model, not to
+    #: the region. Only Qwen3 235B and Nova Pro were measured with theirs (docs/decisions.md).
+    prompt: str = DEFAULT_PROMPT
 
 
 #: AWS Price List API (the source of aws.amazon.com/bedrock/pricing), eu-west-1.
@@ -22,7 +34,7 @@ PRICE_DATE = "2026-09-28"
 
 ANSWER_MODELS = (
     AnswerModel("Nemotron 3 Super", "nvidia.nemotron-super-3-120b", "0.00018", "0.00078"),
-    AnswerModel("Nova Pro", "eu.amazon.nova-pro-v1:0", "0.00092", "0.00368"),
+    AnswerModel("Nova Pro", "eu.amazon.nova-pro-v1:0", "0.00092", "0.00368", PROMPT_SENTENCE_FIRST),
     AnswerModel("Nova 2 Lite", "eu.amazon.nova-2-lite-v1:0", "0.000374", "0.003157"),
     AnswerModel(
         "Claude Haiku 4.5", "eu.anthropic.claude-haiku-4-5-20251001-v1:0", "0.0011", "0.0055"
@@ -47,7 +59,7 @@ FRANKFURT_MODELS = (
     AnswerModel("Nemotron 3 Super", "nvidia.nemotron-super-3-120b", "0.00018", "0.00078"),
     AnswerModel("GLM 4.7 Flash", "zai.glm-4.7-flash", "0.00008", "0.00048"),
     AnswerModel("Devstral 2 123B", "mistral.devstral-2-123b", "0.00048", "0.0024"),
-    AnswerModel("Nova Pro", "eu.amazon.nova-pro-v1:0", "0.00105", "0.0042"),
+    AnswerModel("Nova Pro", "eu.amazon.nova-pro-v1:0", "0.00105", "0.0042", PROMPT_SENTENCE_FIRST),
     AnswerModel("Claude Sonnet 4.6", "eu.anthropic.claude-sonnet-4-6", "0.0033", "0.0165"),
 )
 

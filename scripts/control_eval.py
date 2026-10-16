@@ -212,11 +212,11 @@ def probe_requests(
 
 
 def settings_for(base: Any, model: AnswerModel, region: str, probes: Mapping[str, str]) -> Any:
-    """The deployed settings with this model, its token prices from the table of ``region``,
-    the region of the model and the probe guardrails (their drafts). Without a topic probe the
-    region's topic model checks the topics, at its price there. The guardrail unit prices
-    stay the deployed ones: the eu-central-1 price list gave the same three (topic 0.15, PII
-    0.10, grounding 0.10 USD per 1,000 units) on 06.10.2026."""
+    """The deployed settings with this model, its prompt wording and its token prices from the
+    table of ``region``, the region of the model and the probe guardrails (their drafts).
+    Without a topic probe the region's topic model checks the topics, at its price there. The
+    guardrail unit prices stay the deployed ones: the eu-central-1 price list gave the same
+    three (topic 0.15, PII 0.10, grounding 0.10 USD per 1,000 units) on 06.10.2026."""
     topic_model_id = None if "topic" in probes else REGIONS[region].topic_model_id
     topic_model = None if topic_model_id is None else answer_model(topic_model_id, region)
     prices = dataclasses.replace(
@@ -229,6 +229,7 @@ def settings_for(base: Any, model: AnswerModel, region: str, probes: Mapping[str
     return dataclasses.replace(
         base,
         model_id=model.model_id,
+        answer_prompt=model.prompt,
         region=region,
         prices=prices,
         price_date=region_models(region).price_date,
