@@ -15,7 +15,7 @@ Germany, and a real customer's documents go there and nowhere else. The
 second stack, in Ireland (`eu-west-1`) behind CloudFront, is the comparison
 track; it holds only the two fictional demo companies of `knowledge/` and is
 where models and checks are measured against each other. Both were last
-deployed on 14.10.2026.
+deployed on 16.10.2026.
 
 ![An answer on the Frankfurt page, in German: the question, the answer citing [1], and the sources it rests on, each marked as written by a person](docs/screenshot-answer.png)
 
@@ -132,7 +132,9 @@ deletes; `topic_probe` and `grounding_probe` are also run before a deploy,
 to measure a change before it goes live
 ([decisions.md:537](docs/decisions.md)). The numbers below were measured
 after the deploy of 14.10.2026 in Frankfurt and of 16.10.2026 in Ireland,
-against the deployed stack. How each works:
+against the deployed stack. Frankfurt's deploy of 16.10.2026 gave each
+model its own prompt wording and kept Qwen3 235B's as it was
+([decisions.md:913](docs/decisions.md)). How each works:
 [scripts/README.md](scripts/README.md).
 
 ### Frankfurt, 14.10.2026, Qwen3 235B
