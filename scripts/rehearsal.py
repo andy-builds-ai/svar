@@ -10,7 +10,8 @@ Enter and times it, the default `skip` records it as open and goes on.
 
 Each step's output goes to `--out-dir`, outside the repository, with the account id replaced;
 `run-<time>.json` and `run-<time>.md` there say what ran, for how long and how it ended. The
-key `workspace add` prints is never written anywhere. The run stops at the first step that
+key `workspace add` prints is never written anywhere. A measurement on German questions the
+new workspace has none of is skipped and named so. The run stops at the first step that
 fails; `--from` goes on from a step, `--only` runs single steps, `--list` prints the plan and
 calls nothing. It deploys nothing and deletes nothing; the measurements create and delete their
 own probe guardrails, as they do when run alone, and cost what they cost alone
@@ -33,6 +34,7 @@ from pathlib import Path
 from infra.answer_models import REGIONS, answer_model
 from scripts import utf8_output
 from scripts.aws import STACK_NAME, client
+from scripts.control_eval import QUESTIONS_FILE as CONTROL_QUESTIONS
 from scripts.ingest import discover
 from scripts.layout import SIDECAR_SUFFIX, document_of, upload_items
 from scripts.rehearsal_checks import (
@@ -70,6 +72,29 @@ DEMO_SOURCE = REPOSITORY / "knowledge"
 def deployed_model_name(region: str) -> str:
     """The name of the region's answer model in its table, as `evaluate` and the probes take it."""
     return answer_model(REGIONS[region].answer_model_id, region).name
+
+
+def german_questions(workspace: str) -> Path | None:
+    """The workspace's own German questions on its German documents,
+    `scripts/evaluation-questions-<workspace>.json`; None when there is no such file. A file of
+    that name with a question of another workspace or in another language is refused, so that a
+    workspace named like another set (`de`, `control`) never measures that set."""
+    path = REPOSITORY / "scripts" / f"evaluation-questions-{workspace}.json"
+    if not path.is_file():
+        return None
+    questions = json.loads(path.read_text(encoding="utf-8"))
+    strangers = sorted(
+        q["id"] for q in questions if q["workspace"] != workspace or q.get("language") != "de"
+    )
+    if strangers or not questions:
+        raise ValueError(f"{path.name} is not only {workspace}'s German questions: {strangers}")
+    return path
+
+
+def has_control_questions(workspace: str) -> bool:
+    """Whether the questions built to tempt the model hold German ones of the workspace."""
+    questions = json.loads(CONTROL_QUESTIONS.read_text(encoding="utf-8"))
+    return any(q["workspace"] == workspace and q.get("language") == "de" for q in questions)
 
 
 # --- Readers of a command's output --------------------------------------------------------
@@ -159,6 +184,10 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
 
     def out(name: str) -> tuple[str, str]:
         return "--out", str(args.out_dir / name)
+
+    # Measured on the new workspace's own German questions, or named as skipped.
+    own_questions = german_questions(w)
+    tempting = has_control_questions(w)
 
     plan = ("--plan", args.plan) if args.plan else ()
     key_command = (
@@ -308,28 +337,36 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
         Step(
             "answers-de-de",
             "measure",
-            "evaluate, German on German documents",
+            "evaluate, German on the workspace's German documents",
             command=python(
                 "scripts.evaluate",
                 *model,
                 "--questions",
-                "scripts/evaluation-questions-kalvenstett.json",
+                f"scripts/{own_questions.name}",
                 *out("answers-de-de.json"),
                 *region,
-            ),
+            )
+            if own_questions
+            else None,
+            skipped=None if own_questions else f"no scripts/evaluation-questions-{w}.json",
         ),
         Step(
             "sources",
             "measure",
-            "control_eval, retrieval in the region",
+            "control_eval on the workspace's questions, retrieval in the region",
             command=python(
                 "scripts.control_eval",
                 *model,
+                "--workspace",
+                w,
                 "--retrieve-region",
                 args.region,
                 *out("sources.json"),
                 *region,
-            ),
+            )
+            if tempting
+            else None,
+            skipped=None if tempting else f"no German questions of {w} in {CONTROL_QUESTIONS.name}",
         ),
         # What the deployed stack holds, and what its function logged meanwhile.
         Step("residency", "after", "Where the data lies, as AWS reports it", check=check_residency),
@@ -415,7 +452,12 @@ def plan_lines(chosen: Sequence[tuple[int, Step]]) -> list[str]:
     lines = []
     for number, step in chosen:
         lane = f" [at once: {step.lane}]" if step.group else ""
-        what = step.manual or (" ".join(step.command[1:]) if step.command else "in this process")
+        if step.skipped:
+            what = f"skipped: {step.skipped}"
+        else:
+            what = step.manual or (
+                " ".join(step.command[1:]) if step.command else "in this process"
+            )
         lines.append(f"{number:2d}. {step.phase:<7} {step.id:<15} {step.kind:<7}{lane} {what}")
     return lines
 
@@ -423,9 +465,8 @@ def plan_lines(chosen: Sequence[tuple[int, Step]]) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     utf8_output()
     args = parse_args(argv)
-    plan = build_plan(args)
     try:
-        chosen = select(plan, args.start, args.only)
+        chosen = select(build_plan(args), args.start, args.only)
     except ValueError as problem:
         print(f"error: {problem}", file=sys.stderr)
         return 2

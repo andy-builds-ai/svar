@@ -296,6 +296,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--questions", type=Path, default=QUESTIONS_FILE)
     parser.add_argument("--only", action="append", help="ask only this question id (may repeat)")
+    parser.add_argument("--workspace", help="ask only the questions of this workspace")
     parser.add_argument("--out", type=Path, help="write every answer and mark as JSON here")
     parser.add_argument(
         "--regrade",
@@ -388,6 +389,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: no questions {sorted(unknown_ids)} in {args.questions}", file=sys.stderr)
             return 2
         questions = [q for q in questions if q["id"] in args.only]
+    if args.workspace:
+        questions = [q for q in questions if q["workspace"] == args.workspace]
+        if not questions:
+            print(f"error: no questions of {args.workspace} in {args.questions}", file=sys.stderr)
+            return 2
     if args.out:
         # A bad path fails now, not after paying; an earlier result there stays as it is.
         with args.out.open("a", encoding="utf-8"):

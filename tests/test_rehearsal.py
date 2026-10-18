@@ -139,6 +139,66 @@ def test_the_measurements_ask_the_deployed_answer_model(plan: list[Step]) -> Non
     assert "--deployed" in topics
 
 
+def test_the_german_measurements_follow_the_workspace(plan: list[Step]) -> None:
+    steps = by_id(plan)
+    de_de = steps["answers-de-de"].command or ()
+    assert de_de[de_de.index("--questions") + 1] == "scripts/evaluation-questions-kalvenstett.json"
+    sources = steps["sources"].command or ()
+    assert sources[sources.index("--workspace") + 1] == "kalvenstett"
+    assert [step.id for step in plan if step.skipped] == []
+
+
+def new_business(tmp_path: Path, workspace: str, *extra: str) -> list[str]:
+    return [
+        "--workspace",
+        workspace,
+        "--source",
+        "x",
+        "--question",
+        "q",
+        "--out-dir",
+        str(tmp_path / "out"),
+        *extra,
+    ]
+
+
+def test_a_workspace_without_german_questions_skips_them_and_says_so(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Measuring another business's questions instead would pass for the new one."""
+    steps = by_id(rehearsal.build_plan(rehearsal.parse_args(new_business(tmp_path, "neufirma"))))
+    assert steps["answers-de-de"].skipped == "no scripts/evaluation-questions-neufirma.json"
+    assert steps["sources"].skipped == (
+        "no German questions of neufirma in evaluation-questions-control.json"
+    )
+    assert steps["answers-de-de"].command is None and steps["sources"].command is None
+    run = FakeRun()
+    chosen = numbered(steps["answers-en"], steps["answers-de-de"], steps["sources"])
+    results = runner(context(tmp_path), run).run_all(chosen, lambda r: None)
+    assert [(r.id, r.status) for r in results] == [
+        ("answers-en", "passed"),
+        ("answers-de-de", "skipped"),
+        ("sources", "skipped"),
+    ]
+    assert len(run.calls) == 1
+    lines = rehearsal_runner.summary_lines(results, 1.0)
+    (row,) = [line for line in lines if line.startswith("| 2 | answers-de-de |")]
+    assert row.startswith("| 2 | answers-de-de | command | skipped |")
+    assert row.endswith("| no scripts/evaluation-questions-neufirma.json |")
+    assert lines[-1] == "Skipped, not measured: answers-de-de, sources."
+    assert rehearsal.main(new_business(tmp_path, "neufirma", "--list")) == 0
+    assert "skipped: no scripts/evaluation-questions-neufirma.json" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("workspace", ["de", "control"])
+def test_a_workspace_named_like_another_question_set_is_refused(
+    tmp_path: Path, workspace: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rehearsal.main(new_business(tmp_path, workspace, "--list")) == 2
+    assert f"is not only {workspace}'s German questions" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
 def test_list_prints_the_plan_and_calls_nothing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -583,6 +583,7 @@ def test_no_model_call_leaves_no_text_of_the_question_before(monkeypatch: Any) -
         (["--region", "us-east-1"], "not EU regions"),
         (["--retrieve-region", "us-west-2"], "not EU regions"),
         (["--only", "c99"], "no questions"),
+        (["--workspace", "nobody"], "no questions of nobody"),
     ],
 )
 def test_a_run_outside_the_eu_or_without_questions_is_refused(
@@ -730,3 +731,20 @@ def test_a_run_with_a_failed_call_reports_and_fails(
 def test_a_run_without_a_failed_call_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     run_with(monkeypatch, [marked(sentences.NOT_IN_SOURCES_ANSWERS["de"])])
     assert control_eval.main(["--model", FRANKFURT_MODELS[0].name]) == 0
+
+
+def test_a_workspace_asks_only_its_own_questions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rehearsal measures the new business, not the demo questions beside it."""
+    run_with(monkeypatch, [])
+    asked: list[dict[str, Any]] = []
+
+    def run_model(app_: Any, settings: Any, questions: Any, *_: Any) -> list[dict[str, Any]]:
+        asked.extend(questions)
+        return [marked(sentences.NOT_IN_SOURCES_ANSWERS["de"])]
+
+    monkeypatch.setattr(control_eval, "run_model", run_model)
+    argv = ["--model", FRANKFURT_MODELS[0].name, "--workspace", "kalvenstett"]
+    assert control_eval.main(argv) == 0
+    every = control_eval.load_control_questions(control_eval.QUESTIONS_FILE)
+    assert len(asked) == sum(q["workspace"] == "kalvenstett" for q in every) < len(every)
+    assert {q["workspace"] for q in asked} == {"kalvenstett"}

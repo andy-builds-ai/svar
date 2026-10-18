@@ -82,6 +82,8 @@ class Step:
     #: steps one after the other. Only measurements that share no AWS quota share a group.
     group: str | None = None
     lane: str | None = None
+    #: Why the step does not run: it is named as skipped, never as passed.
+    skipped: str | None = None
 
     @property
     def kind(self) -> str:
@@ -95,7 +97,7 @@ class Result:
     phase: str
     title: str
     kind: str
-    #: passed or failed; a step by hand: done or open.
+    #: passed, failed or skipped; a step by hand: done or open.
     status: str
     started: str
     seconds: float
@@ -164,7 +166,9 @@ class Runner:
         result.group = step.group
         self.tell(f"[{started}] {number:02d} {step.id}: {step.title}")
         try:
-            if step.manual:
+            if step.skipped:
+                result.status, result.summary = "skipped", step.skipped
+            elif step.manual:
                 self.tell(f"  by hand: {step.manual}")
                 result.status = "open"
                 if self.manual_mode == "wait":
@@ -274,6 +278,9 @@ def summary_lines(results: Sequence[Result], wall_seconds: float) -> list[str]:
     still_open = [r.id for r in results if r.status == "open"]
     if still_open:
         lines.append(f"By hand and still open: {', '.join(still_open)}.")
+    skipped = [r.id for r in results if r.status == "skipped"]
+    if skipped:
+        lines.append(f"Skipped, not measured: {', '.join(skipped)}.")
     return lines
 
 

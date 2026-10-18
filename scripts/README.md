@@ -796,6 +796,7 @@ as English added claims did on 06.10.2026.
 ```bash
 python -m scripts.control_eval --out results.json                  # every model in FRANKFURT_MODELS
 python -m scripts.control_eval --model "Nova Pro" --only c12       # one model, one question
+python -m scripts.control_eval --workspace kalvenstett             # only one workspace's questions
 python -m scripts.control_eval --topics-tier standard              # the deployed tier, with the EU profile
 python -m scripts.control_eval --regrade results.json              # mark a saved run again, no AWS call
 ```
@@ -806,7 +807,8 @@ questions, German about Kalvenstett's German documents and Pellwick's English
 ones, a few in English. 16 the documents answer; 6 *partial* ones whose second
 half they do not (the price of a new boiler, the life of a bathroom); 12 they
 do not answer at all although an answer lies close (funding for a heat pump,
-the VAT rate in Pellwick's prices); 8 advice questions.
+the VAT rate in Pellwick's prices); 8 advice questions. `--workspace` asks
+only the questions of one workspace and ends with 2 when it has none.
 
 Every question goes through `answer_question` like in `evaluate`, but the
 model and the guardrails run in `--region` (default `eu-central-1`): the
@@ -915,10 +917,16 @@ this order, each step timed on its own:
    documents;
 4. **measure** — `topic_probe --deployed` at the same time as `tool_probe` and
    `grounding_probe` (the first calls only the topic model, the other two never
-   do, so they share no model quota), then `evaluate` on the English, the German
-   and the Kalvenstett questions and `control_eval` with retrieval in the
+   do, so they share no model quota), then `evaluate` on the English and the
+   German questions and on the new workspace's own German ones,
+   `evaluation-questions-<workspace>.json`, and `control_eval --workspace` on
+   its questions in `evaluation-questions-control.json`, with retrieval in the
    region, all with `--model`, by default the answer model `REGIONS` gives the
-   region;
+   region. A workspace without such German questions has those two steps
+   skipped, named as skipped in the summary, never as passed, so a run for a
+   new business never measures another one in their place; a file of that name
+   with questions of another workspace or language is refused before anything
+   runs;
 5. **after** — where the deployed stack keeps and processes data as AWS reports
    it (bucket, embedding model, vector index, function, the two models, the two
    guardrails, budget table, log group, and whether Bedrock logs the model
@@ -953,10 +961,11 @@ the screen it never shows. It deploys nothing and deletes nothing; the
 measurements create and delete their probe guardrails as they do alone, and
 cost what they cost alone. On 07.10.2026 the whole run in eu-central-1, 22
 steps, took 11 minutes 12 seconds and cost 0.70 USD (at most 0.75) with the
-Frankfurt answer model.
+Frankfurt answer model, when `sources` still asked all 42 questions,
+Pellwick's too.
 
 | Exit code | Meaning |
 |---|---|
-| 0 | Every step passed, or was left open by hand. |
+| 0 | Every step passed, was left open by hand, or was skipped for want of the workspace's own German questions. |
 | 1 | A step failed; the summary names it and its log. |
-| 2 | Unknown step, or `--out-dir` inside the repository. Nothing was called. |
+| 2 | Unknown step, `--out-dir` inside the repository, or `evaluation-questions-<workspace>.json` holding questions of another workspace or language. Nothing was called. |
