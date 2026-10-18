@@ -199,6 +199,21 @@ def test_a_workspace_named_like_another_question_set_is_refused(
     assert not (tmp_path / "out").exists()
 
 
+def test_a_measurement_fails_on_a_failed_call_and_passes_with_wrong_answers(
+    plan: list[Step], tmp_path: Path
+) -> None:
+    """evaluate and control_eval end with 2 after a failed call: there was no measurement. A
+    wrong answer is a result, and they end with 0."""
+    for step_id in ("answers-en", "answers-de", "answers-de-de", "sources"):
+        step = by_id(plan)[step_id]
+        failed = FakeRun(codes={sys.executable: 2}, output="error: 1 failed call(s)")
+        (result,) = runner(context(tmp_path), failed).run_all(numbered(step), lambda r: None)
+        assert (result.status, result.exit_code) == ("failed", 2), step_id
+        wrong = FakeRun(output="| Qwen3 235B A22B 2507 | 0 of 30 right |")
+        (result,) = runner(context(tmp_path), wrong).run_all(numbered(step), lambda r: None)
+        assert result.status == "passed", step_id
+
+
 def test_list_prints_the_plan_and_calls_nothing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

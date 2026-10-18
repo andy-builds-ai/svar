@@ -926,7 +926,8 @@ this order, each step timed on its own:
    skipped, named as skipped in the summary, never as passed, so a run for a
    new business never measures another one in their place; a file of that name
    with questions of another workspace or language is refused before anything
-   runs;
+   runs. A measurement that ends with a failed call (exit code 2) fails its
+   step, since nothing was measured; wrong answers are a result and pass;
 5. **after** — where the deployed stack keeps and processes data as AWS reports
    it (bucket, embedding model, vector index, function, the two models, the two
    guardrails, budget table, log group, and whether Bedrock logs the model

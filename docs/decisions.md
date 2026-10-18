@@ -1108,6 +1108,31 @@ wrong.** Bedrock answered some calls with `ServiceUnavailableException`; a run
 that counts those measures the day's capacity, not the model. A timeout is
 not retried: it is what the page would show.
 
+**2026-10-18 — A measurement fails on a failed call, not on wrong answers.**
+The operator decided: the rehearsal's steps `answers-*` and `sources` fail as
+soon as a call failed (`errors` above 0), and pass however many answers are
+wrong. A failed call means there was no measurement; a wrong answer is a
+result. `evaluate` and `control_eval` end with 2 after a failed call since
+11.10.2026, which fails the step; this entry is the rule behind it.
+
+**2026-10-18 — The rehearsal measures the new business's own German
+questions, or says it did not.** The operator decided: `answers-de-de` and
+`sources` follow `--workspace` instead of always asking Kalvenstett's
+questions. Without German questions of that workspace a step is skipped and
+named as skipped in the summary, not as passed; otherwise a run for a new
+business would measure another one without a word. `sources` no longer asks
+Pellwick's half of the set beside it, which `control_eval` alone still does.
+
+**2026-10-18 — Port 80 that takes the connection is open, even without an
+answer.** The operator decided: an address that takes the connection on port
+80 and then closes, resets or breaks it off without an answer fails
+`https-only`; a refusal (`ConnectionRefusedError`) and a timeout stay closed.
+Once the server has taken the connection, a client's key would already have
+arrived unencrypted. For that reason the operator agreed the same day that a
+timeout counts as closed only before the connection is taken: an address that
+takes it and stays silent is open too. A timeout is named apart in the
+summary, since a block on this computer's side looks the same.
+
 ## Code
 
 **2026-09-23, replaced 2026-10-07 — Files over 500 lines stayed whole.**
