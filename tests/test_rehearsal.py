@@ -610,6 +610,15 @@ def test_an_address_without_a_route_from_here_is_named_as_not_checked(tmp_path: 
         )
 
 
+def test_no_address_checked_on_port_80_fails(tmp_path: Path) -> None:
+    """Without a route to any address, nothing shows that port 80 is closed."""
+    unreachable = {TWO[0]: OSError(10051, "network unreachable"), TWO[1]: OSError()}
+    send = sender(unreachable, PAGE, (401, dict(SECURITY_HEADERS)))
+    with pytest.raises(StepFailed, match="could not be checked on any of the 2 address"):
+        rehearsal_checks.check_https_only(context(tmp_path), send, lambda host: TWO)
+    assert [c for c in send.calls if c[0] == "https"] == []
+
+
 def test_one_open_address_on_port_80_fails(tmp_path: Path) -> None:
     mixed = {TWO[0]: OSError(), TWO[1]: (200, {}, b"<html>")}
     send = sender(mixed, PAGE, (401, dict(SECURITY_HEADERS)))
@@ -623,11 +632,27 @@ def test_one_open_address_on_port_80_fails(tmp_path: Path) -> None:
     ("plain", "page", "ask", "message"),
     [
         ((200, {}, b"<html>"), PAGE, (401, SECURITY_HEADERS), "plain http on .* answers 200"),
-        ((302, {"Location": "http://x/"}, b""), PAGE, (401, SECURITY_HEADERS), "plain http"),
-        (OSError(), (403, dict(SECURITY_HEADERS), b""), (401, SECURITY_HEADERS), "gave 403"),
-        (OSError(), (200, {}, b"<html>"), (401, SECURITY_HEADERS), "the page lacks"),
-        (OSError(), PAGE, (200, SECURITY_HEADERS), "gave 200, not 401"),
-        (OSError(), PAGE, (401, {}), "the 401 lacks"),
+        (
+            (302, {"Location": "http://x/"}, b""),
+            PAGE,
+            (401, SECURITY_HEADERS),
+            "plain http on .* answers 302",
+        ),
+        (
+            TimeoutError(),
+            (403, dict(SECURITY_HEADERS), b"<html>"),
+            (401, SECURITY_HEADERS),
+            "gave 403",
+        ),
+        (
+            TimeoutError(),
+            (200, dict(SECURITY_HEADERS), b"{}"),
+            (401, SECURITY_HEADERS),
+            "gave 200, not the page",
+        ),
+        (TimeoutError(), (200, {}, b"<html>"), (401, SECURITY_HEADERS), "the page lacks"),
+        (TimeoutError(), PAGE, (200, SECURITY_HEADERS), "gave 200, not 401"),
+        (TimeoutError(), PAGE, (401, {}), "the 401 lacks"),
     ],
 )
 def test_https_only_fails_on_every_gap(

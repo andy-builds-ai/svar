@@ -216,7 +216,8 @@ def plain_http(
 ) -> str:
     """Plain HTTP to every address at once, port 80: each must refuse, time out, or send the
     request on to https. One after the other, 12 addresses took 2 minutes on 07.10.2026. An
-    address this computer has no route to (no IPv6 here, say) is named as not checked.
+    address this computer has no route to (no IPv6 here, say) is named as not checked; with
+    none checked at all, nothing shows that port 80 is closed, and the step fails.
 
     A timeout counts as closed, but the summary names it apart: a network that blocks port 80
     on this computer's side looks the same from here as a server that never answers on it."""
@@ -239,6 +240,11 @@ def plain_http(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(addresses))) as pool:
         answers = list(pool.map(probe, addresses))
+    if answers.count("not checked") == len(answers):
+        raise StepFailed(
+            f"plain http could not be checked on any of the {len(answers)} address(es) "
+            "(no route from here)"
+        )
     timed_out = answers.count("timed out")
     closed = timed_out + answers.count("refused")
     summary = f"http: {closed} of {len(addresses)} address(es) without a connection"
