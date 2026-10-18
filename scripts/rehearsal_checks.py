@@ -179,6 +179,10 @@ def check_address_region(
     return f"{len(addresses)} address(es), each in {ctx.region} only"
 
 
+class AcceptedWithoutAnswer(Exception):
+    """Plain HTTP took the connection and the request, then ended or went silent unanswered."""
+
+
 def http_request(
     scheme: str,
     host: str,
@@ -188,7 +192,9 @@ def http_request(
     address: str | None = None,
 ) -> tuple[int, dict[str, str], bytes]:
     """One HTTP request that follows no redirect: status, headers, body. With `address`, plain
-    HTTP goes to that one address, with `host` as its Host header."""
+    HTTP goes to that one address, with `host` as its Host header. Plain HTTP connects first:
+    refused or timed out there, nothing took the request; any break or timeout after that
+    raises `AcceptedWithoutAnswer`."""
     headers = {"Content-Type": "application/json"} if body is not None else {}
     if scheme == "https":
         connection: http.client.HTTPConnection = http.client.HTTPSConnection(
@@ -197,10 +203,20 @@ def http_request(
     else:
         connection = http.client.HTTPConnection(address or host, 80, timeout=HTTP_TIMEOUT_SECONDS)
         headers["Host"] = host
-    try:
+
+    def exchange() -> tuple[int, dict[str, str], bytes]:
         connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         return response.status, dict(response.getheaders()), response.read()
+
+    try:
+        if scheme == "https":
+            return exchange()
+        connection.connect()
+        try:
+            return exchange()
+        except OSError as error:  # a reset, an abort, a broken pipe, a timeout: all once taken
+            raise AcceptedWithoutAnswer(f"{type(error).__name__}: {error}") from error
     finally:
         connection.close()
 
@@ -214,21 +230,30 @@ def missing_headers(headers: Mapping[str, str]) -> list[str]:
 def plain_http(
     host: str, addresses: Sequence[str], send: Callable[..., tuple[int, dict[str, str], bytes]]
 ) -> str:
-    """Plain HTTP to every address at once, port 80: each must refuse, time out, or send the
-    request on to https. One after the other, 12 addresses took 2 minutes on 07.10.2026. An
-    address this computer has no route to (no IPv6 here, say) is named as not checked; with
-    none checked at all, nothing shows that port 80 is closed, and the step fails.
+    """Plain HTTP to every address at once, port 80: each must refuse the connection, let it
+    time out, or send the request on to https. One after the other, 12 addresses took 2
+    minutes on 07.10.2026. An address this computer has no route to (no IPv6 here, say) is
+    named as not checked; with none checked at all, nothing shows that port 80 is closed, and
+    the step fails.
 
-    A timeout counts as closed, but the summary names it apart: a network that blocks port 80
-    on this computer's side looks the same from here as a server that never answers on it."""
+    A connection taken and then reset, closed or left silent without an answer is open: the
+    request, and a client's key with it, had already arrived unencrypted. A timeout before
+    the connection is taken counts as closed, but the summary names it apart: a network that
+    blocks port 80 on this computer's side looks the same from here as a closed port."""
 
     def probe(address: str) -> str:
         try:
             status, headers, _ = send("http", host, "GET", "/", address=address)
         except TimeoutError:
-            return "timed out"  # nothing answered unencrypted, as far as this side can tell
-        except (ConnectionRefusedError, ConnectionResetError):
+            return "timed out"  # nothing took the connection, as far as this side can tell
+        except ConnectionRefusedError:
             return "refused"  # nothing answers unencrypted
+        except (AcceptedWithoutAnswer, ConnectionResetError) as error:
+            # RemoteDisconnected is a ConnectionResetError too: the request was sent.
+            raise StepFailed(
+                f"plain http on {address} takes the connection and ends it without an answer "
+                f"({error}): a key would have arrived unencrypted"
+            ) from error
         except http.client.HTTPException as error:
             raise StepFailed(f"plain http on {address} answers, not as HTTP: {error!r}") from error
         except OSError:

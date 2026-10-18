@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import socket
 import sys
 import threading
 from datetime import UTC, datetime, timedelta
@@ -626,6 +627,102 @@ def test_one_open_address_on_port_80_fails(tmp_path: Path) -> None:
         rehearsal_checks.check_https_only(context(tmp_path), send, lambda host: TWO)
     with pytest.raises(StepFailed, match="resolves to no address"):
         rehearsal_checks.check_https_only(context(tmp_path), send, lambda host: [])
+
+
+@pytest.mark.parametrize(
+    "ended",
+    [
+        lambda: http.client.RemoteDisconnected("Remote end closed connection without response"),
+        lambda: ConnectionResetError(10054, "reset by peer"),
+        lambda: rehearsal_checks.AcceptedWithoutAnswer("TimeoutError: timed out"),
+    ],
+    ids=["closed", "reset", "silent"],
+)
+def test_port_80_that_takes_the_connection_and_ends_it_unanswered_is_open(
+    tmp_path: Path, ended: Any
+) -> None:
+    """The request had arrived, and a client's key would have with it: only a refusal, or a
+    timeout before the connection is taken, counts as closed."""
+    mixed = {TWO[0]: ConnectionRefusedError(), TWO[1]: ended()}
+    send = sender(mixed, PAGE, (401, dict(SECURITY_HEADERS)))
+    with pytest.raises(
+        StepFailed, match="plain http on 2a05:d014::1 takes the connection and ends it without"
+    ):
+        rehearsal_checks.check_https_only(context(tmp_path), send, lambda host: TWO)
+    assert [c for c in send.calls if c[0] == "https"] == []
+
+
+@pytest.fixture
+def local_port_80(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Plain HTTP of `http_request` sent to a port on this computer instead of port 80."""
+
+    def to(port: int) -> None:
+        class Local(http.client.HTTPConnection):
+            def __init__(self, host: str, _port: int | None = None, **options: Any) -> None:
+                super().__init__("127.0.0.1", port, **options)
+
+        monkeypatch.setattr(http.client, "HTTPConnection", Local)
+
+    return to
+
+
+def serve_once(behaviour: str) -> tuple[int, threading.Event]:
+    """A port that takes one connection, reads the request and then closes it unanswered
+    ("close") or stays silent until the returned event is set ("silent")."""
+    listener = socket.create_server(("127.0.0.1", 0))
+    done = threading.Event()
+
+    def run() -> None:
+        with listener:
+            connection, _ = listener.accept()
+            with connection:
+                connection.recv(4096)
+                if behaviour == "silent":
+                    done.wait(10)
+
+    threading.Thread(target=run, daemon=True).start()
+    return listener.getsockname()[1], done
+
+
+@pytest.mark.parametrize("behaviour", ["close", "silent"])
+def test_plain_http_names_a_connection_taken_and_left_unanswered(
+    behaviour: str, local_port_80: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(rehearsal_checks, "HTTP_TIMEOUT_SECONDS", 0.5)
+    port, done = serve_once(behaviour)
+    local_port_80(port)
+    try:
+        with pytest.raises(rehearsal_checks.AcceptedWithoutAnswer):
+            rehearsal_checks.http_request("http", HOST, "GET", "/", address="127.0.0.1")
+    finally:
+        done.set()
+
+
+@pytest.mark.parametrize("broken", [ConnectionAbortedError, BrokenPipeError])
+def test_plain_http_names_a_connection_taken_and_broken_off(
+    broken: type[OSError], local_port_80: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any break once the connection is taken, not only a reset, means it was taken."""
+    port, done = serve_once("silent")
+    local_port_80(port)
+
+    def request(*_: Any, **__: Any) -> None:
+        raise broken()
+
+    monkeypatch.setattr(http.client.HTTPConnection, "request", request)
+    try:
+        with pytest.raises(rehearsal_checks.AcceptedWithoutAnswer, match=broken.__name__):
+            rehearsal_checks.http_request("http", HOST, "GET", "/", address="127.0.0.1")
+    finally:
+        done.set()
+
+
+def test_plain_http_to_a_closed_port_is_refused_as_it_is(local_port_80: Any) -> None:
+    with socket.create_server(("127.0.0.1", 0)) as listener:
+        port = listener.getsockname()[1]
+    local_port_80(port)
+    with pytest.raises(ConnectionRefusedError):
+        rehearsal_checks.http_request("http", HOST, "GET", "/", address="127.0.0.1")
 
 
 @pytest.mark.parametrize(

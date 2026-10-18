@@ -895,9 +895,12 @@ this order, each step timed on its own:
    address of `WebUrl` in the region and in no other by AWS's
    `ip-ranges.json`, and that plain HTTP serves nothing while HTTPS serves the
    page and answers a question without a key with 401, both with the security
-   headers of `app/page.py`; an address that only times out on port 80 is
-   counted as closed but named apart, since a block on this computer's side
-   looks the same;
+   headers of `app/page.py`. On port 80 an address that refuses the
+   connection, or lets it time out before taking it, is closed, a timeout
+   named apart, since a block on this computer's side looks the same; one
+   that takes the connection and then breaks it off, closes it or stays silent
+   without an answer fails the step, since the request, and a client's key
+   with it, had already arrived unencrypted;
 2. **setup** — `ingest --check`, `workspace add` (its stdout, the key, is
    thrown away; the key stays in Parameter Store), `ingest`, `retrieve` (every
    hit from the new workspace), the first question through `ask --language
