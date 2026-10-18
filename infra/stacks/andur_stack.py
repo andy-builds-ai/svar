@@ -257,8 +257,8 @@ class AndurStack(Stack):
                 "TopicGuardrailRef",
                 value=self.topic_guardrail_version.ref,
                 description=(
-                    "The guardrail that checks the answer, without its citations, for the "
-                    "denied topics, as <id>|<version>."
+                    "The guardrail that checks the question, and the answer without its "
+                    "citations, for the denied topics, as <id>|<version>."
                 ),
             )
         else:

@@ -1643,6 +1643,10 @@ def test_the_guardrail_version_is_an_output(stack: AndurStack, template: Templat
     assert excerpt_output["Value"] == {"Ref": stack.get_logical_id(stack.excerpt_guardrail_version)}
     (topic_output,) = template.find_outputs("TopicGuardrailRef").values()
     assert topic_output["Value"] == {"Ref": stack.get_logical_id(stack.topic_guardrail_version)}
+    # The function sends it the question as INPUT and the answer as OUTPUT (app/topic_check.py).
+    assert topic_output["Description"].startswith(
+        "The guardrail that checks the question, and the answer without its citations,"
+    )
 
 
 def test_a_changed_topic_makes_a_new_version_of_the_topic_guardrail_only(
