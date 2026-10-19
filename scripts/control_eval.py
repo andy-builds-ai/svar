@@ -395,7 +395,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: no questions of {args.workspace} in {args.questions}", file=sys.stderr)
             return 2
     if args.out:
-        # A bad path fails now, not after paying; an earlier result there stays as it is.
+        # A bad path fails now, not after paying; an earlier result there stays as it is. One
+        # that goes bad during the run ends it after the model whose result it could not take.
         try:
             with args.out.open("a", encoding="utf-8"):
                 pass
@@ -423,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     runs: dict[str, list[dict[str, Any]]] = {}
     summaries: list[dict[str, Any]] = []
     started = time.strftime("%Y-%m-%dT%H:%M:%S")
-    failed = None
+    failed: AwsProblem | str | None = None
     try:
         answer_profile = region_answer_guardrail_uses_profile(args.region)
         for kind, request in probe_requests(args.topics_tier, answer_profile, args.region).items():
@@ -437,7 +438,13 @@ def main(argv: list[str] | None = None) -> int:
             summaries.append(summarise(model, runs[model.name]))
             progress(f"{model.name}: {summaries[-1]['cost_total']:.4f} USD")
             if args.out:
-                write(args.out, args, started, summaries, runs, passages)
+                try:
+                    write(args.out, args, started, summaries, runs, passages)
+                except OSError as problem:
+                    # What is paid for stays in the report below; no further model is paid for
+                    # when its result could not be saved either.
+                    failed = f"{args.out} cannot be written: {problem}"
+                    break
     except AwsProblem as problem:
         failed = problem
     finally:

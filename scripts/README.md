@@ -955,7 +955,7 @@ stops at `key`, since `workspace add` never replaces a key: go on with
 commands, so `ask` uses the new workspace's own key.
 
 Everything goes to `--out-dir`, which must lie outside the repository: one log
-per command step, the measurements' `--out` files, and `run-<time>.json` and `.md`
+per command that ran, the measurements' `--out` files, and `run-<time>.json` and `.md`
 with every step's start, seconds, exit code, status and result, the seconds
 per phase, and the wall clock. At the end, also after Ctrl+C, the summary is
 written and the account id is replaced by `<account>` in every file there; on

@@ -740,6 +740,40 @@ def test_a_run_with_a_failed_call_reports_and_fails(
     assert json.loads(out.read_text(encoding="utf-8"))["summaries"][0]["errors"] == ["c12"]
 
 
+def test_an_out_file_that_goes_bad_during_the_run_still_reports_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The first model was paid for and its result could not be saved: the table and the cost
+    line still appear, the second model is not paid for, the probes are deleted, exit 2."""
+    run_with(monkeypatch, [marked(sentences.NOT_IN_SOURCES_ANSWERS["de"])])
+    paid_for: list[str] = []
+    deleted: list[str] = []
+    rows = [marked(sentences.NOT_IN_SOURCES_ANSWERS["de"])]
+
+    def run_model(app_: Any, settings: Any, *_: Any) -> list[dict[str, Any]]:
+        paid_for.append(settings.model_id)
+        return rows
+
+    def locked(*_: Any) -> None:
+        raise PermissionError("[Errno 13] Permission denied")
+
+    monkeypatch.setattr(control_eval, "run_model", run_model)
+    monkeypatch.setattr(control_eval, "delete_reporting", lambda _, id_, *__: deleted.append(id_))
+    monkeypatch.setattr(control_eval, "write", locked)
+    out = tmp_path / "results.json"
+    first, second = FRANKFURT_MODELS[0].name, FRANKFURT_MODELS[1].name
+    assert control_eval.main(["--model", first, "--model", second, "--out", str(out)]) == 2
+    captured = capsys.readouterr()
+    assert f"| {first} |" in captured.out
+    assert f"| {second} |" not in captured.out
+    assert "Model and guardrail cost of the run: " in captured.out
+    assert captured.err.strip().endswith(
+        f"error: {out} cannot be written: [Errno 13] Permission denied"
+    )
+    assert len(paid_for) == 1
+    assert deleted
+
+
 def test_a_run_without_a_failed_call_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     run_with(monkeypatch, [marked(sentences.NOT_IN_SOURCES_ANSWERS["de"])])
     assert control_eval.main(["--model", FRANKFURT_MODELS[0].name]) == 0
