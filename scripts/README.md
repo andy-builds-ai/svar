@@ -797,7 +797,7 @@ as English added claims did on 06.10.2026.
 python -m scripts.control_eval --out results.json                  # every model in FRANKFURT_MODELS
 python -m scripts.control_eval --model "Nova Pro" --only c12       # one model, one question
 python -m scripts.control_eval --workspace kalvenstett             # only one workspace's questions
-python -m scripts.control_eval --topics-tier standard              # the deployed tier, with the EU profile
+python -m scripts.control_eval --topics-tier standard              # the tier deployed in eu-west-1, with the EU profile
 python -m scripts.control_eval --regrade results.json              # mark a saved run again, no AWS call
 ```
 
@@ -947,14 +947,15 @@ A step by hand stands in the plan as such. With `--manual skip`, the default,
 it is recorded as open and the run goes on; `--manual wait` stops there until
 Enter and times it. `--list` prints the plan and calls nothing; `--from <step>`
 goes on from a step, `--only <step>` runs single steps, the identity always
-first. The run stops at the first step that fails; any error in a step, a
-network break too, fails that step. A second full run for the same workspace
+first. The run stops at the first step that fails (in a group of steps run at
+once, the other lanes finish first); any error in a step, a network break too,
+fails that step. A second full run for the same workspace
 stops at `key`, since `workspace add` never replaces a key: go on with
 `--from documents`. `ANDUR_API_KEY` from the shell is not handed to the
 commands, so `ask` uses the new workspace's own key.
 
 Everything goes to `--out-dir`, which must lie outside the repository: one log
-per step, the measurements' `--out` files, and `run-<time>.json` and `.md`
+per command step, the measurements' `--out` files, and `run-<time>.json` and `.md`
 with every step's start, seconds, exit code, status and result, the seconds
 per phase, and the wall clock. At the end, also after Ctrl+C, the summary is
 written and the account id is replaced by `<account>` in every file there; on

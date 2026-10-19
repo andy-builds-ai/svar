@@ -177,6 +177,18 @@ def test_an_earlier_result_stays_when_a_run_fails_before_it_pays(
     assert out.read_text(encoding="utf-8") == '{"summaries": ["paid for"]}'
 
 
+def test_a_bad_out_path_ends_with_exit_2_before_anything_is_paid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def paid(region: str) -> dict[str, str]:
+        raise AssertionError("the run reached AWS")
+
+    monkeypatch.setattr(control_eval, "deployed_environment", paid)
+    out = tmp_path / "missing" / "results.json"
+    assert control_eval.main(["--model", "Nova Pro", "--out", str(out)]) == 2
+    assert capsys.readouterr().err.startswith(f"error: {out} cannot be written: ")
+
+
 def test_the_numbers_in_a_gpt_oss_citation_are_not_counted() -> None:
     """gpt-oss cites "【2†L9-L12】" (06.10.2026); 9 and 12 are line numbers, no claim."""
     answer = "Zehn Jahre Garantie【2†L9-L12】, bei 8 °C streichen【1】."

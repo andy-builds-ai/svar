@@ -12,10 +12,10 @@ Each step's output goes to `--out-dir`, outside the repository, with the account
 `run-<time>.json` and `run-<time>.md` there say what ran, for how long and how it ended. The
 key `workspace add` prints is never written anywhere. A measurement on German questions the
 new workspace has none of is skipped and named so. The run stops at the first step that
-fails; `--from` goes on from a step, `--only` runs single steps, `--list` prints the plan and
-calls nothing. It deploys nothing and deletes nothing; the measurements create and delete their
-own probe guardrails, as they do when run alone, and cost what they cost alone
-(scripts/README.md).
+fails (in a group of steps run at once, the other lanes finish first); `--from` goes on from a
+step, `--only` runs single steps, `--list` prints the plan and calls nothing. It deploys nothing
+and deletes nothing; the measurements create and delete their own probe guardrails, as they do
+when run alone, and cost what they cost alone (scripts/README.md).
 """
 
 import argparse
@@ -417,6 +417,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--only", action="append", help="run only this step (may repeat)")
     parser.add_argument("--list", action="store_true", help="print the plan and call nothing")
     args = parser.parse_args(argv)
+    if args.other_workspace == args.workspace:
+        parser.error("--other-workspace must differ from --workspace")
     # The commands run from the repository root, wherever the run was started.
     args.source, args.out_dir = args.source.resolve(), args.out_dir.resolve()
     args.model = args.model or deployed_model_name(args.region)

@@ -396,8 +396,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     if args.out:
         # A bad path fails now, not after paying; an earlier result there stays as it is.
-        with args.out.open("a", encoding="utf-8"):
-            pass
+        try:
+            with args.out.open("a", encoding="utf-8"):
+                pass
+        except OSError as problem:
+            print(f"error: {args.out} cannot be written: {problem}", file=sys.stderr)
+            return 2
 
     def progress(line: str) -> None:
         print(line, file=sys.stderr)

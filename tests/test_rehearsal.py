@@ -104,6 +104,15 @@ def test_the_key_is_never_captured_and_the_plan_reaches_it(plan: list[Step]) -> 
     assert steps["key-apart"].exit_code == 1
 
 
+def test_the_other_workspace_must_differ_from_the_new_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        arguments(tmp_path, "--other-workspace", "kalvenstett")
+    assert stopped.value.code == 2
+    assert "--other-workspace must differ from --workspace" in capsys.readouterr().err
+
+
 def test_the_steps_by_hand_are_marked_as_such(plan: list[Step]) -> None:
     manual = [step for step in plan if step.manual]
     assert [step.id for step in manual] == ["hand-over", "page"]
