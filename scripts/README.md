@@ -1,6 +1,6 @@
 # scripts — operating the knowledge base
 
-Ten commands, all run from the repository root:
+Eleven commands, all run from the repository root:
 
 | Command | Does |
 |---|---|
@@ -13,6 +13,7 @@ Ten commands, all run from the repository root:
 | `python -m scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
 | `python -m scripts.control_eval` | Asks 42 fixed questions of each Frankfurt candidate the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
 | `python -m scripts.tool_probe` | Gives each Frankfurt candidate six orders to record with one tool: whether it fills the tool cleanly and asks back instead of guessing. |
+| `python -m scripts.receiving_probe` | Lets each Frankfurt candidate check twelve delivery notes against their purchase orders through Vard's tool loop: whether it finds every discrepancy, makes none up and closes with the right tool. |
 | `python -m scripts.rehearsal` | Sets up a new business on the deployed stack as a real one is set up, runs the measurements against it, and times every step. |
 
 ## What they need
@@ -879,6 +880,49 @@ the error's text, under *Failed*, and that text says which it was. A call
 that fails any other way — throttled, a service error, a timeout — says
 nothing about the model, is named under the table and fails the run with
 exit code 2. A missing login or permission stops it at once.
+
+## receiving_probe — which model Vard checks deliveries with
+
+```bash
+python -m scripts.receiving_probe --model "Qwen3 235B A22B 2507" --out receiving.json
+python -m scripts.receiving_probe --max-usd 1.00     # every Frankfurt candidate, at most 1 USD
+```
+
+Vard is Andur's agent: one responsibility at a time, a person deciding. His
+first is the receiving check. A model works in Vard's loop (`vard/engine.py`)
+with the receiving responsibility (`vard/receiving.py`) and five tools, all
+allowed: `get_delivery_note`, `get_purchase_order`, and the three that close
+the check, `report_discrepancies`, `report_match` and `hand_off`. There is no
+tool to book with; a call to a tool that is not offered, like one to book, is
+refused, told to the model and counted as invalid, and so is a call without
+its required fields. The loop ends when a closing tool has run, when the model
+answers without a tool, or after 8 model calls.
+
+`receiving-cases.json` holds twelve German cases, six for Pellwick Joinery and
+six for Kalvenstett Haustechnik; the documents are made up, the businesses'
+trades are taken from their documents. Each case starts with "Lieferschein …
+ist eingegangen." and says which tool should close it and which discrepancies,
+by article number and kind, should be reported: everything agrees (also with
+German numbers like "1.250,00" against "1.250", and with boxes of 200 against
+pieces), a quantity short or over, a position missing or extra, a similar but
+wrong article, a wrong unit, a partial delivery whose open rest is reported, a
+note without a purchase order to hand off, and three discrepancies at once.
+
+A case passes when exactly one closing tool ran and it is the right one, every
+expected discrepancy is reported with its kind, none is made up, and no call
+was invalid. The first table gives each model's marks, invalid calls, mean
+steps, cost and wall time; under it each model's cases with steps, cost and
+seconds. `--out` holds the same and every call with its input and result.
+
+`--max-usd` (1.50 by default) is a hard limit. Before every model call the
+probe works out the most the call can cost: the request's size in UTF-8 bytes
+plus 500, as input tokens, and `maxTokens` (2,048) as output tokens, at the
+model's price in `infra/answer_models.py`. If what the run has spent plus that
+would pass the limit, the call is not made: the tables and `--out` are written
+and the run ends with exit code 2. A call that fails keeps its most counted,
+since AWS may have billed it. Claude Sonnet 4.6 is last in the table, so the
+cheaper models are measured first. Failed calls, a missing login or permission
+and `--out` are handled as in `tool_probe`.
 
 ## rehearsal — a new business, set up and measured, step by step
 

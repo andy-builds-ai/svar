@@ -23,9 +23,9 @@ comes from the AWS profile. A switch from Ireland to Frankfurt is that one
 line. The synthesised template of eu-west-1 stayed the same but for the hash
 of the function's code, which now can check the topics with a model. As of
 20.10.2026 this holds for the stack and `scripts/aws.py`; `scripts/control_eval.py`,
-`scripts/tool_probe.py` and `scripts/rehearsal.py` each carry a `DEFAULT_REGION`
-of their own, `eu-central-1`, the rehearsal because it takes only a region whose
-function is its own address (`scripts/README.md`).
+`scripts/tool_probe.py`, `scripts/receiving_probe.py` and `scripts/rehearsal.py` each
+carry a `DEFAULT_REGION` of their own, `eu-central-1`, the rehearsal because it
+takes only a region whose function is its own address (`scripts/README.md`).
 
 **2026-09-28 — Names that hold for the whole account carry the region.**
 IAM role names and CloudFront policy and origin access control names are
@@ -1154,6 +1154,28 @@ arrived unencrypted. For that reason the operator agreed the same day that a
 timeout counts as closed only before the connection is taken: an address that
 takes it and stays silent is open too. A timeout is named apart in the
 summary, since a block on this computer's side looks the same.
+
+## Vard
+
+**2026-10-20 — A measurement picks Vard's model, and his loop is built the way
+Claude Code's is.** The operator decided on 01.10.2026 that a test of the EU
+models picks the model of Vard, Andur's agent, not a fixed choice. Vard works
+in a loop of his own (`vard/engine.py`): a model uses tools turn after turn,
+each tool carries a level (allowed, ask, denied), a call the loop may not run
+goes back to the model as a refusal and counts as invalid, and a fixed step
+limit ends a model that never closes. Neither Claude Code nor the Agent SDK is
+the engine: both run with Claude models only, which Bedrock offers in
+Frankfurt only through the EU profile, routed to every EU region, while the
+customers' data is to stay in Germany. The loop knows no task: a
+responsibility brings the task text, the tools and the step limit, so a second
+one, such as a software firm's support inbox, needs no change to it; a test
+runs a made-up one. The receiving check is the first, and no tool books: a
+person decides. `scripts/receiving_probe.py` measures it on twelve made-up
+cases per Frankfurt model, and its `--max-usd` makes no call whose most could
+pass the limit. Its default of 1.50 USD is about twice the 0.71 USD reckoned
+for the eleven models at three calls a case, not measured; on the run against
+a stub the requests were 3,684 to 5,508 bytes. Memory of corrections, a
+trigger for new notes and pausing belong to the next stage.
 
 ## Code
 

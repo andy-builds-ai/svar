@@ -60,7 +60,12 @@ cdk diff     # compares it with the deployed stack; needs an AWS login, changes 
   both only when asked. `python -m scripts.rehearsal` sets up a workspace
   with its key on the deployed stack and runs the measurements above against
   it, 0.70 USD on 07.10.2026 (at most 0.75); run it only when asked.
-  `--list` calls nothing.
+  `--list` calls nothing. `python -m scripts.receiving_probe` lets every
+  Frankfurt model check twelve delivery notes through Vard's loop (`vard/`)
+  and makes no call that could take the run past `--max-usd`, 1.50 USD by
+  default; a full run was reckoned at 0.71 USD on 20.10.2026, not yet
+  measured. Run it only when asked, and after every change to `vard/` or to
+  its cases ask for it.
 - **Region is `eu-west-1` by default** (`DEFAULT_REGION` in
   `infra/answer_models.py`); `cdk synth -c region=eu-central-1` and each
   script's `--region` pick Frankfurt, whose stack has its own models, checks
