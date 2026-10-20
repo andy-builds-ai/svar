@@ -1203,8 +1203,8 @@ most could pass the limit. Its default of 1.50 USD is about twice the 0.71 USD
 reckoned for the eleven models at three calls a case, not measured; on the run
 against a stub the requests were 3,684 to 5,508 bytes. The next build of Vard
 brings a trigger for new delivery notes, memory of corrections and pausing,
-and picks the model among the four candidates of the entry below with more
-and harder cases.
+and picks the model, with more and harder cases, among the four candidates
+of the entry "The first build of Vard closes with four candidates".
 
 **2026-10-20 — A wrong article may be reported as its two halves.** The
 operator decided after the first paid run: the ordered article reported as
@@ -1248,8 +1248,8 @@ Frankfurt models at 23 of 24 are the candidates: Nemotron 3 Super, which
 passed all 23 cases it answered,
 Devstral 2 123B, MiniMax M2.1 and gpt-oss-20b. The next build of Vard picks
 among them with more and harder cases and brings the trigger, the memory of
-corrections and pausing of the entry above; the loop takes any of them, the
-model being one argument of `vard.engine.run`.
+corrections and pausing of the entry "A measurement picks Vard's model"; the
+loop takes any of them, the model being one argument of `vard.engine.run`.
 
 ## Code
 
