@@ -888,8 +888,8 @@ python -m scripts.receiving_probe --model "Qwen3 235B A22B 2507" --out receiving
 python -m scripts.receiving_probe --max-usd 1.00     # every Frankfurt candidate, at most 1 USD
 ```
 
-Vard is a part of Andur, the agent: one responsibility after another, a
-person deciding. His first is the receiving check. A model works in Vard's loop (`vard/engine.py`)
+Vard is an agent, the second part of Andur: one responsibility after another,
+a person deciding. His first is the receiving check. A model works in Vard's loop (`vard/engine.py`)
 with the receiving responsibility (`vard/receiving.py`) and five tools, all
 allowed: `get_delivery_note`, `get_purchase_order`, and the three that close
 the check, `report_discrepancies`, `report_match` and `hand_off`. There is no

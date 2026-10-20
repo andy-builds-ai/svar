@@ -11,15 +11,15 @@ before it speak of customers and paying customers. They stay as they were
 written. The code they describe stays too: a plan is a quota on
 a key, whoever holds the key.
 
-**2026-10-20 — Andur is the system; Svar and Vard are its parts.** The
-operator decided. Andur is a secretariat that grows stage by stage, on AWS in
-Frankfurt; data stays in Germany, and at every stage a person decides. Svar,
-the chatbot, answers questions from a company's own documents and is shown
-with made-up companies. Vard, the agent, takes on one responsibility after
-another; he is measured, not in operation. The stack in Ireland is the
-comparison stack. Until 02.10.2026 the chatbot itself was called Ask Andur,
-which is why older entries let Andur answer where Svar answers today; they
-stay as they were written.
+**2026-10-20 — Andur is the larger system; Svar and Vard are its parts.** The
+operator decided. Andur is the larger system, meant to grow into a secretariat,
+stage by stage, with a person deciding at every stage. Svar is a chatbot: it
+answers questions from a company's own documents and is shown with made-up
+companies. Vard is an agent: he takes on one responsibility after another, and
+he is measured, not in operation. Andur's main stack runs on AWS in Frankfurt,
+and a company's documents stay in Germany; the stack in Ireland is the
+comparison stack. Until 02.10.2026 the chatbot was called Ask Andur, which is
+why older entries let Andur answer where Svar answers today; they stay as written.
 
 ## Region
 
@@ -1177,14 +1177,14 @@ summary, since a block on this computer's side looks the same.
 
 **2026-10-20 — A measurement picks Vard's model, and his loop is built the way
 Claude Code's is.** The operator decided on 01.10.2026 that a test of the EU
-models picks the model of Vard, Andur's agent, not a fixed choice. Vard works
+models picks Vard's model, not a fixed choice. Vard works
 in a loop of his own (`vard/engine.py`): a model uses tools turn after turn,
 each tool carries a level (allowed, ask, denied), a call the loop may not run
 goes back to the model as a refusal and counts as invalid, and a fixed step
 limit ends a model that never closes. Neither Claude Code nor the Agent SDK is
 the engine: both run with Claude models only, which Bedrock offers in
-Frankfurt only through the EU profile, routed to every EU region, while
-Andur keeps its data in Germany. The loop knows no task: a responsibility
+Frankfurt only through the EU profile, routed to every EU region, while a
+company's documents are to stay in Germany. The loop knows no task: a responsibility
 brings the task text, the tools and the step limit, so a second one, such as
 a support inbox, to be tried on the made-up software company Quillmoor, needs
 no change to it; a test runs a made-up one. The receiving check is the first,
@@ -1232,7 +1232,7 @@ both runs: both Qwen3 counted screws delivered by the box of 200 as a
 discrepancy in p6. gpt-oss-120b passed every case of the first run and ended
 two of the second without a closing tool. Claude Sonnet 4.6 and Nova Pro run
 behind the EU profile, which routes to every EU region; they stand as a
-comparison only, since Andur keeps the data in Germany. The four Frankfurt models at 23 of 24 are the
+comparison only, since a company's documents stay in Germany. The four Frankfurt models at 23 of 24 are the
 candidates: Nemotron 3 Super, which passed all 23 cases it answered,
 Devstral 2 123B, MiniMax M2.1 and gpt-oss-20b. Stage 2 picks among them with
 more and harder cases; the loop takes any of them, the model being one

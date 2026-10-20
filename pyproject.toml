@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "andur"
 version = "0.1.0"
-description = "Andur, a secretariat that grows stage by stage on AWS. This repository holds its first parts: Svar, a chatbot that answers from a company's own documents, and Vard, an agent."
+description = "Svar, a chatbot that answers from a company's own documents on AWS, and Vard, an agent: the first parts of a larger system called Andur."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "LicenseRef-Proprietary"

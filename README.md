@@ -1,19 +1,19 @@
 # Svar
 
-Svar is a part of Andur, the chatbot. It answers questions from a company's
-own documents, and every answer shows its sources: the passages it was built
-from, each marked as written by a person, produced by a machine, or merely
-arrived and not sorted yet. It is shown with made-up companies. One
-installation holds several companies, each in a workspace of its own, and a
-question asked in one workspace is never answered from another's documents.
-It runs on AWS, defined as code (CDK in Python), and nothing in it bills a
-monthly base fee.
+Svar is a chatbot. It answers questions from a company's own documents, and
+every answer shows its sources: the passages it was built from, each marked
+as written by a person, produced by a machine, or merely arrived and not
+sorted yet. It is shown with made-up companies. One installation holds
+several companies, each in a workspace of its own, and a question asked in
+one workspace is never answered from another's documents. It runs on AWS,
+defined as code (CDK in Python), and nothing in it bills a monthly base fee.
 
-Andur is the system: a secretariat that grows stage by stage, on AWS in
-Frankfurt. Data stays in Germany, and at every stage a person decides. Its
-first parts are Svar and [Vard](#vard), the agent; more will follow. The
-stack, its resources and the code carry Andur's name (`AndurStack`,
-`X-Andur-Key`, `andur-*`).
+Svar is one part of a larger system called Andur. Andur is meant to grow
+into a secretariat, stage by stage, with a person deciding at every stage.
+Its second part is Vard, an agent ([Vard](#vard)); more will follow. Andur's
+main stack runs on AWS in Frankfurt, and a company's documents stay in
+Germany. The stack, its resources and the code carry Andur's name
+(`AndurStack`, `X-Andur-Key`, `andur-*`).
 
 Two stacks run from the same code. The main stack is in Frankfurt
 (`eu-central-1`): documents, vectors, models, questions and answers stay in
@@ -261,12 +261,12 @@ Prices, the counter, the page and how each number was taken:
 
 ## Vard
 
-Vard is a part of Andur, the agent. He takes on one responsibility after
-another, works on each with tools, and a person decides what happens. His
-first is the receiving check: he fetches a delivery note that has come in,
-fetches the purchase order it names, compares them and reports what differs.
-A support inbox, tried on the made-up software company Quillmoor, is planned
-as the next.
+Vard is an agent, the second part of Andur. He takes on one responsibility
+after another, works on each with tools, and a person decides what happens.
+His first is the receiving check: he fetches a delivery note that has come
+in, fetches the purchase order it names, compares them and reports what
+differs. A support inbox, tried on the made-up software company Quillmoor, is
+planned as the next.
 
 The loop is `vard/engine.py`: a model calls tools turn after turn until a
 tool that closes the task has run, it answers without a tool, or the step

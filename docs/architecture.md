@@ -1,8 +1,9 @@
 # Architecture
 
-Svar, a part of Andur, is the chatbot: it answers questions from a company's
-own documents, and says where each answer came from. Vard, the agent, is not
-part of the stack yet (`vard/`, [README](../README.md#vard)).
+Svar is a chatbot: it answers questions from a company's own documents, and
+says where each answer came from. It is one part of a larger system called
+Andur. Vard, an agent and Andur's second part, is not in the stack yet
+(`vard/`, [README](../README.md#vard)).
 
 A company drops its handbooks, policies and notes into a folder. Andur keeps
 them, and from then on anyone can ask Svar in plain language instead of
