@@ -74,7 +74,7 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
 
 ## Decisions and what each one costs
 
-87 decisions are written down with their dates and reasons in
+91 decisions are written down with their dates and reasons in
 [docs/decisions.md](docs/decisions.md). The ones that shape the system:
 
 - **Nothing with a monthly base fee** ([decisions.md:47](docs/decisions.md)):
@@ -92,7 +92,7 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
   daily quota for a key on a plan. The price: whoever holds a key can ask
   until it is spent; a leaked demo key is a leak of ten questions.
 - **In Frankfurt the function's URL is the address, without CloudFront**
-  ([decisions.md:879](docs/decisions.md)): no setting keeps CloudFront's edge
+  ([decisions.md:939](docs/decisions.md)): no setting keeps CloudFront's edge
   locations inside Germany. The price: no domain of its own and no WAF, so
   a flood is capped only by the number of executions Lambda allows at once.
   The stack is built to reserve 10 for the function there, 5 for questions
@@ -111,9 +111,9 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
   documents. The price: it withholds right German answers to English
   documents. Checking those in English was measured and not built, because
   it also let made-up answers through
-  ([decisions.md:921](docs/decisions.md)).
+  ([decisions.md:985](docs/decisions.md)).
 - **Measured through the function's own code path**
-  ([decisions.md:1023](docs/decisions.md)), against the deployed knowledge
+  ([decisions.md:1087](docs/decisions.md)), against the deployed knowledge
   base and the deployed function's settings. The price: every measurement
   calls real models and costs real money, and one run is one sample, since
   the models do not repeat themselves even at temperature 0
@@ -264,7 +264,7 @@ request to `main`, and `cdk synth` for both regions.
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
-pytest -q                                  # 1,417 tests, no AWS needed; one is skipped without a time zone database
+pytest -q                                  # 1,450 tests, no AWS needed; one is skipped without a time zone database
 ruff check && ruff format --check
 ```
 

@@ -969,14 +969,18 @@ addresses lie in eu-central-1 by AWS's `ip-ranges.json`.
 
 The price: no own domain and no WAF in front of the URL, which takes neither
 (API Gateway would, with a request to raise its 29-second limit); the only
-guard against floods is the reserved concurrency. Each file of the page is a
+guard against floods is the concurrency limit. Each file of the page is a
 call of the function, and two questions in flight beside a page load's five
 calls would refuse one of its files with a 429 and leave the page empty,
-its words coming from its scripts. So Frankfurt reserves 5 more for a page
-load (`PAGE_LOAD_CONCURRENCY`), 10 in all; questions may take all 10, twice
-as many at once as in Ireland. A page that inlines its files would need one
-call, but the content security policy, shared with Ireland, allows no inline
-script.
+its words coming from its scripts. So the Frankfurt stack is built to reserve
+5 more for a page load (`PAGE_LOAD_CONCURRENCY`), 10 in all; questions may
+take all 10, twice as many at once as in Ireland. The Frankfurt account allows
+only 10 executions in all and Lambda keeps 10 unreserved, so the stack runs
+there without the reservation (`-c answer_max_concurrency=none`) and the
+account's limit of 10 is the cap, shared with every function of the account
+in the region (`docs/operating.md`). A page that inlines its files would need
+one call, but the content security policy, shared with Ireland, allows no
+inline script.
 
 **2026-10-06 — German answers keep the grounding check as it is; checking
 them in English is measured, not built.** Measured with `python -m
