@@ -1051,7 +1051,7 @@ def test_invented_names_are_forgotten_once_they_hold_back_nothing(
 
 
 def test_many_workspaces_cost_no_extra_calls(aws: dict[str, Any]) -> None:
-    """The read does not grow with the number of customers: one call, whatever the store
+    """The read does not grow with the number of workspaces: one call, whatever the store
     holds. Reading the whole path cost one more call per ten workspaces."""
     aws["ssm"].parameters.update(
         parameters({f"customer-{number}": f"key-{number}" for number in range(2000)})
@@ -1297,7 +1297,7 @@ def test_the_maximum_age_is_three_cache_times() -> None:
 def test_reads_for_workspaces_without_a_cached_key_are_capped_per_instance(
     aws: dict[str, Any], cold_start: FakeClock
 ) -> None:
-    """Invented names cannot spend the account's Parameter Store reads, and a customer
+    """Invented names cannot spend the account's Parameter Store reads, and a workspace
     whose key is cached never notices them."""
     assert call(event())[0] == 200
     for number in range(keys.UNKNOWN_KEY_READS - 1):
@@ -2356,7 +2356,7 @@ def test_a_long_tail_of_old_counts_is_cleared_a_few_at_a_time(
 def test_a_spent_demo_key_put_on_a_plan_asks_again_and_loses_its_end(
     aws: dict[str, Any], budget_clock: "FakeWallClock"
 ) -> None:
-    """The step from a test to a paying customer, with the key kept."""
+    """The step from a demo key to a plan, with the key kept."""
     for _ in range(10):
         call(event())
     assert call(event())[0] == 402
@@ -3062,8 +3062,8 @@ def test_a_masked_answer_says_so_and_a_blocked_one_is_the_guardrail_message_alon
         llm.extract_answer(masked, "masked")
         == "Call {PHONE} [1].\n\n" + llm.GUARDRAIL_NOTES["en"]["masked"]
     )
-    blocked = bedrock_response([{"text": "Andur does not advise on this."}], "guardrail_intervened")
-    assert llm.extract_answer(blocked, "blocked") == "Andur does not advise on this."
+    blocked = bedrock_response([{"text": "Svar does not advise on this."}], "guardrail_intervened")
+    assert llm.extract_answer(blocked, "blocked") == "Svar does not advise on this."
     assert llm.extract_answer(blocked, "intervened").endswith(
         llm.STOP_NOTES["en"]["guardrail_intervened"]
     )
@@ -3178,7 +3178,7 @@ def test_a_tax_question_comes_back_as_the_guardrail_message_and_is_still_a_200(
     """A refusal by the guardrail is an answer, not an error: the key's question is spent
     either way."""
     aws["bedrock-runtime"].response = {
-        "output": {"message": {"content": [{"text": "Andur does not advise on this."}]}},
+        "output": {"message": {"content": [{"text": "Svar does not advise on this."}]}},
         "stopReason": "guardrail_intervened",
         "usage": {"inputTokens": 0, "outputTokens": 0},
         "trace": guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED, output_assessment={}),
@@ -3199,7 +3199,7 @@ def test_a_refused_question_gets_no_sources_and_its_excerpts_are_never_guarded(
     """Nothing was answered from the passages; their text next to a refusal is only a leak."""
     caplog.set_level(logging.INFO, logger="andur")
     aws["bedrock-runtime"].response = {
-        "output": {"message": {"content": [{"text": "Andur does not advise on this."}]}},
+        "output": {"message": {"content": [{"text": "Svar does not advise on this."}]}},
         "stopReason": "guardrail_intervened",
         "usage": {"inputTokens": 0, "outputTokens": 0},
         "trace": guardrail_trace(input_assessment=TAX_QUESTION_BLOCKED, output_assessment={}),
@@ -3707,9 +3707,9 @@ def test_every_log_line_is_single_line_json(
         json.loads(message)
 
 
-# --- Languages: Andur speaks the visitor's -------------------------------
+# --- Languages: Svar speaks the visitor's --------------------------------
 
-#: A request that names no language, English, German, and one Andur does not speak.
+#: A request that names no language, English, German, and one Svar does not speak.
 ASKED_IN = [(None, "en"), ("en", "en"), ("de", "de"), ("fr", "en")]
 
 SENTENCE_TABLES = {
@@ -4484,7 +4484,7 @@ def test_a_refusal_is_in_german_when_the_request_asks_for_german(
 ) -> None:
     assert call(request_event) == (status, {"error": german})
 
-    # The same request in English, in no language or in one Andur does not speak is English.
+    # The same request in English, in no language or in one Svar does not speak is English.
     body = json.loads(request_event["body"])
     for asked in (None, "en", "fr"):
         body.pop("language", None)

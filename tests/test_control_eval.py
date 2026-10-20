@@ -780,7 +780,7 @@ def test_a_run_without_a_failed_call_passes(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_a_workspace_asks_only_its_own_questions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The rehearsal measures the new business, not the demo questions beside it."""
+    """The rehearsal measures the new workspace, not the demo questions beside it."""
     run_with(monkeypatch, [])
     asked: list[dict[str, Any]] = []
 

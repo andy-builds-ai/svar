@@ -1,4 +1,4 @@
-"""Set up a new business on a deployed stack the way a real one is set up, and time every step.
+"""Set up a new workspace on a deployed stack, as any other is set up, and time every step.
 
 One command runs it all, in this order: the checks of the deployed stack and its address, the
 new workspace with its key and documents, its first question, the proof that it stays apart
@@ -211,7 +211,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
         Step(
             "https-only", "check", "HTTPS only, headers, no key no answer", check=check_https_only
         ),
-        # The new business, set up as a real one is.
+        # The new workspace, set up as any other is.
         Step(
             "documents-check",
             "setup",
@@ -228,7 +228,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
         Step(
             "hand-over",
             "setup",
-            "The key handed to the business",
+            "The key handed over",
             manual=f"Copy the key into the clipboard without showing it, and hand it over: "
             f"{key_commands}",
         ),
@@ -261,7 +261,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             manual="Open WebUrl in a browser, enter the key, ask the same question; in the "
             "developer tools every response carries the security headers.",
         ),
-        # The new business stays apart from the others.
+        # The new workspace stays apart from the others.
         Step(
             "demo-documents",
             "apart",
@@ -379,9 +379,9 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m scripts.rehearsal",
-        description="Set up a new business on the deployed stack, measure it, time every step.",
+        description="Set up a new workspace on the deployed stack, measure it, time every step.",
     )
-    parser.add_argument("--workspace", required=True, help="the new business's workspace")
+    parser.add_argument("--workspace", required=True, help="the new workspace")
     parser.add_argument(
         "--source", type=Path, required=True, help="its folder: <workspace>/<layer>/<document>"
     )

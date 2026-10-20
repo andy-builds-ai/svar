@@ -949,7 +949,7 @@ def test_one_workspace_prunes_only_inside_that_workspace(tmp_path: Path) -> None
 def test_a_folder_with_one_workspace_never_prunes_the_others(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A customer's own folder with --delete and no --workspace: only that customer is pruned."""
+    """One company's own folder with --delete and no --workspace: only that company is pruned."""
     s3, _ = uploaded_bucket(tmp_path / "demo")
     customer = tmp_path / "customer"
     add_document(customer, "third", "human", name="c.md")

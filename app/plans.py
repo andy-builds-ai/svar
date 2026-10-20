@@ -1,4 +1,4 @@
-"""The plans a paying customer's key can carry, and what each allows.
+"""The plans a key can carry, and what each allows.
 
 This table is the one place a plan is defined. The answer function reads it to
 count a question (app/budget.py), `python -m scripts.workspace` to give a key

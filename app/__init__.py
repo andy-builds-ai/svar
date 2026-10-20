@@ -1,4 +1,4 @@
-"""The Andur answer function: handler.py and the modules beside it.
+"""Svar's answer function: handler.py and the modules beside it.
 
 Neither Lambda nor the tests import this folder as a package: both import
 the modules by their plain names, handler, aws, plans and the rest

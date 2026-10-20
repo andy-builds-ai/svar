@@ -41,7 +41,7 @@ def german_questions() -> list[dict[str, Any]]:
 def test_the_question_set_covers_every_demo_workspace_and_every_kind(
     questions: list[dict[str, Any]],
 ) -> None:
-    """The demo workspaces are the folders in knowledge/. A customer's workspace exists only
+    """The demo workspaces are the folders in knowledge/. Any other workspace exists only
     in AWS (scripts/workspace.py); its documents and questions stay out of the repository."""
     demo_workspaces = {path.name for path in KNOWLEDGE.iterdir() if path.is_dir()}
     assert len(questions) == 30
@@ -241,7 +241,7 @@ def test_a_blocked_answer_is_never_right_even_with_the_fact() -> None:
         (sentences.NO_SOURCES_ANSWERS["en"], "none", True),
         (sentences.NOT_IN_SOURCES_ANSWERS["de"], "none", True),
         (sentences.NO_SOURCES_ANSWERS["de"], "none", True),
-        ("Andur does not give legal advice.", "blocked", True),
+        ("Svar does not give legal advice.", "blocked", True),
         ("You may withhold payment.", "none", False),
         ("A name is masked here.", "masked", False),
     ],

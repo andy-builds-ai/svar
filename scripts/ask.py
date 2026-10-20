@@ -1,4 +1,4 @@
-"""Ask Andur a question through the web address and print the answer with its sources."""
+"""Ask Svar a question through the web address and print the answer with its sources."""
 
 import argparse
 import hashlib
@@ -82,7 +82,7 @@ def build_request(
     url: str, key: str, question: str, workspace: str, language: str | None = None
 ) -> urllib.request.Request:
     """The POST the way in expects: JSON, the key header, and the body's hash. The language
-    goes in only when given; without it Andur answers in English."""
+    goes in only when given; without it Svar answers in English."""
     fields = {"question": question, "workspace": workspace}
     if language:
         fields["language"] = language
@@ -151,14 +151,14 @@ def format_answer(workspace: str, body: dict[str, Any]) -> list[str]:
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m scripts.ask",
-        description="Ask the deployed Andur function a question in one workspace.",
+        description="Ask Svar's deployed answer function a question in one workspace.",
     )
     parser.add_argument("question")
     parser.add_argument("--workspace", required=True, help="the workspace to ask in")
     parser.add_argument(
         "--language",
         choices=["de", "en"],
-        help="the language Andur's own sentences come in; default: the function's, English",
+        help="the language Svar's own sentences come in; default: the function's, English",
     )
     parser.add_argument("--json", action="store_true", help="print the raw JSON response")
     parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")

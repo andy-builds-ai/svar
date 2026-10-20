@@ -102,7 +102,7 @@ def region_answer_guardrail_uses_profile(region: str) -> bool:
 
 #: The regions a stack may be deployed to. `cdk deploy -c region=<region>` and each script's
 #: `--region` pick one; without them it is `DEFAULT_REGION`, but for `control_eval`,
-#: `tool_probe` and `rehearsal`, which default to eu-central-1 on their own.
+#: `tool_probe`, `receiving_probe` and `rehearsal`, which default to eu-central-1 on their own.
 REGIONS = {
     "eu-west-1": RegionModels(PRICE_DATE, ANSWER_MODELS, "eu.amazon.nova-pro-v1:0", None, True),
     # Everything stays in Frankfurt. The Standard topic tier, which reads German, goes only with

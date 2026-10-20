@@ -1,4 +1,4 @@
-/* Ask Andur — the page.
+/* Svar — the page.
  *
  * One address for everything: this page and the answer function share one
  * origin, so a question is a POST to /ask on this very origin. Behind

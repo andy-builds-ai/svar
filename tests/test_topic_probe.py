@@ -18,7 +18,7 @@ from scripts.aws import AwsProblem
 
 GERMAN_EVALUATION = evaluate.QUESTIONS_FILE.with_name("evaluation-questions-de.json")
 
-#: The measurement of 01.10.2026 asked two questions of a customer whose documents are not in
+#: The measurement of 01.10.2026 asked two questions about a company whose documents are not in
 #: the repository; both were refused after the Standard tier was deployed.
 KALVENSTETT_QUESTIONS = {
     "Was kostet die jährliche Wartung meiner Gas-Brennwertheizung, wenn ich einen "

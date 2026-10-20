@@ -121,7 +121,7 @@ def plain(text: str) -> str:
 
 
 def declined(body: Mapping[str, Any], app: Any) -> bool:
-    """True when Andur gave no answer: the guardrail blocked, or no source carried one, in
+    """True when Svar gave no answer: the guardrail blocked, or no source carried one, in
     either language."""
     if body["guardrail"]["action"] == "blocked":
         return True
@@ -308,7 +308,7 @@ def deployed_environment(region: str) -> dict[str, str]:
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m scripts.evaluate",
-        description="Compare answer models on the evaluation questions, the way Andur answers.",
+        description="Compare answer models on the evaluation questions, the way Svar answers.",
     )
     parser.add_argument(
         "--model", action="append", help="a model name from MODELS; default: all of them"

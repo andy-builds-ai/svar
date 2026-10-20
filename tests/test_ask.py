@@ -81,7 +81,7 @@ def test_request_is_a_json_post_with_the_key_in_its_own_header() -> None:
 
 
 def test_the_language_goes_in_the_body_only_when_given() -> None:
-    """Without it Andur answers in English; the script never guesses a language."""
+    """Without it Svar answers in English; the script never guesses a language."""
     german = ask.build_request(ASK_URL, KEY, "Wie?", "quillmoor", "de")
     assert isinstance(german.data, bytes)
     assert json.loads(german.data) == {

@@ -1,4 +1,4 @@
-"""The Andur question handler: one Lambda function behind a Function URL."""
+"""Svar's question handler: one Lambda function behind a Function URL."""
 
 import json
 import os

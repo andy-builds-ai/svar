@@ -1,9 +1,9 @@
 """Add a workspace's key, change its plan, or remove a workspace: its key, budget,
 documents and vectors.
 
-No customer is named in the repository. A workspace exists in AWS: a key under the
+No workspace is named in the stack's code. A workspace exists in AWS: a key under the
 stack output ``ApiKeyParameterPath``, documents under ``workspaces/<name>/`` in the
-documents bucket, and for a paying customer a plan in the key's budget item. This
+documents bucket, and, for a key on a plan, the plan in the key's budget item. This
 script adds the key and the plan, changes the plan, and removes all of it again.
 """
 
@@ -228,7 +228,7 @@ def workspace_budgets(dynamodb: Any, table: str, workspace: str) -> dict[str, di
     """Every budget item of ``workspace``, by key hash, and not one of another workspace.
 
     A scan reads the whole table; it holds one item per key, on demand, and this runs when
-    a customer leaves. An item preset by hand carries no workspace until its first
+    a workspace is removed. An item preset by hand carries no workspace until its first
     question, so it is found only by the current key's hash (`read_budget`).
     """
     request: dict[str, Any] = {

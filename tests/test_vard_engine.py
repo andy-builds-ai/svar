@@ -34,8 +34,8 @@ class Scripted:
 
 
 def support_inbox(tickets: dict[str, str], sent: list[str]) -> Responsibility:
-    """A tiny second responsibility, a software firm's support inbox: read a ticket, send a
-    reply only with a person's approval, never delete, close to end."""
+    """A tiny second responsibility, a support inbox: read a ticket, send a reply only with a
+    person's approval, never delete, close to end."""
 
     def schema(*required: str) -> dict[str, Any]:
         return {

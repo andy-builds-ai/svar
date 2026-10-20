@@ -114,8 +114,8 @@ def count_unknown_read(now: float) -> None:
     """Allow one more read for a workspace this instance holds no key for, or refuse (503).
 
     At most `UNKNOWN_KEY_READS` every `KEY_RELOAD_MIN_SECONDS`: a stream of invented
-    names must not spend the account's Parameter Store reads, which real customers'
-    first reads need too. A key in the cache never comes here.
+    names must not spend the account's Parameter Store reads, which the workspaces need
+    for their first reads too. A key in the cache never comes here.
     """
     _unknown_reads[:] = [at for at in _unknown_reads if now - at < KEY_RELOAD_MIN_SECONDS]
     if len(_unknown_reads) >= UNKNOWN_KEY_READS:

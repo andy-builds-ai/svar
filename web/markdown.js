@@ -1,4 +1,4 @@
-/* Ask Andur — the little Markdown an answer may carry.
+/* Svar — the little Markdown an answer may carry.
  *
  * The answering model writes **bold** and lists now and then. Shown raw, the
  * asterisks stand in the text; so this file understands exactly three things

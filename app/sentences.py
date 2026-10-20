@@ -5,7 +5,7 @@ from typing import TypeVar
 
 T = TypeVar("T")
 
-#: The two languages Andur speaks: the one the visitor's page is set to. A request
+#: The two languages Svar speaks: the one the visitor's page is set to. A request
 #: names it in the body field "language"; a missing or unknown one means English.
 LANGUAGES = ("en", "de")
 

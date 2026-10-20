@@ -1698,7 +1698,7 @@ DEPLOYED_KEY_FUNCTION_IDS = {
 
 
 def test_the_stack_creates_no_workspace_key(template: Template) -> None:
-    """Keys come from `python -m scripts.workspace add`; no customer is named in the code.
+    """Keys come from `python -m scripts.workspace add`; no workspace is named in the code.
     The custom resources left are the deploy drain, which waits and touches nothing, and
     the copier that puts web/ into the site bucket."""
     custom = sorted(

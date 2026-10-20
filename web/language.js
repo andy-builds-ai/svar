@@ -1,7 +1,7 @@
-/* Ask Andur — the two languages of the page.
+/* Svar — the two languages of the page.
  *
  * Every word the page says itself is in TEXTS, once in English and once in
- * German. Andur speaks the visitor's language, not the company's: the page
+ * German. Svar speaks the visitor's language, not the company's: the page
  * starts in German when the browser's language begins with "de" and in
  * English otherwise, a switch in the corner changes it, and the choice is
  * kept in the browser like the workspace. app.js sends the language with every

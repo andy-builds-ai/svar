@@ -280,8 +280,8 @@ def stale_keys(
 ) -> list[str]:
     """Objects that no local document produces any more, inside `compared_workspaces`.
 
-    A workspace that is not compared is never touched, so a folder with one customer in it
-    cannot take every other customer's documents for stale — nor delete them with
+    A workspace that is not compared is never touched, so a folder with one company in it
+    cannot take every other company's documents for stale — nor delete them with
     ``--delete``.
     """
     documents = list(documents)
