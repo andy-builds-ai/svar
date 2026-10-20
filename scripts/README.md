@@ -921,8 +921,12 @@ model's price in `infra/answer_models.py`. If what the run has spent plus that
 would pass the limit, the call is not made: the tables and `--out` are written
 and the run ends with exit code 2. A call that fails keeps its most counted,
 since AWS may have billed it. Claude Sonnet 4.6 is last in the table, so the
-cheaper models are measured first. Failed calls, a missing login or permission
-and `--out` are handled as in `tool_probe`.
+cheaper models are measured first. A missing login or permission stops the run
+the same way, with the cases measured so far kept. A request Bedrock refuses
+as sent fails its case and is a result; any other failed call fails the run
+with exit code 2, as in `tool_probe`. `--region` takes the models and prices
+`infra/answer_models.py` gives that region: Frankfurt by default, Ireland with
+`--region eu-west-1`; a region without a table there is refused.
 
 ## rehearsal — a new business, set up and measured, step by step
 

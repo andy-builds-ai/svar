@@ -398,3 +398,66 @@ def test_a_cost_limit_that_is_no_amount_above_zero_is_refused(
     with pytest.raises(SystemExit) as stop:
         probe.main(["--max-usd", amount])
     assert stop.value.code == 2 and "no amount above 0" in capsys.readouterr().err
+
+
+def test_a_reply_cut_off_at_max_tokens_says_so(cases: dict[str, dict[str, Any]]) -> None:
+    cut = engine.Outcome(ended=engine.ANSWERED, steps=1, stop_reason="max_tokens")
+    assert "cut off at 2048 tokens" in probe.judge(cases["p1"], cut)["why"]
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (lambda data: data.update(cases=[]), "no cases"),
+        (lambda data: data["cases"][0]["purchase_orders"][0].pop("order_number"), "its number"),
+        (lambda data: data["cases"][0]["delivery_note"].pop("order_number"), "its number"),
+    ],
+    ids=["empty", "order-without-number", "note-without-order-field"],
+)
+def test_a_file_that_would_fail_after_paying_is_refused_before(
+    tmp_path: Path, change: Any, message: str
+) -> None:
+    data = json.loads(probe.CASES_FILE.read_text(encoding="utf-8"))
+    change(data)
+    path = tmp_path / "cases.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        probe.load_cases(path)
+
+
+def test_another_region_measures_its_own_models_at_its_own_prices(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    from infra.answer_models import ANSWER_MODELS
+
+    monkeypatch.setattr(probe, "model_client", lambda region: Clerk(loaded[1]))
+    nova = next(m for m in ANSWER_MODELS if m.name == "Nova Pro")
+    assert probe.main(["--region", "eu-west-1", "--model", "Nova Pro"]) == 0
+    case_cost = 3 * (1000 * Decimal(nova.input_per_1k) + 100 * Decimal(nova.output_per_1k)) / 1000
+    assert f"| p1 | yes | 3 | 0 | {case_cost:.5f} |" in capsys.readouterr().out
+    assert probe.main(["--region", "eu-west-1", "--model", "gpt-oss-120b"]) == 2
+    assert probe.main(["--region", "eu-north-1"]) == 2
+    assert "has no models" in capsys.readouterr().err
+
+
+def test_a_login_that_runs_out_mid_run_keeps_the_paid_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    from botocore.exceptions import ClientError
+
+    class RunsOut(Clerk):
+        def converse(self, **request: Any) -> dict[str, Any]:
+            if len(self.request_bytes) == 6:
+                raise ClientError({"Error": {"Code": "ExpiredToken", "Message": "x"}}, "Converse")
+            return super().converse(**request)
+
+    out = tmp_path / "receiving.json"
+    assert run_main(monkeypatch, RunsOut(loaded[1]), "--out", str(out)) == 2
+    assert "AWS login is missing or expired" in capsys.readouterr().err
+    rows = json.loads(out.read_text(encoding="utf-8"))["runs"][probe.MODELS[0].name]
+    assert [(r["id"], r["passed"]) for r in rows] == [("p1", True), ("p2", True), ("p3", False)]

@@ -81,8 +81,9 @@ class Outcome:
     ended: str = STEP_LIMIT
     steps: int = 0
     calls: list[Call] = field(default_factory=list)
-    #: The text of the model's last reply.
+    #: The text of the model's last reply, and Bedrock's reason it stopped there.
     text: str = ""
+    stop_reason: str | None = None
     #: `usage` of every model call, in order.
     usage: list[dict[str, int]] = field(default_factory=list)
 
@@ -163,6 +164,7 @@ def run(
         )
         outcome.steps += 1
         outcome.usage.append(dict(response.get("usage", {})))
+        outcome.stop_reason = response.get("stopReason")
         content = response.get("output", {}).get("message", {}).get("content") or []
         outcome.text = "\n".join(b["text"] for b in content if isinstance(b.get("text"), str))
         uses = [block["toolUse"] for block in content if "toolUse" in block]

@@ -14,7 +14,8 @@ from vard.engine import Level, Responsibility, Tool
 #: The kinds of discrepancy `report_discrepancies` takes.
 KINDS = ("wrong_item", "wrong_quantity", "missing_item", "extra_item", "wrong_unit")
 
-#: The tools that close a check; exactly one of them ends it.
+#: The tools that close a check. The loop ends after the reply that called one; a check is
+#: closed rightly when exactly one of them ran.
 CLOSING = ("report_discrepancies", "report_match", "hand_off")
 
 #: Fetching the note and the order and reporting take three steps; the rest is room for a

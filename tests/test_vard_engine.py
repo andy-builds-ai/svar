@@ -234,3 +234,9 @@ def test_the_loop_knows_nothing_of_aws_or_receiving() -> None:
     text = open(source, encoding="utf-8").read()
     for word in ("boto", "infra", "scripts", "delivery", "purchase", "receiving"):
         assert word not in text
+
+
+def test_the_reason_the_last_reply_stopped_is_kept() -> None:
+    cut = {**reply({"text": "Ich prüfe gerade"}), "stopReason": "max_tokens"}
+    outcome = engine.run(Scripted([cut]), "m", support_inbox({}, []), "x")
+    assert (outcome.ended, outcome.stop_reason) == (engine.ANSWERED, "max_tokens")

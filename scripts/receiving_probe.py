@@ -6,8 +6,9 @@ purchase order it names, compare them and report to a person, who decides. Each 
 responsibility (`vard/receiving.py`); the documents come from the case, nothing goes to a real
 system. Measured per model and case: every discrepancy found, none made up, the right closing
 tool, the invalid tool calls, the steps, the cost and the time. No guardrail, no knowledge base:
-only the model, in ``--region``. ``--max-usd`` is a hard limit: a call that could take the run
-past it is not made.
+only the model, in ``--region`` or behind an EU profile, with the models and prices
+`infra/answer_models.py` gives that region. ``--max-usd`` is a hard limit: a call that could take
+the run past it is not made.
 """
 
 import argparse
@@ -21,7 +22,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from infra.answer_models import FRANKFURT_MODELS, AnswerModel
+from infra.answer_models import FRANKFURT_MODELS, AnswerModel, region_models
 from scripts import utf8_output
 from scripts.aws import AwsProblem, error_code, explain, is_login_problem
 from scripts.evaluate import stays_in_the_eu
@@ -37,7 +38,7 @@ MODELS = FRANKFURT_MODELS
 #: A report of three discrepancies, and the reasoning gpt-oss writes before it, must fit.
 MAX_TOKENS = 2048
 
-#: Twice what twelve cases of three steps were reckoned to cost all eleven models (0.71 USD,
+#: About twice what twelve cases of three steps were reckoned to cost all eleven models (0.71 USD,
 #: docs/decisions.md); the paid run sets its own with --max-usd.
 DEFAULT_MAX_USD = Decimal("1.50")
 
@@ -62,6 +63,8 @@ def load_cases(path: Path) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """The companies and the cases, checked for what the loop and the judging read."""
     data = json.loads(path.read_text(encoding="utf-8"))
     companies, cases = data["companies"], data["cases"]
+    if not cases:
+        raise ValueError("the file holds no cases")
     ids = [case["id"] for case in cases]
     if len(set(ids)) != len(ids):
         raise ValueError(f"two cases share an id: {ids}")
@@ -69,6 +72,9 @@ def load_cases(path: Path) -> tuple[dict[str, str], list[dict[str, Any]]]:
         name, note = case["id"], case["delivery_note"]
         if case["company"] not in companies:
             raise ValueError(f"{name}: unknown company {case['company']!r}")
+        numbers = [note["note_number"], *(o.get("order_number") for o in case["purchase_orders"])]
+        if not (all(isinstance(n, str) and n for n in numbers) and "order_number" in note):
+            raise ValueError(f"{name}: every document carries its number, a note its order's")
         if note["note_number"] not in case["message"]:
             raise ValueError(f"{name}: the message must name the delivery note")
         for document in (note, *case["purchase_orders"]):
@@ -177,6 +183,9 @@ def matches(expected: Mapping[str, Any], given: tuple[str, str]) -> bool:
     )
 
 
+#: Bedrock's stopReason of a reply cut off at maxTokens.
+CUT_OFF = "max_tokens"
+
 ENDINGS = {
     engine.ANSWERED: "answered without a closing tool",
     engine.STEP_LIMIT: f"reached the step limit of {receiving.MAX_STEPS}",
@@ -193,8 +202,15 @@ def judge(case: Mapping[str, Any], outcome: engine.Outcome) -> dict[str, Any]:
     made_up = sorted(g for g in given if not any(matches(e, g) for e in case["findings"]))
     invalid = [call.name for call in outcome.invalid]
     why = []
-    if not closed_right:
-        why.append(f"closed with {' and '.join(names)}" if names else ENDINGS[outcome.ended])
+    if names and not closed_right:
+        why.append(f"closed with {' and '.join(names)}")
+    elif not names:
+        cut_off = outcome.ended == engine.ANSWERED and outcome.stop_reason == CUT_OFF
+        why.append(
+            f"cut off at {MAX_TOKENS} tokens without a closing tool"
+            if cut_off
+            else ENDINGS[outcome.ended]
+        )
     if missed:
         why.append("missed " + ", ".join(f"{e['items'][0]} {e['kinds'][0]}" for e in missed))
     if made_up:
@@ -242,6 +258,7 @@ def run_case(
     return {
         **marks,
         "ended": outcome.ended,
+        "stop_reason": outcome.stop_reason,
         "calls": [dataclasses.asdict(call) for call in outcome.calls],
         "text": outcome.text,
     }
@@ -253,7 +270,8 @@ def run_model(
     companies: Mapping[str, str],
     cases: Sequence[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """The rows of one model, and why the run stopped at the cost limit, if it did."""
+    """The rows of one model, and why the run stopped, if it did: at the cost limit, or for a
+    missing login or permission. The rows before the stop are kept; they are paid for."""
     meter.model = model
     rows: list[dict[str, Any]] = []
     for case in cases:
@@ -261,10 +279,11 @@ def run_model(
         stopped = None
         try:
             marks = run_case(meter, model, companies, case)
-        except CostLimitReached as limit:
-            stopped = str(limit)
-            marks = {"passed": False, "why": f"stopped: {limit}"}
-            print(f"{model.name} {case['id']}: stopped, {limit}", file=sys.stderr)
+        except (CostLimitReached, AwsProblem) as stop:
+            where = " at the cost limit" if isinstance(stop, CostLimitReached) else ""
+            stopped = f"stopped{where}: {stop}"
+            marks = {"passed": False, "why": stopped}
+            print(f"{model.name} {case['id']}: {stopped}", file=sys.stderr)
         rows.append(
             {
                 "id": case["id"],
@@ -325,17 +344,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--max-usd", type=usd, default=DEFAULT_MAX_USD)
     args = parser.parse_args(argv)
-    models = [m for m in MODELS if not args.model or m.name in args.model]
-    unknown = set(args.model or []) - {m.name for m in MODELS}
+    if not args.region.startswith("eu-"):
+        print(f"error: {args.region} is not an EU region", file=sys.stderr)
+        return 2
+    try:
+        # The region's own table, so that the limit and the costs count with its prices.
+        table = region_models(args.region).models
+    except KeyError as exc:
+        print(f"error: {exc.args[0]}", file=sys.stderr)
+        return 2
+    models = [m for m in table if not args.model or m.name in args.model]
+    unknown = set(args.model or []) - {m.name for m in table}
     if unknown or not models:
-        print(f"error: unknown model {sorted(unknown)}; known: {[m.name for m in MODELS]}")
+        print(f"error: unknown model {sorted(unknown)}; known: {[m.name for m in table]}")
         return 2
     outside = [m.model_id for m in models if not stays_in_the_eu(m.model_id)]
     if outside:
         print(f"error: these would leave the EU: {outside}", file=sys.stderr)
-        return 2
-    if not args.region.startswith("eu-"):
-        print(f"error: {args.region} is not an EU region", file=sys.stderr)
         return 2
     companies, cases = load_cases(args.cases)
     if args.out:
@@ -358,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if stopped:
                 print_tables(summaries, runs)
-                print(f"error: stopped at the cost limit: {stopped}", file=sys.stderr)
+                print(f"error: {stopped}", file=sys.stderr)
                 return 2
     except AwsProblem as problem:
         print(f"error: {problem}", file=sys.stderr)
