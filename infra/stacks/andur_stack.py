@@ -54,7 +54,7 @@ from infra.stacks.web import (
 
 
 class AndurStack(Stack):
-    """Everything Andur runs on, in one stack."""
+    """Everything Svar runs on, in one stack."""
 
     def __init__(
         self,

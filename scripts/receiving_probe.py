@@ -1,6 +1,6 @@
-"""Which Frankfurt model checks a delivery note against its purchase order cleanly, with tools.
+"""Which model checks a delivery note against its purchase order cleanly, with tools.
 
-Vard, an agent, is to take over the receiving check: fetch the delivery note, fetch the
+Vard is to take over the receiving check: fetch the delivery note, fetch the
 purchase order it names, compare them and report to a person, who decides. Each case in
 `receiving-cases.json` runs through Vard's loop (`vard/engine.py`) with the receiving
 responsibility (`vard/receiving.py`); the documents come from the case, nothing goes to a real

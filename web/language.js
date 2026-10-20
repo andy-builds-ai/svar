@@ -34,8 +34,8 @@ const TEXTS = {
     lead_before: "A demo with ",
     lead_strong: "fictional",
     lead_after:
-      " companies. Each keeps its handbooks, notes and drafts in a vault of its own, and "
-      + "Svar answers from one vault at a time. Every answer comes with the passages it was "
+      " companies. Each keeps its handbooks, notes and drafts in a workspace of its own, and "
+      + "Svar answers from one workspace at a time. Every answer comes with the passages it was "
       + "built from, and every passage says which layer it came from: written by a person, "
       + "produced by a machine, or merely arrived and not yet sorted.",
     language_label: "Language",
@@ -100,11 +100,11 @@ const TEXTS = {
     lead_before: "Eine Demo mit ",
     lead_strong: "erfundenen",
     lead_after:
-      " Betrieben. Jeder hält seine Handbücher, Notizen und Entwürfe in einer eigenen Ablage, "
-      + "und Svar antwortet immer aus einer Ablage. Jede Antwort kommt mit den Textstellen, "
-      + "aus denen sie gebaut wurde, und jede Stelle sagt, aus welcher Schicht sie stammt: von "
-      + "einem Menschen geschrieben, von einer Maschine erzeugt oder nur eingetroffen und noch "
-      + "nicht sortiert.",
+      " Betrieben. Jeder hält seine Handbücher, Notizen und Entwürfe in einem eigenen "
+      + "Arbeitsbereich, und Svar antwortet immer aus einem Arbeitsbereich. Jede Antwort kommt "
+      + "mit den Textstellen, aus denen sie gebaut wurde, und jede Stelle sagt, aus welcher "
+      + "Schicht sie stammt: von einem Menschen geschrieben, von einer Maschine erzeugt oder nur "
+      + "eingetroffen und noch nicht sortiert.",
     language_label: "Sprache",
     access_heading: "Arbeitsbereich und Schlüssel",
     access_note:

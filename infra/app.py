@@ -38,8 +38,8 @@ AndurStack(
     app,
     "AndurStack",
     description=(
-        "Andur: the stack Svar runs on: documents, knowledge base, guardrails, answer function "
-        "and page."
+        "Andur: documents, knowledge base, guardrails, answer function and page, everything "
+        "Svar runs on."
     ),
     answer_model_id=MODELS.answer_model_id,
     topic_model_id=MODELS.topic_model_id,

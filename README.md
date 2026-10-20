@@ -10,14 +10,13 @@ defined as code (CDK in Python), and nothing in it bills a monthly base fee.
 
 Svar is one part of a larger system called Andur. Andur is meant to grow
 into a secretariat, stage by stage, with a person deciding at every stage.
-Its second part is Vard, an agent ([Vard](#vard)); more will follow. Andur's
-main stack runs on AWS in Frankfurt, and a company's documents stay in
-Germany. The stack, its resources and the code carry Andur's name
-(`AndurStack`, `X-Andur-Key`, `andur-*`).
+Its second part is Vard, an agent ([Vard](#vard)); more will follow. The
+stack, its resources and the code carry Andur's name (`AndurStack`,
+`X-Andur-Key`, `andur-*`).
 
-Two stacks run from the same code. The main stack is in Frankfurt
-(`eu-central-1`): documents, vectors, models, questions and answers stay in
-Germany. The second stack, in Ireland (`eu-west-1`) behind CloudFront, is
+Two stacks run from the same code. Andur's main stack runs on AWS in
+Frankfurt (`eu-central-1`): a company's documents, the vectors, models,
+questions and answers stay in Germany. The second stack, in Ireland (`eu-west-1`) behind CloudFront, is
 the comparison track; it holds only the two fictional demo companies of
 `knowledge/` and is where models and checks are measured against each other.
 Both were last deployed on 16.10.2026.
@@ -80,7 +79,7 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
 
 ## Decisions and what each one costs
 
-96 decisions are written down with their dates and reasons in
+97 decisions are written down with their dates and reasons in
 [docs/decisions.md](docs/decisions.md). The ones that shape the system:
 
 - **Nothing with a monthly base fee** ([decisions.md:69](docs/decisions.md)):
@@ -98,7 +97,7 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
   daily quota for a key on a plan. The price: whoever holds a key can ask
   until it is spent; a leaked demo key is a leak of ten questions.
 - **In Frankfurt the function's URL is the address, without CloudFront**
-  ([decisions.md:971](docs/decisions.md)): no setting keeps CloudFront's edge
+  ([decisions.md:978](docs/decisions.md)): no setting keeps CloudFront's edge
   locations inside Germany. The price: no domain of its own and no WAF, so
   a flood is capped only by the number of executions Lambda allows at once.
   The stack is built to reserve 10 for the function there, 5 for questions
@@ -108,23 +107,23 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
   the account's limit is the cap
   ([docs/operating.md](docs/operating.md#another-region)).
 - **In Frankfurt a model in the region checks the topics**
-  ([decisions.md:686](docs/decisions.md), [:724](docs/decisions.md)),
+  ([decisions.md:693](docs/decisions.md), [:731](docs/decisions.md)),
   because the one guardrail tier that reads German needs a profile that
   checks in six regions. The price: a model call per check, 0.30 USD for
   957 checks (below).
 - **The grounding check withholds at 0.8 in Frankfurt**
-  ([decisions.md:785](docs/decisions.md)), the threshold that withheld the
+  ([decisions.md:792](docs/decisions.md)), the threshold that withheld the
   most made-up answers without withholding a right answer to German
   documents. The price: it withholds right German answers to English
   documents. Checking those in English was measured and not built, because
   it also let made-up answers through
-  ([decisions.md:1017](docs/decisions.md)).
+  ([decisions.md:1024](docs/decisions.md)).
 - **Measured through the function's own code path**
-  ([decisions.md:1123](docs/decisions.md)), against the deployed knowledge
+  ([decisions.md:1130](docs/decisions.md)), against the deployed knowledge
   base and the deployed function's settings. The price: every measurement
   calls real models and costs real money, and one run is one sample, since
   the models do not repeat themselves even at temperature 0
-  ([decisions.md:360](docs/decisions.md)).
+  ([decisions.md:367](docs/decisions.md)).
 
 ## Measured
 
@@ -137,11 +136,11 @@ function's own code with the deployed function's settings and knowledge
 base, and its guardrails or copies of them that a script creates and
 deletes; `topic_probe` and `grounding_probe` are also run before a deploy,
 to measure a change before it goes live
-([decisions.md:569](docs/decisions.md)). The numbers below were measured
+([decisions.md:576](docs/decisions.md)). The numbers below were measured
 after the deploy of 14.10.2026 in Frankfurt and of 16.10.2026 in Ireland,
 against the deployed stack. Frankfurt's deploy of 16.10.2026 gave each
 model its own prompt wording and kept Qwen3 235B's as it was
-([decisions.md:945](docs/decisions.md)). How each works:
+([decisions.md:952](docs/decisions.md)). How each works:
 [scripts/README.md](scripts/README.md).
 
 ### Frankfurt, 14.10.2026, Qwen3 235B
@@ -153,7 +152,7 @@ model its own prompt wording and kept Qwen3 235B's as it was
 | German questions on German documents | 26 of 26 right; all 20 answerable ones cite the expected document |
 | Questions built to tempt the model | 36 of 42 right; 0 of 34 answers added a figure of their own; 29 of 29 German questions answered in German; 8 of 8 advice questions refused |
 | Denied topics, three runs, 957 checks | every one of 45 denied questions, 32 denied answers and 11 advice questions refused; none of 87 harmless questions, 87 harmless answers and 57 questions of the evaluation sets refused |
-| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md:800](docs/decisions.md); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
+| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md:807](docs/decisions.md); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
 | Median time per question, retrieval to cost line, from a laptop in Germany | 3.0 s (English), 2.3 s (German on English documents), 2.8 s (German on German documents) |
 
 **Setting up a new workspace**, measured on 07.10.2026 with a fictional craft
@@ -261,12 +260,12 @@ Prices, the counter, the page and how each number was taken:
 
 ## Vard
 
-Vard is an agent, the second part of Andur. He takes on one responsibility
-after another, works on each with tools, and a person decides what happens.
-His first is the receiving check: he fetches a delivery note that has come
-in, fetches the purchase order it names, compares them and reports what
-differs. A support inbox, tried on the made-up software company Quillmoor, is
-planned as the next.
+Vard is an agent. He takes on one responsibility after another, works on
+each with tools, and a person decides what happens. His first is the
+receiving check: he fetches a delivery note that has come in, fetches the
+purchase order it names, compares them and reports what differs. A support
+inbox, to be tried on the made-up software company Quillmoor, is planned as
+the next.
 
 The loop is `vard/engine.py`: a model calls tools turn after turn until a
 tool that closes the task has run, it answers without a tool, or the step
@@ -279,7 +278,7 @@ text, the tools and the step limit (`vard/receiving.py`). The receiving check
 has five tools, all allowed, and none of them books.
 
 **Measured on 20.10.2026 in Frankfurt**, twelve made-up cases, two runs of
-every model ([decisions.md:1207](docs/decisions.md)):
+every model ([decisions.md:1216](docs/decisions.md)):
 
 | Model | Passed, of 24 | USD, both runs | Median seconds per case |
 |---|---|---|---|
@@ -294,12 +293,12 @@ every model ([decisions.md:1207](docs/decisions.md)):
 The runs took 11 min 56 s and 8 min 34 s and cost 0.488 and 0.490 USD for
 all eleven models. A model's result moved by up to two cases between the
 runs at the same settings, so twelve cases do not tell the leaders apart. The
-four Frankfurt models at 23 of 24 are the candidates; the next stage picks
-among them with more and harder cases. Claude Sonnet 4.6 and Nova Pro run behind the
+four Frankfurt models at 23 of 24 are the candidates; the next build of Vard
+picks among them with more and harder cases. Claude Sonnet 4.6 and Nova Pro run behind the
 EU profile, which routes to every EU region, and stand as a comparison only.
 
-**What Vard does not do yet.** He is a measurement. Nothing of him is
-deployed, nothing starts him when a delivery note comes in, he remembers no
+**What Vard does not do yet.** So far he is only measured, not in
+operation. Nothing of him is deployed, nothing starts him when a delivery note comes in, he remembers no
 correction, and he books nothing. The documents come from the case file, not
 from a real system.
 

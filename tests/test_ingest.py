@@ -951,10 +951,10 @@ def test_a_folder_with_one_workspace_never_prunes_the_others(
 ) -> None:
     """One company's own folder with --delete and no --workspace: only that company is pruned."""
     s3, _ = uploaded_bucket(tmp_path / "demo")
-    customer = tmp_path / "customer"
-    add_document(customer, "third", "human", name="c.md")
+    company = tmp_path / "company"
+    add_document(company, "third", "human", name="c.md")
     s3.objects["workspaces/third/human/gone--01-gone.md"] = b"old"
-    assert run_main_against(s3, ["--source", str(customer), "--delete"], monkeypatch) == 0
+    assert run_main_against(s3, ["--source", str(company), "--delete"], monkeypatch) == 0
     assert "Deleted 1 object(s) that are no longer in the folder:" in capsys.readouterr().out
     assert "workspaces/third/human/gone--01-gone.md" not in s3.objects
     assert "workspaces/pellwick/inbox/old.md" in s3.objects

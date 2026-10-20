@@ -244,7 +244,7 @@ stored in Windows-1252 or UTF-16 go up converted to UTF-8, and `--check`
 names each one ([Encodings](../scripts/README.md#encodings)). Details,
 output and exit codes: [scripts/README.md](../scripts/README.md#workspace--adding-and-removing-a-workspace).
 
-## Asking it
+## Asking Svar
 
 ```bash
 python -m scripts.ask "How do I export project data?" --workspace quillmoor

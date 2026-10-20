@@ -725,7 +725,7 @@ def test_one_open_address_on_port_80_fails(tmp_path: Path) -> None:
 def test_port_80_that_takes_the_connection_and_ends_it_unanswered_is_open(
     tmp_path: Path, ended: Any
 ) -> None:
-    """The request had arrived, and a client's key would have with it: only a refusal, or a
+    """The request had arrived, and a caller's key would have with it: only a refusal, or a
     timeout before the connection is taken, counts as closed."""
     mixed = {TWO[0]: ConnectionRefusedError(), TWO[1]: ended()}
     send = sender(mixed, PAGE, (401, dict(SECURITY_HEADERS)))

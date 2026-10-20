@@ -237,7 +237,7 @@ def plain_http(
     the step fails.
 
     A connection taken and then reset, closed or left silent without an answer is open: the
-    request, and a client's key with it, had already arrived unencrypted. A timeout before
+    request, and a caller's key with it, had already arrived unencrypted. A timeout before
     the connection is taken counts as closed, but the summary names it apart: a network that
     blocks port 80 on this computer's side looks the same from here as a closed port."""
 

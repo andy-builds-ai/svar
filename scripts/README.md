@@ -11,9 +11,9 @@ Eleven commands, all run from the repository root:
 | `python -m scripts.workspace` | Adds a workspace's key, puts it on a plan, or removes a workspace: key, budget items, documents and vectors. |
 | `python -m scripts.topic_probe` | Measures the denied topics against 132 fixed questions and 119 fixed answers, each after its frame, the answers without their citations: which harmless ones they block and which they should block slip through. |
 | `python -m scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
-| `python -m scripts.control_eval` | Asks 42 fixed questions of each Frankfurt candidate the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
-| `python -m scripts.tool_probe` | Gives each Frankfurt candidate six orders to record with one tool: whether it fills the tool cleanly and asks back instead of guessing. |
-| `python -m scripts.receiving_probe` | Lets each Frankfurt candidate check twelve delivery notes against their purchase orders through Vard's tool loop: whether it finds every discrepancy, makes none up and closes with the right tool. |
+| `python -m scripts.control_eval` | Asks 42 fixed questions of every model of `FRANKFURT_MODELS` the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
+| `python -m scripts.tool_probe` | Gives every model of `FRANKFURT_MODELS` six orders to record with one tool: whether it fills the tool cleanly and asks back instead of guessing. |
+| `python -m scripts.receiving_probe` | Lets every model of `FRANKFURT_MODELS` check twelve delivery notes against their purchase orders through Vard's tool loop: whether it finds every discrepancy, makes none up and closes with the right tool. |
 | `python -m scripts.rehearsal` | Sets up a new workspace on the deployed stack with the same commands as any other, runs the measurements against it, and times every step. |
 
 ## What they need
@@ -885,11 +885,11 @@ exit code 2. A missing login or permission stops it at once.
 
 ```bash
 python -m scripts.receiving_probe --model "Qwen3 235B A22B 2507" --out receiving.json
-python -m scripts.receiving_probe --max-usd 1.00     # every Frankfurt candidate, at most 1 USD
+python -m scripts.receiving_probe --max-usd 1.00     # every model of FRANKFURT_MODELS, at most 1 USD
 ```
 
-Vard is an agent, the second part of Andur: one responsibility after another,
-a person deciding. His first is the receiving check. A model works in Vard's loop (`vard/engine.py`)
+Vard takes on one responsibility after another, and a person decides; his
+first is the receiving check. A model works in his loop (`vard/engine.py`)
 with the receiving responsibility (`vard/receiving.py`) and five tools, all
 allowed: `get_delivery_note`, `get_purchase_order`, and the three that close
 the check, `report_discrepancies`, `report_match` and `hand_off`. There is no
@@ -952,7 +952,7 @@ this order, each step timed on its own:
    connection, or lets it time out before taking it, is closed, a timeout
    named apart, since a block on this computer's side looks the same; one
    that takes the connection and then breaks it off, closes it or stays silent
-   without an answer fails the step, since the request, and a client's key
+   without an answer fails the step, since the request, and a caller's key
    with it, had already arrived unencrypted;
 2. **setup** — `ingest --check`, `workspace add` (its stdout, the key, is
    thrown away; the key stays in Parameter Store), `ingest`, `retrieve` (every

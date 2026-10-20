@@ -1,9 +1,10 @@
 # AGENTS.md
 
-Svar is a chatbot: it answers questions from a company's own documents, on
-AWS. Vard is an agent (`vard/`), measured, not deployed. Both are parts of a
+Svar is a chatbot that answers questions from a company's own documents.
+Vard is an agent (`vard/`), measured, not deployed. Both are parts of a
 larger system called Andur, which is meant to grow into a secretariat, stage
-by stage. The stack is defined as code (CDK in Python). `README.md` says what
+by stage, with a person deciding at every stage. The stack runs on AWS and
+is defined as code (CDK in Python). `README.md` says what
 it does, `docs/architecture.md` how it is built, `scripts/README.md` how the
 scripts work.
 

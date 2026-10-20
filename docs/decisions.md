@@ -335,6 +335,13 @@ carries a sentence, which Lambda's own 429 does not, so the page shows it
 alone. The sentence asks the customer to get in touch with their contact
 person, in German or English like every other.
 
+**2026-10-20 — A full quota sends the reader to whoever gave the key.** The
+operator decided. The sentence of the entry above named a contact person; it
+now reads "Please ask whoever gave you this key for more." ("Bitten Sie den,
+der Ihnen diesen Schlüssel gegeben hat, um mehr."), as the page's line for a
+spent demo key sends the reader to whoever sent the link. Nothing is sold, so
+there is no contact person to name.
+
 **2026-10-01 — A plan item that cannot be counted answers nothing.** An
 unknown plan and a count that is not a number are a 500 with a log line,
 never a question that nothing counted. A missing count is the start of its
@@ -1167,7 +1174,7 @@ Pellwick's half of the set beside it, which `control_eval` alone still does.
 answer.** The operator decided: an address that takes the connection on port
 80 and then closes, resets or breaks it off without an answer fails
 `https-only`; a refusal (`ConnectionRefusedError`) and a timeout stay closed.
-Once the server has taken the connection, a client's key would already have
+Once the server has taken the connection, a caller's key would already have
 arrived unencrypted. For that reason the operator agreed the same day that a
 timeout counts as closed only before the connection is taken: an address that
 takes it and stays silent is open too. A timeout is named apart in the
@@ -1189,11 +1196,13 @@ brings the task text, the tools and the step limit, so a second one, such as
 a support inbox, to be tried on the made-up software company Quillmoor, needs
 no change to it; a test runs a made-up one. The receiving check is the first,
 and no tool books: a person decides. `scripts/receiving_probe.py` measures it on twelve made-up
-cases per Frankfurt model, and its `--max-usd` makes no call whose most could
-pass the limit. Its default of 1.50 USD is about twice the 0.71 USD reckoned
-for the eleven models at three calls a case, not measured; on the run against
-a stub the requests were 3,684 to 5,508 bytes. Memory of corrections, a
-trigger for new notes and pausing belong to the next stage.
+cases per model of `FRANKFURT_MODELS`, and its `--max-usd` makes no call whose
+most could pass the limit. Its default of 1.50 USD is about twice the 0.71 USD
+reckoned for the eleven models at three calls a case, not measured; on the run
+against a stub the requests were 3,684 to 5,508 bytes. The next build of Vard
+brings a trigger for new delivery notes, memory of corrections and pausing,
+and picks the model among the four candidates of the entry below with more
+and harder cases.
 
 **2026-10-20 — A wrong article may be reported as its two halves.** The
 operator decided after the first paid run: the ordered article reported as
@@ -1204,7 +1213,7 @@ washbasins so. The documents of the case say which number was ordered and
 which delivered; one half alone, or both with their kinds swapped, misses
 the wrong article and counts as made up.
 
-**2026-10-20 — Stage 1 closes with four candidates; Stage 2 picks the model.**
+**2026-10-20 — The first build of Vard closes with four candidates; the next picks the model.**
 The operator decided after two paid runs of `scripts/receiving_probe.py` in
 eu-central-1, both with every model of `FRANKFURT_MODELS`: the first at
 19:06 to 19:18, scored again with the rule above, and the second at 19:57 to
@@ -1234,9 +1243,10 @@ two of the second without a closing tool. Claude Sonnet 4.6 and Nova Pro run
 behind the EU profile, which routes to every EU region; they stand as a
 comparison only, since a company's documents stay in Germany. The four Frankfurt models at 23 of 24 are the
 candidates: Nemotron 3 Super, which passed all 23 cases it answered,
-Devstral 2 123B, MiniMax M2.1 and gpt-oss-20b. Stage 2 picks among them with
-more and harder cases; the loop takes any of them, the model being one
-argument of `vard.engine.run`.
+Devstral 2 123B, MiniMax M2.1 and gpt-oss-20b. The next build of Vard picks
+among them with more and harder cases and brings the trigger, the memory of
+corrections and pausing of the entry above; the loop takes any of them, the
+model being one argument of `vard.engine.run`.
 
 ## Code
 

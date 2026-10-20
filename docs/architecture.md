@@ -2,16 +2,17 @@
 
 Svar is a chatbot: it answers questions from a company's own documents, and
 says where each answer came from. It is one part of a larger system called
-Andur. Vard, an agent and Andur's second part, is not in the stack yet
-(`vard/`, [README](../README.md#vard)).
+Andur. The second part, the agent Vard, is not in the stack yet (`vard/`,
+[README](../README.md#vard)).
 
-A company drops its handbooks, policies and notes into a folder. Andur keeps
-them, and from then on anyone can ask Svar in plain language instead of
+It is shown with made-up companies. Each has its handbooks, policies and
+notes in a folder, and Andur keeps them in a workspace of its own. Whoever
+holds the workspace's key can ask Svar in plain language instead of
 searching. Every answer carries its sources, and every source says which
 layer it came from — written by a person, produced by a machine, or merely
-arrived and not yet sorted. One deployment serves several companies: each
-gets a workspace, and a question asked in one workspace can never be
-answered from another's documents. It is shown with made-up companies.
+arrived and not yet sorted. One deployment serves several companies, and a
+question asked in one workspace can never be answered from another's
+documents.
 
 Runs entirely on AWS, defined as code. One command builds it; one command
 removes it.
