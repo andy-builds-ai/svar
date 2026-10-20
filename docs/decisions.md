@@ -21,7 +21,11 @@ answer model, price table and which guardrails use the EU profile, and
 deploy and the scripts take without `-c region=` or `--region`; the account
 comes from the AWS profile. A switch from Ireland to Frankfurt is that one
 line. The synthesised template of eu-west-1 stayed the same but for the hash
-of the function's code, which now can check the topics with a model.
+of the function's code, which now can check the topics with a model. As of
+20.10.2026 this holds for the stack and `scripts/aws.py`; `scripts/control_eval.py`,
+`scripts/tool_probe.py` and `scripts/rehearsal.py` each carry a `DEFAULT_REGION`
+of their own, `eu-central-1`, the rehearsal because it takes only a region whose
+function is its own address (`scripts/README.md`).
 
 **2026-09-28 — Names that hold for the whole account carry the region.**
 IAM role names and CloudFront policy and origin access control names are
@@ -247,6 +251,9 @@ their own, 10 in 10 seconds per instance across workspaces
 (`WRONG_KEY_READS`): the brake per workspace alone would let wrong keys sent
 round many real workspaces spend the same reads. Over it the cached key
 decides, so a wrong key stays a 401 and a just-changed key waits a few seconds.
+Five instances are Ireland's cap. The Frankfurt stack runs without a reservation
+(2026-10-07), so there up to 10 instances may each read 10 times in 10 seconds:
+10 reads a second, a quarter of the 40.
 
 **2026-09-18 — The key travels in `X-Andur-Key`.** CloudFront signs every
 request to the function URL and overwrites `Authorization` with its own
@@ -374,7 +381,10 @@ applied it everywhere.
 
 **2026-09-17 — The model call is tried once, everything else twice.** A
 converse that timed out may have produced its answer; a second attempt pays
-for the input again.
+for the input again. Two more calls are made once as well: the budget refund,
+since a refund whose answer got lost would take the question back twice, and the
+topic model, which the handler asks again itself (both 2026-10-07; `CLIENT_LIMITS`
+in `app/aws.py`).
 
 **2026-09-28 — A model call AWS turns away is made once more, if it can still
 end before CloudFront gives up.** Claude Haiku 4.5 was turned away with
@@ -415,7 +425,9 @@ of all of them stays under the function's timeout.** A hanging call ends as a
 whatever the number of workspaces: the key is one call (2026-10-02), and the
 guardrail three, the topic checks of the answer (2026-10-05) and the question
 (2026-10-06) and the excerpts; the function's timeout went from 180 to 195
-with the check of the question, which made the sum 189.
+with the check of the question, which made the sum 189. That sum is the one
+behind CloudFront (`aws.worst_case_seconds`); without it, in Frankfurt since
+07.10.2026, it is 190 (the entry of 2026-10-07 on the function's URL).
 
 **2026-09-17 — At most 5 requests at a time.** The cap on the bill matters
 more than keeping a demo reachable; a stranger with five parallel calls can
@@ -490,7 +502,9 @@ signed request to a function URL may not have an unsigned payload.
 **2026-09-17 — CloudFront waits 120 seconds, the function may run 180.** 120
 is the quota without an approved increase. A slower answer reaches the
 browser as a 504 while the function finishes it; cutting the function under
-120 would stop answers that are only slow.
+120 would stop answers that are only slow. Since 06.10.2026 the function may
+run 195 seconds (`ANSWER_TIMEOUT_SECONDS`); the 120 apply only in Ireland, where
+CloudFront stands in front of it.
 
 **2026-09-22 — Security headers on the distribution, with a strict CSP.**
 The page loads its own script and stylesheet and posts to its own origin,
@@ -1045,7 +1059,11 @@ draft instead of versions, since CloudFormation changes it before the
 function and the topic probe measures numbered versions. A Lambda alias with
 a role per published version would also close the windows that remain
 (`docs/operating.md`, *Deploy*), but it moves the function URL that
-CloudFront calls; a step of its own.
+CloudFront calls; a step of its own. Since 06.10.2026 an answer may run 195
+seconds, not 180, and the drain waits 225 (`DEPLOY_DRAIN_SECONDS`, the
+function's timeout plus 30; 210 until then), about four minutes per such
+deploy. It follows two versions in Frankfurt, which has no topic guardrail,
+and three in Ireland.
 
 **2026-09-23 — At most 30 passages.** The grounding source takes at most
 100,000 characters.
