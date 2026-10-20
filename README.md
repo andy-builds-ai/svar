@@ -1,23 +1,28 @@
 # Svar
 
-Svar answers questions from a company's own documents. Every answer comes
-with the passages it was built from, and every passage says whether a person
-wrote it, a machine produced it, or it merely arrived and nobody has sorted
-it yet. One installation serves several companies, and a question asked in
-one company's workspace is never answered from another's documents. It runs
-on AWS, defined as code (CDK in Python), and nothing in it bills a monthly
-base fee. Svar is the name of the page and the product; Andur is the name of
-the system behind it, in identifiers and in the docs.
+Svar is a part of Andur, the chatbot. It answers questions from a company's
+own documents, and every answer shows its sources: the passages it was built
+from, each marked as written by a person, produced by a machine, or merely
+arrived and not sorted yet. It is shown with made-up companies. One
+installation holds several companies, each in a workspace of its own, and a
+question asked in one workspace is never answered from another's documents.
+It runs on AWS, defined as code (CDK in Python), and nothing in it bills a
+monthly base fee.
 
-Two stacks run from the same code. The product is the stack in Frankfurt
+Andur is the system: a secretariat that grows stage by stage, on AWS in
+Frankfurt. Data stays in Germany, and at every stage a person decides. Its
+first parts are Svar and [Vard](#vard), the agent; more will follow. The
+stack, its resources and the code carry Andur's name (`AndurStack`,
+`X-Andur-Key`, `andur-*`).
+
+Two stacks run from the same code. The main stack is in Frankfurt
 (`eu-central-1`): documents, vectors, models, questions and answers stay in
-Germany, and a real customer's documents go there and nowhere else. The
-second stack, in Ireland (`eu-west-1`) behind CloudFront, is the comparison
-track; it holds only the two fictional demo companies of `knowledge/` and is
-where models and checks are measured against each other. Both were last
-deployed on 16.10.2026.
+Germany. The second stack, in Ireland (`eu-west-1`) behind CloudFront, is
+the comparison track; it holds only the two fictional demo companies of
+`knowledge/` and is where models and checks are measured against each other.
+Both were last deployed on 16.10.2026.
 
-![An answer on the Frankfurt page, in German: the question, the answer citing [1], and the sources it rests on, each marked as written by a person](docs/screenshot-answer.png)
+![An answer on Svar's page in Frankfurt, in German: the question, the answer citing [1], and the sources it rests on, each marked as written by a person](docs/screenshot-answer.png)
 
 ## How a question travels
 
@@ -75,25 +80,25 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
 
 ## Decisions and what each one costs
 
-94 decisions are written down with their dates and reasons in
+96 decisions are written down with their dates and reasons in
 [docs/decisions.md](docs/decisions.md). The ones that shape the system:
 
-- **Nothing with a monthly base fee** ([decisions.md:51](docs/decisions.md)):
+- **Nothing with a monthly base fee** ([decisions.md:69](docs/decisions.md)):
   S3 Vectors behind a Bedrock knowledge base instead of a search cluster, so
   an idle month costs cents. The price is control over retrieval: Bedrock
   returned whole documents with Markdown tables under every chunking tried,
   so documents are split at their headings before the upload
-  ([decisions.md:64](docs/decisions.md)).
+  ([decisions.md:82](docs/decisions.md)).
 - **One installation, workspaces kept apart by a metadata filter**
-  ([decisions.md:139](docs/decisions.md)). The price: the separation rests on
+  ([decisions.md:157](docs/decisions.md)). The price: the separation rests on
   a filter in every query, not on separate deployments, so it has to be
   tested and measured, not assumed (see [Privacy](#privacy-and-separation)).
-- **A key is a budget, not a password** ([decisions.md:264](docs/decisions.md)):
+- **A key is a budget, not a password** ([decisions.md:282](docs/decisions.md)):
   ten questions within 48 hours of the first for a demo key, a monthly and a
   daily quota for a key on a plan. The price: whoever holds a key can ask
   until it is spent; a leaked demo key is a leak of ten questions.
 - **In Frankfurt the function's URL is the address, without CloudFront**
-  ([decisions.md:953](docs/decisions.md)): no setting keeps CloudFront's edge
+  ([decisions.md:971](docs/decisions.md)): no setting keeps CloudFront's edge
   locations inside Germany. The price: no domain of its own and no WAF, so
   a flood is capped only by the number of executions Lambda allows at once.
   The stack is built to reserve 10 for the function there, 5 for questions
@@ -103,23 +108,23 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
   the account's limit is the cap
   ([docs/operating.md](docs/operating.md#another-region)).
 - **In Frankfurt a model in the region checks the topics**
-  ([decisions.md:668](docs/decisions.md), [:706](docs/decisions.md)),
+  ([decisions.md:686](docs/decisions.md), [:724](docs/decisions.md)),
   because the one guardrail tier that reads German needs a profile that
   checks in six regions. The price: a model call per check, 0.30 USD for
   957 checks (below).
 - **The grounding check withholds at 0.8 in Frankfurt**
-  ([decisions.md:767](docs/decisions.md)), the threshold that withheld the
+  ([decisions.md:785](docs/decisions.md)), the threshold that withheld the
   most made-up answers without withholding a right answer to German
   documents. The price: it withholds right German answers to English
   documents. Checking those in English was measured and not built, because
   it also let made-up answers through
-  ([decisions.md:999](docs/decisions.md)).
+  ([decisions.md:1017](docs/decisions.md)).
 - **Measured through the function's own code path**
-  ([decisions.md:1105](docs/decisions.md)), against the deployed knowledge
+  ([decisions.md:1123](docs/decisions.md)), against the deployed knowledge
   base and the deployed function's settings. The price: every measurement
   calls real models and costs real money, and one run is one sample, since
   the models do not repeat themselves even at temperature 0
-  ([decisions.md:342](docs/decisions.md)).
+  ([decisions.md:360](docs/decisions.md)).
 
 ## Measured
 
@@ -127,16 +132,16 @@ Five scripts measure the deployed stack: `evaluate` (fixed questions with
 expected facts), `control_eval` (questions built to tempt a model away from
 its sources), `topic_probe --deployed` (the denied topics),
 `grounding_probe` (fixed right and made-up answers against the grounding
-check) and `rehearsal` (a new business set up from nothing). They run the
+check) and `rehearsal` (a new workspace set up from nothing). They run the
 function's own code with the deployed function's settings and knowledge
 base, and its guardrails or copies of them that a script creates and
 deletes; `topic_probe` and `grounding_probe` are also run before a deploy,
 to measure a change before it goes live
-([decisions.md:551](docs/decisions.md)). The numbers below were measured
+([decisions.md:569](docs/decisions.md)). The numbers below were measured
 after the deploy of 14.10.2026 in Frankfurt and of 16.10.2026 in Ireland,
 against the deployed stack. Frankfurt's deploy of 16.10.2026 gave each
 model its own prompt wording and kept Qwen3 235B's as it was
-([decisions.md:927](docs/decisions.md)). How each works:
+([decisions.md:945](docs/decisions.md)). How each works:
 [scripts/README.md](scripts/README.md).
 
 ### Frankfurt, 14.10.2026, Qwen3 235B
@@ -148,10 +153,10 @@ model its own prompt wording and kept Qwen3 235B's as it was
 | German questions on German documents | 26 of 26 right; all 20 answerable ones cite the expected document |
 | Questions built to tempt the model | 36 of 42 right; 0 of 34 answers added a figure of their own; 29 of 29 German questions answered in German; 8 of 8 advice questions refused |
 | Denied topics, three runs, 957 checks | every one of 45 denied questions, 32 denied answers and 11 advice questions refused; none of 87 harmless questions, 87 harmless answers and 57 questions of the evaluation sets refused |
-| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md:782](docs/decisions.md); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
+| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md:800](docs/decisions.md); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
 | Median time per question, retrieval to cost line, from a laptop in Germany | 3.0 s (English), 2.3 s (German on English documents), 2.8 s (German on German documents) |
 
-**Setting up a new business**, measured on 07.10.2026 with a fictional craft
+**Setting up a new workspace**, measured on 07.10.2026 with a fictional craft
 firm and seven German documents: 31 seconds of machine time from checking
 its folder to the first right answer, 3 for its workspace and key, 16 to
 upload and index its documents, 8 for the first question, answered with the
@@ -256,11 +261,12 @@ Prices, the counter, the page and how each number was taken:
 
 ## Vard
 
-Vard is Andur's agent. He takes one responsibility at a time, works on it
-with tools, and a person decides what happens. His first is the receiving
-check: he fetches a delivery note that has come in, fetches the purchase
-order it names, compares them and reports what differs. A support inbox for
-software firms is planned as the next.
+Vard is a part of Andur, the agent. He takes on one responsibility after
+another, works on each with tools, and a person decides what happens. His
+first is the receiving check: he fetches a delivery note that has come in,
+fetches the purchase order it names, compares them and reports what differs.
+A support inbox, tried on the made-up software company Quillmoor, is planned
+as the next.
 
 The loop is `vard/engine.py`: a model calls tools turn after turn until a
 tool that closes the task has run, it answers without a tool, or the step
@@ -273,7 +279,7 @@ text, the tools and the step limit (`vard/receiving.py`). The receiving check
 has five tools, all allowed, and none of them books.
 
 **Measured on 20.10.2026 in Frankfurt**, twelve made-up cases, two runs of
-every model ([decisions.md:1189](docs/decisions.md)):
+every model ([decisions.md:1207](docs/decisions.md)):
 
 | Model | Passed, of 24 | USD, both runs | Median seconds per case |
 |---|---|---|---|
@@ -322,7 +328,7 @@ pytest -q                                  # 1,521 tests, no AWS needed; one is 
 ruff check && ruff format --check
 ```
 
-The commands below build the product stack in Frankfurt. Without
+The commands below build the main stack, in Frankfurt. Without
 `-c region=eu-central-1` and `--region eu-central-1`, and with `eu-west-1` in
 the `cdk bootstrap` line, the same commands build the comparison stack in
 Ireland.
@@ -344,7 +350,7 @@ to get a key, what every field and status means, and how to ask with curl:
 [docs/operating.md](docs/operating.md) and [app/README.md](app/README.md).
 
 A walkthrough of one question, recorded on 28.09.2026 on the Ireland stack
-with Nova Pro, before the page was named Svar:
+with Nova Pro, when the page was still called Ask Andur:
 
 ![Walkthrough: typing a question about the guarantee on painted windows, asking it, and the answer with four sources and its cost line](docs/walkthrough.gif)
 
@@ -370,6 +376,7 @@ checked the results.
 
 ## Licence
 
+This repository is a public portfolio piece; nothing in it is sold.
 Proprietary, all rights reserved: using, copying or passing on the code needs
 the author's written permission, see [LICENSE](LICENSE). The demo documents
 in `knowledge/` are CC0 ([knowledge/README.md](knowledge/README.md)).

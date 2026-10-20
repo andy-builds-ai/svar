@@ -42,10 +42,10 @@ per question on average for the English set, 0.0013 for German questions on
 English documents and 0.0021 for German questions on German documents,
 counting the questions with a known cost; 14 of the 88 were withheld by the
 grounding check and carry `cost_usd: null`. Three runs of the topic check by
-gpt-oss-120b, 957 checks, cost 0.30 USD. A rehearsal of a new business with
+gpt-oss-120b, 957 checks, cost 0.30 USD. A rehearsal of a new workspace with
 all its measurements cost 0.70 USD (at most 0.75), from the cost lines of
 the measurements; see
-[scripts/README.md](../scripts/README.md#rehearsal--a-new-business-set-up-and-measured-step-by-step).
+[scripts/README.md](../scripts/README.md#rehearsal--a-new-workspace-set-up-and-measured-step-by-step).
 
 In `eu-central-1` on 14.10.2026, after that day's deploy, the same three sets
 with Qwen3 235B: 0.0024 USD per question on average for the English set,

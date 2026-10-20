@@ -1,15 +1,16 @@
 # Architecture
 
-An internal knowledge assistant that answers questions from a company's own
-documents, and says where each answer came from.
+Svar, a part of Andur, is the chatbot: it answers questions from a company's
+own documents, and says where each answer came from. Vard, the agent, is not
+part of the stack yet (`vard/`, [README](../README.md#vard)).
 
-A company drops its handbooks, policies and notes into a folder. Andur reads
-them, and from then on anyone can ask in plain language instead of searching.
-Every answer carries its sources, and every source says which layer it came
-from — written by a person, produced by a machine, or merely arrived and not
-yet sorted. One deployment serves several companies: each gets a workspace,
-and a question asked in one workspace can never be answered from another's
-documents.
+A company drops its handbooks, policies and notes into a folder. Andur keeps
+them, and from then on anyone can ask Svar in plain language instead of
+searching. Every answer carries its sources, and every source says which
+layer it came from — written by a person, produced by a machine, or merely
+arrived and not yet sorted. One deployment serves several companies: each
+gets a workspace, and a question asked in one workspace can never be
+answered from another's documents. It is shown with made-up companies.
 
 Runs entirely on AWS, defined as code. One command builds it; one command
 removes it.
@@ -96,7 +97,7 @@ ask script puts a question to the deployed address. The page itself is five
 files in `web/` — no framework, no build step, nothing from another server.
 
 Every key carries a budget. A demo key has ten questions, and 48 hours from
-the first of them; a paying customer's key carries a plan from
+the first of them; a key on a plan carries one from
 `app/plans.py`, a quota per German calendar month and per day that renews
 itself. The handler counts a question against the key that asked before it
 retrieves anything, in a conditional write against a DynamoDB item found by
@@ -139,7 +140,9 @@ infra/       the CDK app, the models per region, and the stack: one module per p
 app/         the answer function behind /ask: handler.py and one module per step
 web/         the page: index.html, app.js, language.js, markdown.js, style.css
 scripts/     ingest, retrieve, ask, workspace, and the measurements: evaluate,
-             topic_probe, grounding_probe, control_eval, tool_probe, rehearsal
+             topic_probe, grounding_probe, control_eval, tool_probe, receiving_probe,
+             rehearsal
+vard/        Vard's loop and his first responsibility, measured, not deployed
 knowledge/   the demo corpus: two fictional companies
 docs/        architecture, operating, retrieval findings, costs, decisions, metadata convention
 tests/       stack template, answer function, scripts, page
@@ -153,7 +156,7 @@ tests/       stack template, answer function, scripts, page
    retrieval, model, answer with sources and layer, token counts per answer
    in the log. *(done)*
 4. **Key budgets** — a key is an allowance: ten questions and 48 hours,
-   counted in DynamoDB. *(done)* A paying customer's key carries a plan,
+   counted in DynamoDB. *(done)* A key can carry a plan,
    a quota per month and per day. *(done; the first key on a plan was set
    up in eu-central-1 on 07.10.2026)*
 5. **The page** — a page behind CloudFront, with the answer function on the

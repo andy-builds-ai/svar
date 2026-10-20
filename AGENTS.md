@@ -1,8 +1,11 @@
 # AGENTS.md
 
-Andur answers questions from a company's own documents, on AWS, defined as
-code (CDK in Python). `README.md` says what it does, `docs/architecture.md`
-how it is built, `scripts/README.md` how the scripts work.
+Andur is a secretariat that grows stage by stage, on AWS. This repository
+holds its first two parts: Svar, the chatbot, which answers questions from a
+company's own documents, and Vard, the agent (`vard/`), measured, not
+deployed. The stack is defined as code (CDK in Python). `README.md` says what
+it does, `docs/architecture.md` how it is built, `scripts/README.md` how the
+scripts work.
 
 ## Setup
 

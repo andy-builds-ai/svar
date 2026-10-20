@@ -8,7 +8,7 @@ Needs Python 3.11+ (tested on 3.14), Node.js 22, the AWS CDK CLI
 (`npm install -g aws-cdk@2.1142.0`) and AWS credentials for the target
 account. Everything goes to `eu-west-1` (Ireland), the comparison stack,
 unless `-c region=` names another region of `REGIONS` in
-`infra/answer_models.py`; the product stack is the one in `eu-central-1`
+`infra/answer_models.py`; the main stack is the one in `eu-central-1`
 ([Another region](#another-region)).
 
 ```bash
@@ -123,8 +123,8 @@ deploy waits in `Custom::AndurDeployDrain`, and old and new code both check
 the question with the topic guardrail. After the second, measure with
 `python -m scripts.topic_probe --deployed`.
 
-The deploy creates no workspace key, and no customer is named anywhere in the
-repository. A workspace exists only in AWS: its key under
+The deploy creates no workspace key, and no workspace is named in the stack's
+code. A workspace exists only in AWS: its key under
 `/andur/api-keys/<workspace>` and its documents under `workspaces/<workspace>/`
 in the documents bucket. Keys are added and removed with one command each,
 without a deploy (see *Workspaces* below). After a first deploy, give the two

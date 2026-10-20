@@ -3,6 +3,24 @@
 Why the code is the way it is. One entry per decision: when, what, why.
 Measurements behind them are in the READMEs.
 
+## What it is
+
+**2026-10-16 — Nothing is sold; the repository is a portfolio piece.** The
+operator decided. Until this day Svar was to be sold, and the entries dated
+before it speak of customers, paying customers and a product stack. They stay
+as they were written. The code they describe stays too: a plan is a quota on
+a key, whoever holds the key.
+
+**2026-10-20 — Andur is the system; Svar and Vard are its parts.** The
+operator decided. Andur is a secretariat that grows stage by stage, on AWS in
+Frankfurt; data stays in Germany, and at every stage a person decides. Svar,
+the chatbot, answers questions from a company's own documents and is shown
+with made-up companies. Vard, the agent, takes on one responsibility after
+another; he is measured, not in operation. The stack in Ireland is the
+comparison stack. Until 02.10.2026 the chatbot itself was called Ask Andur,
+which is why older entries let Andur answer where Svar answers today; they
+stay as they were written.
+
 ## Region
 
 **2026-09-28 — eu-west-1 (Ireland), not us-east-1.** A company asks where
@@ -1137,12 +1155,12 @@ wrong. A failed call means there was no measurement; a wrong answer is a
 result. `evaluate` and `control_eval` end with 2 after a failed call since
 11.10.2026, which fails the step; this entry is the rule behind it.
 
-**2026-10-18 — The rehearsal measures the new business's own German
+**2026-10-18 — The rehearsal measures the new workspace's own German
 questions, or says it did not.** The operator decided: `answers-de-de` and
 `sources` follow `--workspace` instead of always asking Kalvenstett's
 questions. Without German questions of that workspace a step is skipped and
 named as skipped in the summary, not as passed; otherwise a run for a new
-business would measure another one without a word. `sources` no longer asks
+workspace would measure another one without a word. `sources` no longer asks
 Pellwick's half of the set beside it, which `control_eval` alone still does.
 
 **2026-10-18 — Port 80 that takes the connection is open, even without an
@@ -1165,12 +1183,12 @@ each tool carries a level (allowed, ask, denied), a call the loop may not run
 goes back to the model as a refusal and counts as invalid, and a fixed step
 limit ends a model that never closes. Neither Claude Code nor the Agent SDK is
 the engine: both run with Claude models only, which Bedrock offers in
-Frankfurt only through the EU profile, routed to every EU region, while the
-customers' data is to stay in Germany. The loop knows no task: a
-responsibility brings the task text, the tools and the step limit, so a second
-one, such as a software firm's support inbox, needs no change to it; a test
-runs a made-up one. The receiving check is the first, and no tool books: a
-person decides. `scripts/receiving_probe.py` measures it on twelve made-up
+Frankfurt only through the EU profile, routed to every EU region, while
+Andur keeps its data in Germany. The loop knows no task: a responsibility
+brings the task text, the tools and the step limit, so a second one, such as
+a support inbox, tried on the made-up software company Quillmoor, needs no
+change to it; a test runs a made-up one. The receiving check is the first,
+and no tool books: a person decides. `scripts/receiving_probe.py` measures it on twelve made-up
 cases per Frankfurt model, and its `--max-usd` makes no call whose most could
 pass the limit. Its default of 1.50 USD is about twice the 0.71 USD reckoned
 for the eleven models at three calls a case, not measured; on the run against

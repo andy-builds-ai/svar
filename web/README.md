@@ -45,7 +45,7 @@ function:
 
 ## Two languages
 
-Andur speaks the visitor's language: German and English. The page starts in
+Svar speaks the visitor's language: German and English. The page starts in
 German when the browser's language (`navigator.language`) begins with `de`
 and in English otherwise. A **DE | EN** switch in the corner changes it at
 once, and the choice is kept in the browser under `andur.language`, like the

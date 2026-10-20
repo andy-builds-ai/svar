@@ -14,7 +14,7 @@ Eleven commands, all run from the repository root:
 | `python -m scripts.control_eval` | Asks 42 fixed questions of each Frankfurt candidate the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
 | `python -m scripts.tool_probe` | Gives each Frankfurt candidate six orders to record with one tool: whether it fills the tool cleanly and asks back instead of guessing. |
 | `python -m scripts.receiving_probe` | Lets each Frankfurt candidate check twelve delivery notes against their purchase orders through Vard's tool loop: whether it finds every discrepancy, makes none up and closes with the right tool. |
-| `python -m scripts.rehearsal` | Sets up a new business on the deployed stack as a real one is set up, runs the measurements against it, and times every step. |
+| `python -m scripts.rehearsal` | Sets up a new workspace on the deployed stack with the same commands as any other, runs the measurements against it, and times every step. |
 
 ## What they need
 
@@ -191,7 +191,7 @@ stay. After the upload the script lists every such object; with `--delete`
 it removes them, and the sync then drops their vectors. It compares only the
 workspaces with at least one document in the folder (or the one
 `--workspace` names), and the all-clear lists them: a folder with one
-customer in it never lists or deletes another customer's documents. A
+company in it never lists or deletes another company's documents. A
 workspace whose documents were all removed locally is not compared, even if
 its folder is still there; remove it from the bucket by hand. Within a
 compared workspace, every layer counts: a folder holding only `human/` for a
@@ -302,8 +302,8 @@ python -m scripts.workspace remove kalvenstett             # show what belongs t
 python -m scripts.workspace remove kalvenstett --yes       # delete it
 ```
 
-No customer is named in the repository and none needs a deploy. A workspace
-is what AWS holds under its name: the key `/andur/api-keys/<name>`, the budget
+No workspace is named in the stack's code, and a new one needs no deploy. A
+workspace is what AWS holds under its name: the key `/andur/api-keys/<name>`, the budget
 item of that key with its plan, if it has one, and the documents under
 `workspaces/<name>/`. The name
 follows the answer function's rule — lowercase letters, digits and single
@@ -429,7 +429,7 @@ the same in both.
 
 A question is **right** when the answer contains every expected fact, each
 standing on its own ("12" is not found in "120"), or, for the other eight,
-when Andur declines, in German or English. **Blocked by guardrail** counts
+when Svar declines, in German or English. **Blocked by guardrail** counts
 the refusals the guardrail itself blocked: a model that answers "the sources
 do not answer this" is refused right, but only a block proves the guardrail
 refuses the topic. **Cites the document** means a
@@ -560,7 +560,7 @@ the guardrail must refuse it) and `"topic"`: the denied topic it must hit,
 or for a harmless question its subject. 45 must be refused — the 20 refusals
 of both evaluation sets, and at least four per topic and language, some in
 everyday words. 87 must pass — the 34 answerable questions of both
-evaluation sets, two of a customer whose documents are not in the
+evaluation sets, two about a company whose documents are not in the
 repository, and 51 that a trade business is asked about its own documents:
 prices, quotes, payment terms, VAT on its prices, warranty, maintenance
 contracts, delivery, opening hours; 23 of them (hd20 to hd32, he12 to he21,
@@ -677,7 +677,7 @@ python -m scripts.grounding_probe --out grounding.json
 ```
 
 The grounding check reads English, French and Spanish only, the user guide
-says, and Andur answers in German too. This measures what that does, on right
+says, and Svar answers in German too. This measures what that does, on right
 answers and on made-up ones, before a change to the check or the prompt is
 deployed. The script creates a guardrail of its own, `andur-grounding-probe`,
 a copy of the answer guardrail as the stack would deploy it — the topics on
@@ -863,8 +863,8 @@ as it is.
 python -m scripts.tool_probe --model "Nova Pro" --out tools.json
 ```
 
-Svar is to take orders, absences and invoice drafts later; a model that
-cannot call a tool would have to be swapped then. `tool-cases.json` holds six
+Vard is to take on more responsibilities later, such as orders, absences and
+invoice drafts; a model that cannot call a tool would have to be swapped then. `tool-cases.json` holds six
 conversations for one tool, `record_order` (material, quantity, unit, site,
 delivery date, all required), sent through `converse` without guardrail or
 knowledge base. Three give everything and expect exactly one call with the
@@ -888,8 +888,8 @@ python -m scripts.receiving_probe --model "Qwen3 235B A22B 2507" --out receiving
 python -m scripts.receiving_probe --max-usd 1.00     # every Frankfurt candidate, at most 1 USD
 ```
 
-Vard is Andur's agent: one responsibility at a time, a person deciding. His
-first is the receiving check. A model works in Vard's loop (`vard/engine.py`)
+Vard is a part of Andur, the agent: one responsibility after another, a
+person deciding. His first is the receiving check. A model works in Vard's loop (`vard/engine.py`)
 with the receiving responsibility (`vard/receiving.py`) and five tools, all
 allowed: `get_delivery_note`, `get_purchase_order`, and the three that close
 the check, `report_discrepancies`, `report_match` and `hand_off`. There is no
@@ -931,15 +931,15 @@ with exit code 2, as in `tool_probe`. `--region` takes the models and prices
 `infra/answer_models.py` gives that region: Frankfurt by default, Ireland with
 `--region eu-west-1`; a region without a table there is refused.
 
-## rehearsal — a new business, set up and measured, step by step
+## rehearsal — a new workspace, set up and measured, step by step
 
 ```bash
-python -m scripts.rehearsal --workspace kalvenstett --source ../customers \
+python -m scripts.rehearsal --workspace kalvenstett --source ../companies \
   --question "Was kostet eine Stunde für einen Gesellen?" --fact "68 Euro" --plan betrieb \
   --expect-role OrganizationAccountAccessRole --out-dir ../rehearsal --list
 ```
 
-One command for what a new business needs once the stack is deployed, in
+One command for what a new workspace needs once the stack is deployed, in
 this order, each step timed on its own:
 
 1. **check** — the signed-in identity (with `--expect-role`, the run stops
@@ -975,7 +975,7 @@ this order, each step timed on its own:
    region, all with `--model`, by default the answer model `REGIONS` gives the
    region. A workspace without such German questions has those two steps
    skipped, named as skipped in the summary, never as passed, so a run for a
-   new business never measures another one in their place; a file of that name
+   new workspace never measures another one in their place; a file of that name
    with questions of another workspace or language is refused before anything
    runs. A measurement that ends with a failed call (exit code 2) fails its
    step, since nothing was measured; wrong answers are a result and pass;

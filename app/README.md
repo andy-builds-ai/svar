@@ -1,6 +1,6 @@
 # app — the answer function
 
-`handler.py` is the entry of the Lambda function behind Andur's `/ask` path.
+`handler.py` is the entry of the Lambda function behind Svar's `/ask` path.
 It takes a question for one workspace, counts it against the budget of the key that
 asked, retrieves passages from the knowledge base with a `workspace` filter,
 asks the answering model to answer from those passages only, and returns the
@@ -48,7 +48,7 @@ question meets them:
 | `log.py`, `clients.py`, `clocks.py` | The log, the AWS clients, the clocks |
 
 `aws.py` holds the AWS clients' timeouts and retries. `plans.py` holds the
-plans a paying customer's key can carry (*Plans* below); `page.py` serves the
+plans a key can carry (*Plans* below); `page.py` serves the
 page where no CloudFront stands in front (above); `topic_model.py` and
 `denied_topics.py` hold the topic model's prompt and the denied topics.
 Lambda packages this folder and imports the modules by their plain names,
@@ -83,7 +83,7 @@ question is 1 to 1,000 characters. On macOS use `shasum -a 256` in place of
 `sha256sum`.
 
 The body may also carry `"language": "de"` or `"language": "en"`: the
-language of the sentences Andur says itself, see *Language* below. Leave it
+language of the sentences Svar says itself, see *Language* below. Leave it
 out and they are English; the page sends it with every question, and
 `python -m scripts.ask` with `--language`.
 
@@ -177,14 +177,14 @@ are being checked right now; try again in a few seconds.*, without a read.
 Five instances at that rate are at most 5 reads a second, an eighth of the
 40 a second Parameter Store allows an account by default for `GetParameter`,
 `GetParameters` and `GetParametersByPath` together, so invented names cannot
-use up the reads that real customers' first requests need. A key the
+use up the reads that the workspaces' first requests need. A key the
 instance already holds is never held back by this, also not when it is due
-to be read again. An instance that has not read a real customer's key yet
-can, during such a stream, answer that customer with the 503 too; that is the
-price of the cap, and the sentence tells the customer to try again. The stream
+to be read again. An instance that has not read a workspace's key yet can,
+during such a stream, answer a question to that workspace with the 503 too;
+that is the price of the cap, and the sentence says to try again. The stream
 needs neither a key nor parallel requests: about one request a second per
 instance, each with a new invented name, is enough. After a cold start or a
-deploy, when no instance holds a key yet, that reaches every customer.
+deploy, when no instance holds a key yet, that reaches every workspace.
 
 A wrong key, the key of another workspace and a workspace without a key all
 get the same 401 with the same sentence, *This key does not open the
@@ -204,7 +204,7 @@ A key does not open its workspace without end. A key without a plan is a
 demo key and carries an allowance: **10 questions**, and **48 hours** counted
 from the first of them. A key that has spent either is refused with 402
 before anything is paid for. A key that is never used never starts its
-clock. A paying customer's key carries a plan instead: a quota per calendar
+clock. A key can carry a plan instead: a quota per calendar
 month and per day that comes back by itself, and no end (*Plans* below).
 
 The count lives in the DynamoDB table `andur-key-budgets` (stack output
@@ -376,7 +376,7 @@ it.
 
 ### Plans
 
-A paying customer's key carries a plan in its budget item, and the plans are
+A key on a plan carries it in its budget item, and the plans are
 defined in one place, `plans.py`:
 
 | Plan | Questions per calendar month | At most per day |
@@ -521,7 +521,7 @@ An answer from us-east-1, 23.09.2026, before the move to eu-west-1:
 | `model` | The model that answered; `null` when no passage matched or the topic check refused the question, and no model was asked. |
 | `stop_reason` | Bedrock's stop reason; `null` when no model was asked. `max_tokens` means the answer was cut off, `content_filtered` that the model's own filter stopped it, `guardrail_intervened` that the guardrail blocked or masked something — `guardrail` says which. |
 | `usage` | Tokens in and out of the model call. |
-| `guardrail` | What the guardrail did: `action` is `none`, `masked` (personal details replaced by their type, such as `{PHONE}`, and a note at the end of the answer), `blocked` (the answer is a sentence of Andur's, which replaced the guardrail's own message) or `intervened` (Bedrock says it stepped in, the trace does not say how). `policies` names what acted: `topic:<name>`, `pii:<type>`, `grounding`, `relevance`. |
+| `guardrail` | What the guardrail did: `action` is `none`, `masked` (personal details replaced by their type, such as `{PHONE}`, and a note at the end of the answer), `blocked` (the answer is a sentence of Svar's, which replaced the guardrail's own message) or `intervened` (Bedrock says it stepped in, the trace does not say how). `policies` names what acted: `topic:<name>`, `pii:<type>`, `grounding`, `relevance`. |
 | `cost_usd` | What this answer cost: model tokens and guardrail text units, each times its price, rounded to six places. `null` when the guardrail reported no units, because a cost without them would be too low; and `null` for an answer the guardrail withheld after the model wrote it, for which Bedrock reports no model tokens although it charges the model call (`model_tokens_unknown`). Retrieval, embedding and Lambda are not in it — together under a hundredth of a cent. |
 | `price_date` | The day the prices behind `cost_usd` were read off the AWS pricing page. A price changes at AWS without a deploy here; the date says how old the number is. |
 | `latency_ms` | Time inside the function, from request to response. |
@@ -532,7 +532,7 @@ passt zur Frage.*), with empty `sources`, zero tokens and a `cost_usd` of 0.
 
 ## Language
 
-Andur speaks the visitor's language, not the company's, and knows two:
+Svar speaks the visitor's language, not the company's, and knows two:
 German and English. The request names it in the body field `language`
 (`"de"` or `"en"`, case and surrounding spaces ignored). A missing field, a
 field that is not text and any other value mean English; there is no error
