@@ -910,7 +910,10 @@ note without a purchase order to hand off, and three discrepancies at once.
 
 A case passes when exactly one closing tool ran and it is the right one, every
 expected discrepancy is reported with its kind, none is made up, and no call
-was invalid. The first table gives each model's marks, invalid calls, mean
+was invalid. A wrong article counts as reported too when the ordered one is
+reported missing and the delivered one extra: a person sees both all the same.
+One of the two alone does not, and counts as made up, and so do both with their
+kinds swapped. The first table gives each model's marks, invalid calls, mean
 steps, cost and wall time; under it each model's cases with steps, cost and
 seconds. `--out` holds the same and every call with its input and result.
 

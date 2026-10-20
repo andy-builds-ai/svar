@@ -78,8 +78,13 @@ def load_cases(path: Path) -> tuple[dict[str, str], list[dict[str, Any]]]:
         if note["note_number"] not in case["message"]:
             raise ValueError(f"{name}: the message must name the delivery note")
         for document in (note, *case["purchase_orders"]):
-            if not (isinstance(document["positions"], list) and document["positions"]):
-                raise ValueError(f"{name}: every document lists its positions")
+            positions = document["positions"]
+            if not (
+                isinstance(positions, list)
+                and positions
+                and all(isinstance(p, dict) and texts([p.get("item")]) for p in positions)
+            ):
+                raise ValueError(f"{name}: every document lists its positions, each its item")
         if case["expect"] not in receiving.CLOSING:
             raise ValueError(f"{name}: expect is one of {', '.join(receiving.CLOSING)}")
         findings = case["findings"]
@@ -183,6 +188,30 @@ def matches(expected: Mapping[str, Any], given: tuple[str, str]) -> bool:
     )
 
 
+def items_of(*documents: Mapping[str, Any]) -> set[str]:
+    return {number(p["item"]) for document in documents for p in document["positions"]}
+
+
+def meeting(
+    case: Mapping[str, Any], expected: Mapping[str, Any], given: set[tuple[str, str]]
+) -> set[tuple[str, str]]:
+    """The reported discrepancies that meet an expected one; none when it is missed. A wrong
+    article is also met by its two halves together: the ordered one reported missing and the
+    delivered one extra, which shows a person both articles all the same (the operator, 20.10.2026).
+    Which number was ordered and which delivered, the documents of the case say."""
+    met = {g for g in given if matches(expected, g)}
+    if "wrong_item" in expected["kinds"]:
+        ordered = items_of(*case["purchase_orders"])
+        delivered = items_of(case["delivery_note"])
+        mine = {number(item) for item in expected["items"]}
+        ordered_only, delivered_only = mine & (ordered - delivered), mine & (delivered - ordered)
+        missing = {g for g in given if g[1] == "missing_item" and g[0] in ordered_only}
+        extra = {g for g in given if g[1] == "extra_item" and g[0] in delivered_only}
+        if missing and extra:
+            met |= missing | extra
+    return met
+
+
 #: Bedrock's stopReason of a reply cut off at maxTokens.
 CUT_OFF = "max_tokens"
 
@@ -198,8 +227,9 @@ def judge(case: Mapping[str, Any], outcome: engine.Outcome) -> dict[str, Any]:
     names = [call.name for call in closing]
     closed_right = names == [case["expect"]]
     given = reported(closing)
-    missed = [e for e in case["findings"] if not any(matches(e, g) for g in given)]
-    made_up = sorted(g for g in given if not any(matches(e, g) for e in case["findings"]))
+    met = [meeting(case, e, given) for e in case["findings"]]
+    missed = [e for e, by in zip(case["findings"], met, strict=True) if not by]
+    made_up = sorted(given - set().union(*met))
     invalid = [call.name for call in outcome.invalid]
     why = []
     if names and not closed_right:

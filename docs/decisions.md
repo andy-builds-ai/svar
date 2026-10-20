@@ -1177,6 +1177,15 @@ for the eleven models at three calls a case, not measured; on the run against
 a stub the requests were 3,684 to 5,508 bytes. Memory of corrections, a
 trigger for new notes and pausing belong to the next stage.
 
+**2026-10-20 — A wrong article may be reported as its two halves.** The
+operator decided after the first paid run: the ordered article reported as
+missing and the delivered one as extra meet an expected wrong article, the
+way `k1` takes a wrong unit or a wrong quantity, because the person sees both
+articles and that the wrong one came. In `k5` three models had reported the
+washbasins so. The documents of the case say which number was ordered and
+which delivered; one half alone, or both with their kinds swapped, misses
+the wrong article and counts as made up.
+
 ## Code
 
 **2026-09-23, replaced 2026-10-07 — Files over 500 lines stayed whole.**

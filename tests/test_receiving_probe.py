@@ -411,8 +411,16 @@ def test_a_reply_cut_off_at_max_tokens_says_so(cases: dict[str, dict[str, Any]])
         (lambda data: data.update(cases=[]), "no cases"),
         (lambda data: data["cases"][0]["purchase_orders"][0].pop("order_number"), "its number"),
         (lambda data: data["cases"][0]["delivery_note"].pop("order_number"), "its number"),
+        (lambda data: data["cases"][4]["delivery_note"]["positions"][0].pop("item"), "its item"),
+        (lambda data: data["cases"][4]["purchase_orders"][0]["positions"].append("x"), "its item"),
     ],
-    ids=["empty", "order-without-number", "note-without-order-field"],
+    ids=[
+        "empty",
+        "order-without-number",
+        "note-without-order-field",
+        "position-without-item",
+        "position-no-object",
+    ],
 )
 def test_a_file_that_would_fail_after_paying_is_refused_before(
     tmp_path: Path, change: Any, message: str
@@ -461,3 +469,50 @@ def test_a_login_that_runs_out_mid_run_keeps_the_paid_rows(
     assert "AWS login is missing or expired" in capsys.readouterr().err
     rows = json.loads(out.read_text(encoding="utf-8"))["runs"][probe.MODELS[0].name]
     assert [(r["id"], r["passed"]) for r in rows] == [("p1", True), ("p2", True), ("p3", False)]
+
+
+#: k5's wrong washbasin as two halves: the ordered one missing, the delivered one extra.
+K5_HALVES = [
+    {"item": "OS-WT-60", "kind": "missing_item"},
+    {"item": "OS-WT-55", "kind": "extra_item"},
+]
+
+
+@pytest.mark.parametrize("case", ["k5", "p5"])
+def test_a_wrong_article_reported_as_its_two_halves_is_met(
+    cases: dict[str, dict[str, Any]], case: str
+) -> None:
+    halves = {
+        "k5": [*K5_HALVES, *K5[1:]],
+        "p5": [
+            {"item": "QB-MV-3592", "kind": "missing_item"},
+            {"item": "QB-MV-4592", "kind": "extra_item"},
+        ],
+    }[case]
+    marks = probe.judge(cases[case], outcome(report(*halves)))
+    assert marks["passed"] and marks["why"] == ""
+
+
+@pytest.mark.parametrize("half", K5_HALVES)
+def test_one_half_of_a_wrong_article_is_missed_and_made_up(
+    cases: dict[str, dict[str, Any]], half: dict[str, str]
+) -> None:
+    marks = probe.judge(cases["k5"], outcome(report(half, *K5[1:])))
+    assert not marks["found_all"] and not marks["none_made_up"]
+    assert "missed OS-WT-60 wrong_item" in marks["why"]
+    assert f"made up {half['item']} {half['kind']}" in marks["why"]
+
+
+def test_the_halves_with_their_kinds_swapped_fail(cases: dict[str, dict[str, Any]]) -> None:
+    swapped = [
+        {"item": "OS-WT-60", "kind": "extra_item"},
+        {"item": "OS-WT-55", "kind": "missing_item"},
+    ]
+    marks = probe.judge(cases["k5"], outcome(report(*swapped, *K5[1:])))
+    assert not marks["passed"] and "missed OS-WT-60 wrong_item" in marks["why"]
+    assert "made up OS-WT-55 missing_item, OS-WT-60 extra_item" in marks["why"]
+
+
+def test_the_halves_beside_a_wrong_item_make_nothing_up(cases: dict[str, dict[str, Any]]) -> None:
+    marks = probe.judge(cases["k5"], outcome(report(*K5, *K5_HALVES)))
+    assert marks["passed"]
