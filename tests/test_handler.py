@@ -1054,13 +1054,14 @@ def test_many_workspaces_cost_no_extra_calls(aws: dict[str, Any]) -> None:
     """The read does not grow with the number of workspaces: one call, whatever the store
     holds. Reading the whole path cost one more call per ten workspaces."""
     aws["ssm"].parameters.update(
-        parameters({f"customer-{number}": f"key-{number}" for number in range(2000)})
+        parameters({f"workspace-{number}": f"key-{number}" for number in range(2000)})
     )
     assert call(event())[0] == 200
-    assert call(event({"question": "How?", "workspace": "customer-1999"}, key="key-1999"))[0] == 200
+    request = event({"question": "How?", "workspace": "workspace-1999"}, key="key-1999")
+    assert call(request)[0] == 200
     assert aws["ssm"].calls == [
         QUILLMOOR_READ,
-        {"Name": "/andur/api-keys/customer-1999", "WithDecryption": True},
+        {"Name": "/andur/api-keys/workspace-1999", "WithDecryption": True},
     ]
 
 
@@ -2154,10 +2155,10 @@ def test_a_month_that_is_used_up_says_so_even_when_the_day_is_too(
     )
 
 
-def test_the_quota_message_says_what_a_customer_needs_and_nothing_about_a_new_key() -> None:
+def test_the_quota_message_sends_the_reader_to_whoever_gave_the_key_not_to_a_new_key() -> None:
     for messages in (sentences.MONTH_QUOTA_MESSAGES, sentences.DAY_QUOTA_MESSAGES):
-        assert "contact person" in messages["en"]
-        assert "Ansprechpartner" in messages["de"]
+        assert "whoever gave you this key" in messages["en"]
+        assert "der Ihnen diesen Schlüssel gegeben hat" in messages["de"]
         assert "new key" not in messages["en"]
         assert "neuen" not in messages["de"]
     assert "this month" in sentences.MONTH_QUOTA_MESSAGES["en"]

@@ -453,10 +453,10 @@ needs). A demo question is still one write.
 **A full quota** is a **429** with one sentence, in the language of the
 request:
 
-- *This key's quota of 6,000 questions for this month is reached. Please get
-  in touch with your contact person.* (*Das Kontingent von 6.000 Fragen für
-  diesen Monat ist erreicht. Bitte melden Sie sich bei Ihrem
-  Ansprechpartner.*)
+- *This key's quota of 6,000 questions for this month is reached. Please ask
+  whoever gave you this key for more.* (*Das Kontingent von 6.000 Fragen für
+  diesen Monat ist erreicht. Bitten Sie den, der Ihnen diesen Schlüssel
+  gegeben hat, um mehr.*)
 - the same for *today* (*für heute*) with the day's number.
 
 When both are full, the month's sentence wins: tomorrow would not help. 429

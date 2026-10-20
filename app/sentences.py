@@ -59,22 +59,22 @@ BUDGET_SPENT_MESSAGES = {
 #: What a key on a plan reads when its quota is reached (app/plans.py).
 MONTH_QUOTA_MESSAGES = {
     "en": (
-        "This key's quota of {limit} questions for this month is reached. Please get in touch "
-        "with your contact person."
+        "This key's quota of {limit} questions for this month is reached. Please ask whoever "
+        "gave you this key for more."
     ),
     "de": (
-        "Das Kontingent von {limit} Fragen für diesen Monat ist erreicht. Bitte melden Sie sich "
-        "bei Ihrem Ansprechpartner."
+        "Das Kontingent von {limit} Fragen für diesen Monat ist erreicht. Bitten Sie den, der "
+        "Ihnen diesen Schlüssel gegeben hat, um mehr."
     ),
 }
 DAY_QUOTA_MESSAGES = {
     "en": (
-        "This key's quota of {limit} questions for today is reached. Please get in touch with "
-        "your contact person."
+        "This key's quota of {limit} questions for today is reached. Please ask whoever gave "
+        "you this key for more."
     ),
     "de": (
-        "Das Kontingent von {limit} Fragen für heute ist erreicht. Bitte melden Sie sich bei "
-        "Ihrem Ansprechpartner."
+        "Das Kontingent von {limit} Fragen für heute ist erreicht. Bitten Sie den, der Ihnen "
+        "diesen Schlüssel gegeben hat, um mehr."
     ),
 }
 
