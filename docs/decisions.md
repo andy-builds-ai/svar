@@ -7,8 +7,8 @@ Measurements behind them are in the READMEs.
 
 **2026-10-16 — Nothing is sold; the repository is a portfolio piece.** The
 operator decided. Until this day Svar was to be sold, and the entries dated
-before it speak of customers, paying customers and a product stack. They stay
-as they were written. The code they describe stays too: a plan is a quota on
+before it speak of customers and paying customers. They stay as they were
+written. The code they describe stays too: a plan is a quota on
 a key, whoever holds the key.
 
 **2026-10-20 — Andur is the system; Svar and Vard are its parts.** The
@@ -1186,8 +1186,8 @@ the engine: both run with Claude models only, which Bedrock offers in
 Frankfurt only through the EU profile, routed to every EU region, while
 Andur keeps its data in Germany. The loop knows no task: a responsibility
 brings the task text, the tools and the step limit, so a second one, such as
-a support inbox, tried on the made-up software company Quillmoor, needs no
-change to it; a test runs a made-up one. The receiving check is the first,
+a support inbox, to be tried on the made-up software company Quillmoor, needs
+no change to it; a test runs a made-up one. The receiving check is the first,
 and no tool books: a person decides. `scripts/receiving_probe.py` measures it on twelve made-up
 cases per Frankfurt model, and its `--max-usd` makes no call whose most could
 pass the limit. Its default of 1.50 USD is about twice the 0.71 USD reckoned
