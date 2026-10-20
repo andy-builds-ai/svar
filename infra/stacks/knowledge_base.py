@@ -206,7 +206,7 @@ def create_knowledge_base(
         stack,
         "KnowledgeBase",
         name=KNOWLEDGE_BASE_NAME,
-        description="Andur: internal knowledge assistant, one workspace per company.",
+        description="Andur: the documents Svar answers from, one workspace per company.",
         role_arn=role.role_arn,
         knowledge_base_configuration=bedrock.CfnKnowledgeBase.KnowledgeBaseConfigurationProperty(
             type="VECTOR",

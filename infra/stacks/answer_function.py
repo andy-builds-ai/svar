@@ -343,7 +343,7 @@ def create_answer_function(
         stack,
         "AnswerFunction",
         function_name=ANSWER_FUNCTION_NAME,
-        description="Andur: answers a question from one workspace's documents.",
+        description="Andur: Svar answers a question from one workspace's documents.",
         runtime=LAMBDA_RUNTIME,
         architecture=lambda_.Architecture.ARM_64,
         code=lambda_.Code.from_asset(str(REPOSITORY_ROOT / "app"), exclude=ASSET_EXCLUDES),

@@ -37,7 +37,10 @@ if CONCURRENCY not in (None, "none"):
 AndurStack(
     app,
     "AndurStack",
-    description="Andur: documents, vector index and Bedrock knowledge base.",
+    description=(
+        "Andur: the stack Svar runs on: documents, knowledge base, guardrails, answer function "
+        "and page."
+    ),
     answer_model_id=MODELS.answer_model_id,
     topic_model_id=MODELS.topic_model_id,
     answer_guardrail_profile=MODELS.answer_guardrail_profile,
