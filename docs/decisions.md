@@ -1186,6 +1186,40 @@ washbasins so. The documents of the case say which number was ordered and
 which delivered; one half alone, or both with their kinds swapped, misses
 the wrong article and counts as made up.
 
+**2026-10-20 — Stage 1 closes with four candidates; Stage 2 picks the model.**
+The operator decided after two paid runs of `scripts/receiving_probe.py` in
+eu-central-1, both with every model of `FRANKFURT_MODELS`: the first at
+19:06 to 19:18, scored again with the rule above, and the second at 19:57 to
+20:06, with the rule. The runs took 11 min 56 s and 8 min 34 s and cost 0.488
+and 0.490 USD for all eleven models, 0.286 of each for Claude Sonnet 4.6.
+Passed, first run plus second, of 24:
+
+| Model | Passed | Failed |
+|---|---|---|
+| Nemotron 3 Super | 23 | k6 in the first run, a read timeout, no answer |
+| Devstral 2 123B | 23 | k1 once |
+| MiniMax M2.1 | 23 | k5 once |
+| gpt-oss-20b | 23 | k1 once |
+| gpt-oss-120b | 22 | p1 and k2 in the second run, ended without a closing tool |
+| Qwen3 235B A22B 2507 | 22 | p6 in both runs |
+| Qwen3 32B | 21 | p6 in both runs, k5 once |
+| MiniMax M2.5 | 21 | k5 and k6 in the first run, k1 in the second |
+| GLM 4.7 Flash | 17 | p2, p5 and k6 in both runs, k5 once |
+| Nova Pro (EU profile) | 17 | p4, k1 and k3 in both runs, p6 once |
+| Claude Sonnet 4.6 (EU profile) | 24 | - |
+
+At the same settings a model's result changed by up to two cases between the
+runs, so twelve cases do not tell the leaders apart. Some failures held in
+both runs: both Qwen3 counted screws delivered by the box of 200 as a
+discrepancy in p6. gpt-oss-120b passed every case of the first run and ended
+two of the second without a closing tool. Claude Sonnet 4.6 and Nova Pro run
+behind the EU profile, which routes to every EU region; they stand as a
+comparison only, since Andur keeps the data in Germany. The four Frankfurt models at 23 of 24 are the
+candidates: Nemotron 3 Super, which passed all 23 cases it answered,
+Devstral 2 123B, MiniMax M2.1 and gpt-oss-20b. Stage 2 picks among them with
+more and harder cases; the loop takes any of them, the model being one
+argument of `vard.engine.run`.
+
 ## Code
 
 **2026-09-23, replaced 2026-10-07 — Files over 500 lines stayed whole.**

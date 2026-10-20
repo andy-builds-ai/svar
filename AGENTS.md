@@ -63,8 +63,8 @@ cdk diff     # compares it with the deployed stack; needs an AWS login, changes 
   `--list` calls nothing. `python -m scripts.receiving_probe` lets every
   Frankfurt model check twelve delivery notes through Vard's loop (`vard/`)
   and makes no call that could take the run past `--max-usd`, 1.50 USD by
-  default; a full run was reckoned at 0.71 USD on 20.10.2026, not yet
-  measured. Run it only when asked, and after every change to `vard/` or to
+  default; a full run of the eleven models cost 0.488 and 0.490 USD on
+  20.10.2026. Run it only when asked, and after every change to `vard/` or to
   its cases ask for it.
 - **Region is `eu-west-1` by default** (`DEFAULT_REGION` in
   `infra/answer_models.py`); `cdk synth -c region=eu-central-1` and each
