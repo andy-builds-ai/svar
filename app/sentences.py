@@ -60,21 +60,21 @@ BUDGET_SPENT_MESSAGES = {
 MONTH_QUOTA_MESSAGES = {
     "en": (
         "This key's quota of {limit} questions for this month is reached. Please ask whoever "
-        "gave you this key for more."
+        "gave you this key for more questions."
     ),
     "de": (
         "Das Kontingent von {limit} Fragen für diesen Monat ist erreicht. Bitten Sie den, der "
-        "Ihnen diesen Schlüssel gegeben hat, um mehr."
+        "Ihnen diesen Schlüssel gegeben hat, um weitere Fragen."
     ),
 }
 DAY_QUOTA_MESSAGES = {
     "en": (
         "This key's quota of {limit} questions for today is reached. Please ask whoever gave "
-        "you this key for more."
+        "you this key for more questions."
     ),
     "de": (
         "Das Kontingent von {limit} Fragen für heute ist erreicht. Bitten Sie den, der Ihnen "
-        "diesen Schlüssel gegeben hat, um mehr."
+        "diesen Schlüssel gegeben hat, um weitere Fragen."
     ),
 }
 

@@ -4,9 +4,9 @@ Svar is a chatbot that answers questions from a company's own documents.
 Vard is an agent (`vard/`), measured, not deployed. Both are parts of a
 larger system called Andur, which is meant to grow into a secretariat, stage
 by stage, with a person deciding at every stage. The stack runs on AWS and
-is defined as code (CDK in Python). `README.md` says what
-it does, `docs/architecture.md` how it is built, `scripts/README.md` how the
-scripts work.
+is defined as code (CDK in Python). `README.md` says what the repository
+holds, `docs/architecture.md` how the stack is built, `scripts/README.md`
+how the scripts work.
 
 ## Setup
 
@@ -65,7 +65,8 @@ cdk diff     # compares it with the deployed stack; needs an AWS login, changes 
   with its key on the deployed stack and runs the measurements above against
   it, 0.70 USD on 07.10.2026 (at most 0.75); run it only when asked.
   `--list` calls nothing. `python -m scripts.receiving_probe` lets every
-  Frankfurt model check twelve delivery notes through Vard's loop (`vard/`)
+  model of `FRANKFURT_MODELS` check twelve delivery notes through Vard's loop
+  (`vard/`)
   and makes no call that could take the run past `--max-usd`, 1.50 USD by
   default; a full run of the eleven models cost 0.488 and 0.490 USD on
   20.10.2026. Run it only when asked, and after every change to `vard/` or to

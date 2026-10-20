@@ -265,9 +265,7 @@ def create_answer_role(
     return iam.Role(
         stack,
         "AnswerFunctionRole",
-        description=(
-            "Lets the Andur answer function read keys, retrieve, invoke the model and log."
-        ),
+        description=("Lets Svar's answer function read keys, retrieve, invoke the model and log."),
         assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
         inline_policies={
             "ReadApiKeys": iam.PolicyDocument(

@@ -42,7 +42,7 @@ def test_the_question_set_covers_every_demo_workspace_and_every_kind(
     questions: list[dict[str, Any]],
 ) -> None:
     """The demo workspaces are the folders in knowledge/. Any other workspace exists only
-    in AWS (scripts/workspace.py); its documents and questions stay out of the repository."""
+    in AWS (scripts/workspace.py); its documents stay out of the repository."""
     demo_workspaces = {path.name for path in KNOWLEDGE.iterdir() if path.is_dir()}
     assert len(questions) == 30
     assert len({q["id"] for q in questions}) == len(questions)

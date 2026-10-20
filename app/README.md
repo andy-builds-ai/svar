@@ -451,12 +451,13 @@ for a demo key it is the count and the TTL repair, which a plan item never
 needs). A demo question is still one write.
 
 **A full quota** is a **429** with one sentence, in the language of the
-request:
+request. From the next deploy on it reads (until then the deployed function
+asks the reader to get in touch with their contact person):
 
 - *This key's quota of 6,000 questions for this month is reached. Please ask
-  whoever gave you this key for more.* (*Das Kontingent von 6.000 Fragen für
-  diesen Monat ist erreicht. Bitten Sie den, der Ihnen diesen Schlüssel
-  gegeben hat, um mehr.*)
+  whoever gave you this key for more questions.* (*Das Kontingent von 6.000
+  Fragen für diesen Monat ist erreicht. Bitten Sie den, der Ihnen diesen
+  Schlüssel gegeben hat, um weitere Fragen.*)
 - the same for *today* (*für heute*) with the day's number.
 
 When both are full, the month's sentence wins: tomorrow would not help. 429

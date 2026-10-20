@@ -863,8 +863,8 @@ as it is.
 python -m scripts.tool_probe --model "Nova Pro" --out tools.json
 ```
 
-Vard is to take on more responsibilities later, such as orders, absences and
-invoice drafts; a model that cannot call a tool would have to be swapped then. `tool-cases.json` holds six
+It measures whether each model of `FRANKFURT_MODELS` fills in one tool
+cleanly and asks back instead of guessing. `tool-cases.json` holds six
 conversations for one tool, `record_order` (material, quantity, unit, site,
 delivery date, all required), sent through `converse` without guardrail or
 knowledge base. Three give everything and expect exactly one call with the

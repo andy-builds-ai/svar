@@ -1,9 +1,8 @@
 """Whether an answer model fills in a tool cleanly, and asks instead of guessing.
 
-Vard is to take on more responsibilities later, such as orders, absences and invoice
-drafts; a model that answers well but cannot call a tool would have to be replaced
-then. Each case in `tool-cases.json` sends one conversation through Bedrock `converse`
-with one tool, `record_order` (material, quantity, unit, site, delivery date, all
+It measures whether each model of `FRANKFURT_MODELS` fills in one tool cleanly and asks
+back instead of guessing. Each case in `tool-cases.json` sends one conversation through
+Bedrock `converse` with one tool, `record_order` (material, quantity, unit, site, delivery date, all
 required). A case that gives everything expects exactly one call with the
 expected values; a case that leaves something out or vague expects no call and
 a question or a request back for what is missing. No guardrail, no knowledge

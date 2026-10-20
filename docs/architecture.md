@@ -6,13 +6,13 @@ Andur. The second part, the agent Vard, is not in the stack yet (`vard/`,
 [README](../README.md#vard)).
 
 It is shown with made-up companies. Each has its handbooks, policies and
-notes in a folder, and Andur keeps them in a workspace of its own. Whoever
-holds the workspace's key can ask Svar in plain language instead of
-searching. Every answer carries its sources, and every source says which
-layer it came from — written by a person, produced by a machine, or merely
-arrived and not yet sorted. One deployment serves several companies, and a
-question asked in one workspace can never be answered from another's
-documents.
+notes in a folder, and Andur keeps each company's documents in a workspace
+of their own. Whoever holds the workspace's key can ask Svar in plain
+language instead of searching. Every answer carries its sources, and every
+source says which layer it came from — written by a person, produced by a
+machine, or merely arrived and not yet sorted. One deployment serves several
+companies, and a question asked in one workspace can never be answered from
+another's documents.
 
 Runs entirely on AWS, defined as code. One command builds it; one command
 removes it.
@@ -89,8 +89,9 @@ with Nova Pro on 28.09.2026 (four questions).
 The stack creates the documents bucket, the
 vector bucket and index, the knowledge base with its service role, a data
 source pointing at the documents, the table that
-holds each key's budget, the guardrail on the answering model, the answer
-function, the bucket holding the page, and the CloudFront distribution that
+holds each key's budget, the guardrails (on the answer, on the excerpts of
+its sources, and in Ireland on the denied topics), the answer function, the
+bucket holding the page, and the CloudFront distribution that
 serves both; in Frankfurt neither of the last two, since the function
 serves the page from a layer at its own URL. A fill script loads a demo
 corpus of two fictional companies into it, a retrieve script shows that a
@@ -99,9 +100,9 @@ ask script puts a question to the deployed address. The page itself is five
 files in `web/` — no framework, no build step, nothing from another server.
 
 Every key carries a budget. A demo key has ten questions, and 48 hours from
-the first of them; a key on a plan carries one from
-`app/plans.py`, a quota per German calendar month and per day that renews
-itself. The handler counts a question against the key that asked before it
+the first of them; a key on a plan gets a quota from `app/plans.py`, per
+German calendar month and per day, that renews itself. The handler counts a
+question against the key that asked before it
 retrieves anything, in a conditional write against a DynamoDB item found by
 the SHA-256 of the key — one for a demo key, and for a key on a plan a
 second after the first has refused it and handed back the plan. A demo key

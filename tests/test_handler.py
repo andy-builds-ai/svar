@@ -2157,8 +2157,8 @@ def test_a_month_that_is_used_up_says_so_even_when_the_day_is_too(
 
 def test_the_quota_message_sends_the_reader_to_whoever_gave_the_key_not_to_a_new_key() -> None:
     for messages in (sentences.MONTH_QUOTA_MESSAGES, sentences.DAY_QUOTA_MESSAGES):
-        assert "whoever gave you this key" in messages["en"]
-        assert "der Ihnen diesen Schlüssel gegeben hat" in messages["de"]
+        assert "whoever gave you this key for more questions" in messages["en"]
+        assert "der Ihnen diesen Schlüssel gegeben hat, um weitere Fragen" in messages["de"]
         assert "new key" not in messages["en"]
         assert "neuen" not in messages["de"]
     assert "this month" in sentences.MONTH_QUOTA_MESSAGES["en"]

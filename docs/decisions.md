@@ -8,8 +8,8 @@ Measurements behind them are in the READMEs.
 **2026-10-16 — Nothing is sold; the repository is a portfolio piece.** The
 operator decided. Until this day Svar was to be sold, and the entries dated
 before it speak of customers and paying customers. They stay as they were
-written. The code they describe stays too: a plan is a quota on
-a key, whoever holds the key.
+written. The plans stay in the code: a plan is a quota on a key, whoever
+holds it.
 
 **2026-10-20 — Andur is the larger system; Svar and Vard are its parts.** The
 operator decided. Andur is the larger system, meant to grow into a secretariat,
@@ -336,10 +336,11 @@ alone. The sentence asks the customer to get in touch with their contact
 person, in German or English like every other.
 
 **2026-10-20 — A full quota sends the reader to whoever gave the key.** The
-operator decided. The sentence of the entry above named a contact person; it
-now reads "Please ask whoever gave you this key for more." ("Bitten Sie den,
-der Ihnen diesen Schlüssel gegeben hat, um mehr."), as the page's line for a
-spent demo key sends the reader to whoever sent the link. Nothing is sold, so
+operator decided. The sentence of the entry above named a contact person;
+from the next deploy on it reads "Please ask whoever gave you this key for
+more questions." ("Bitten Sie den, der Ihnen diesen Schlüssel gegeben hat, um
+weitere Fragen."), as the page's line for a spent demo key sends the reader
+to whoever sent the link. Nothing is sold, so
 there is no contact person to name.
 
 **2026-10-01 — A plan item that cannot be counted answers nothing.** An
@@ -1195,8 +1196,9 @@ company's documents are to stay in Germany. The loop knows no task: a responsibi
 brings the task text, the tools and the step limit, so a second one, such as
 a support inbox, to be tried on the made-up software company Quillmoor, needs
 no change to it; a test runs a made-up one. The receiving check is the first,
-and no tool books: a person decides. `scripts/receiving_probe.py` measures it on twelve made-up
-cases per model of `FRANKFURT_MODELS`, and its `--max-usd` makes no call whose
+and no tool books: a person decides. `scripts/receiving_probe.py` measures
+it on twelve made-up cases per model of `FRANKFURT_MODELS`, and its
+`--max-usd` makes no call whose
 most could pass the limit. Its default of 1.50 USD is about twice the 0.71 USD
 reckoned for the eleven models at three calls a case, not measured; on the run
 against a stub the requests were 3,684 to 5,508 bytes. The next build of Vard
@@ -1241,8 +1243,9 @@ both runs: both Qwen3 counted screws delivered by the box of 200 as a
 discrepancy in p6. gpt-oss-120b passed every case of the first run and ended
 two of the second without a closing tool. Claude Sonnet 4.6 and Nova Pro run
 behind the EU profile, which routes to every EU region; they stand as a
-comparison only, since a company's documents stay in Germany. The four Frankfurt models at 23 of 24 are the
-candidates: Nemotron 3 Super, which passed all 23 cases it answered,
+comparison only, since a company's documents stay in Germany. The four
+Frankfurt models at 23 of 24 are the candidates: Nemotron 3 Super, which
+passed all 23 cases it answered,
 Devstral 2 123B, MiniMax M2.1 and gpt-oss-20b. The next build of Vard picks
 among them with more and harder cases and brings the trigger, the memory of
 corrections and pausing of the entry above; the loop takes any of them, the
