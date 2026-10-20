@@ -1,0 +1,369 @@
+{
+  "companies": {
+    "pellwick": "Pellwick Joinery, a joinery workshop that makes and fits timber windows, doors, staircases and fitted furniture",
+    "kalvenstett": "Kalvenstett Haustechnik, a master plumbing and heating business: heating, sanitation, bathroom renovation and heat pumps"
+  },
+  "cases": [
+    {
+      "id": "p1",
+      "company": "pellwick",
+      "about": "everything agrees",
+      "message": "Lieferschein LS-HT-58201 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-HT-58201",
+        "supplier": "Holvane Timber",
+        "date": "2026-10-19",
+        "order_number": "PW-2026-0311",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "HT-LAE-6878", "description": "Sibirische Lärche, Kantholz 68 x 78 mm, keilgezinkt, 4,8 m", "quantity": "24", "unit": "Stück"},
+          {"position": 2, "item": "HT-EI-40-200", "description": "Europäische Eiche, Bohle 40 mm, 200 mm breit, 3,0 m", "quantity": "6", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0311",
+          "supplier": "Holvane Timber",
+          "date": "2026-10-07",
+          "positions": [
+            {"position": 1, "item": "HT-LAE-6878", "description": "Sibirische Lärche, Kantholz 68 x 78 mm, keilgezinkt, 4,8 m", "quantity": "24", "unit": "Stück"},
+            {"position": 2, "item": "HT-EI-40-200", "description": "Europäische Eiche, Bohle 40 mm, 200 mm breit, 3,0 m", "quantity": "6", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_match",
+      "findings": []
+    },
+    {
+      "id": "p2",
+      "company": "pellwick",
+      "about": "two treads short",
+      "message": "Lieferschein LS-HT-58244 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-HT-58244",
+        "supplier": "Holvane Timber",
+        "date": "2026-10-19",
+        "order_number": "PW-2026-0318",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "HT-EI-TS-1000", "description": "Eiche Treppenstufe, 40 x 280 x 1.000 mm, keilgezinkt", "quantity": "12", "unit": "Stück"},
+          {"position": 2, "item": "HT-EI-HL-3000", "description": "Eiche Handlauf, rund 45 mm, 3,0 m", "quantity": "2", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0318",
+          "supplier": "Holvane Timber",
+          "date": "2026-10-08",
+          "positions": [
+            {"position": 1, "item": "HT-EI-TS-1000", "description": "Eiche Treppenstufe, 40 x 280 x 1.000 mm, keilgezinkt", "quantity": "14", "unit": "Stück"},
+            {"position": 2, "item": "HT-EI-HL-3000", "description": "Eiche Handlauf, rund 45 mm, 3,0 m", "quantity": "2", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["HT-EI-TS-1000"], "kinds": ["wrong_quantity"]}]
+    },
+    {
+      "id": "p3",
+      "company": "pellwick",
+      "about": "the cylinders are missing",
+      "message": "Lieferschein LS-QB-11873 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-QB-11873",
+        "supplier": "Quarrish Beschläge",
+        "date": "2026-10-20",
+        "order_number": "PW-2026-0322",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "QB-MV-3592", "description": "Mehrfachverriegelung, Dornmaß 35 mm, Entfernung 92 mm, Edelstahl", "quantity": "2", "unit": "Stück"},
+          {"position": 2, "item": "QB-TB-3D-120", "description": "Türband 3D, verstellbar, bis 120 kg, silber", "quantity": "6", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0322",
+          "supplier": "Quarrish Beschläge",
+          "date": "2026-10-12",
+          "positions": [
+            {"position": 1, "item": "QB-MV-3592", "description": "Mehrfachverriegelung, Dornmaß 35 mm, Entfernung 92 mm, Edelstahl", "quantity": "2", "unit": "Stück"},
+            {"position": 2, "item": "QB-TB-3D-120", "description": "Türband 3D, verstellbar, bis 120 kg, silber", "quantity": "6", "unit": "Stück"},
+            {"position": 3, "item": "QB-PZ-3545", "description": "Profilzylinder 35/45 mm, mit 5 Schlüsseln", "quantity": "2", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["QB-PZ-3545"], "kinds": ["missing_item"]}]
+    },
+    {
+      "id": "p4",
+      "company": "pellwick",
+      "about": "glazing tape that was not ordered",
+      "message": "Lieferschein LS-BG-3307 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-BG-3307",
+        "supplier": "Brennick Glas",
+        "date": "2026-10-20",
+        "order_number": "PW-2026-0329",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "BG-IG-0412", "description": "Isolierglas 4/16/4, Ug 1,1, 412 x 1.088 mm", "quantity": "6", "unit": "Stück"},
+          {"position": 2, "item": "BG-DB-10", "description": "Glasdichtband 10 x 3 mm, Rolle 15 m", "quantity": "2", "unit": "Rolle"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0329",
+          "supplier": "Brennick Glas",
+          "date": "2026-10-13",
+          "positions": [
+            {"position": 1, "item": "BG-IG-0412", "description": "Isolierglas 4/16/4, Ug 1,1, 412 x 1.088 mm", "quantity": "6", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["BG-DB-10"], "kinds": ["extra_item"]}]
+    },
+    {
+      "id": "p5",
+      "company": "pellwick",
+      "about": "a lock with a 45 mm backset instead of 35 mm",
+      "message": "Lieferschein LS-QB-11902 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-QB-11902",
+        "supplier": "Quarrish Beschläge",
+        "date": "2026-10-20",
+        "order_number": "PW-2026-0335",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "QB-MV-4592", "description": "Mehrfachverriegelung, Dornmaß 45 mm, Entfernung 92 mm, Edelstahl", "quantity": "3", "unit": "Stück"},
+          {"position": 2, "item": "QB-SB-92", "description": "Schließblech-Satz für Mehrfachverriegelung, Entfernung 92 mm", "quantity": "3", "unit": "Satz"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0335",
+          "supplier": "Quarrish Beschläge",
+          "date": "2026-10-14",
+          "positions": [
+            {"position": 1, "item": "QB-MV-3592", "description": "Mehrfachverriegelung, Dornmaß 35 mm, Entfernung 92 mm, Edelstahl", "quantity": "3", "unit": "Stück"},
+            {"position": 2, "item": "QB-SB-92", "description": "Schließblech-Satz für Mehrfachverriegelung, Entfernung 92 mm", "quantity": "3", "unit": "Satz"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["QB-MV-3592", "QB-MV-4592"], "kinds": ["wrong_item"]}]
+    },
+    {
+      "id": "p6",
+      "company": "pellwick",
+      "about": "screws ordered by the piece, delivered by the box of 200: the same amount",
+      "message": "Lieferschein LS-FB-77120 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-FB-77120",
+        "supplier": "Fennow Befestigungstechnik",
+        "date": "2026-10-20",
+        "order_number": "PW-2026-0340",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "FB-ES-560", "description": "Edelstahlschraube A2, Senkkopf, 5 x 60 mm", "quantity": "10", "unit": "Karton à 200 Stück"},
+          {"position": 2, "item": "FB-ES-440", "description": "Edelstahlschraube A2, Senkkopf, 4 x 40 mm", "quantity": "5", "unit": "Karton à 200 Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0340",
+          "supplier": "Fennow Befestigungstechnik",
+          "date": "2026-10-15",
+          "positions": [
+            {"position": 1, "item": "FB-ES-560", "description": "Edelstahlschraube A2, Senkkopf, 5 x 60 mm", "quantity": "2.000", "unit": "Stück"},
+            {"position": 2, "item": "FB-ES-440", "description": "Edelstahlschraube A2, Senkkopf, 4 x 40 mm", "quantity": "1.000", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_match",
+      "findings": []
+    },
+    {
+      "id": "k1",
+      "company": "kalvenstett",
+      "about": "20 elbows instead of 20 boxes of 10",
+      "message": "Lieferschein LS-OS-240917 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-OS-240917",
+        "supplier": "Ostrelt Haustechnik-Großhandel",
+        "date": "2026-10-19",
+        "order_number": "KH-26-0518",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "OS-PF-W15", "description": "Pressfitting Winkel 90°, Kupfer, 15 mm", "quantity": "20", "unit": "Stück"},
+          {"position": 2, "item": "OS-PF-M15", "description": "Pressfitting Muffe, Kupfer, 15 mm", "quantity": "10", "unit": "Karton à 10 Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0518",
+          "supplier": "Ostrelt Haustechnik-Großhandel",
+          "date": "2026-10-14",
+          "positions": [
+            {"position": 1, "item": "OS-PF-W15", "description": "Pressfitting Winkel 90°, Kupfer, 15 mm", "quantity": "20", "unit": "Karton à 10 Stück"},
+            {"position": 2, "item": "OS-PF-M15", "description": "Pressfitting Muffe, Kupfer, 15 mm", "quantity": "10", "unit": "Karton à 10 Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["OS-PF-W15"], "kinds": ["wrong_unit", "wrong_quantity"]}]
+    },
+    {
+      "id": "k2",
+      "company": "kalvenstett",
+      "about": "German numbers written two ways: everything agrees",
+      "message": "Lieferschein LS-VW-60391 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-VW-60391",
+        "supplier": "Varnholm Wärmetechnik",
+        "date": "2026-10-19",
+        "order_number": "KH-26-0522",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "VW-FBH-1620", "description": "Fußbodenheizungsrohr PE-RT 16 x 2,0 mm, Rolle 250 m", "quantity": "1.250,00", "unit": "m"},
+          {"position": 2, "item": "VW-NP-30", "description": "Noppensystemplatte 30 mm, für Rohr 14-17 mm", "quantity": "147,6", "unit": "m²"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0522",
+          "supplier": "Varnholm Wärmetechnik",
+          "date": "2026-10-09",
+          "positions": [
+            {"position": 1, "item": "VW-FBH-1620", "description": "Fußbodenheizungsrohr PE-RT 16 x 2,0 mm, Rolle 250 m", "quantity": "1.250", "unit": "m"},
+            {"position": 2, "item": "VW-NP-30", "description": "Noppensystemplatte 30 mm, für Rohr 14-17 mm", "quantity": "147,60", "unit": "m²"}
+          ]
+        }
+      ],
+      "expect": "report_match",
+      "findings": []
+    },
+    {
+      "id": "k3",
+      "company": "kalvenstett",
+      "about": "a partial delivery, marked as one: the open rest is reported",
+      "message": "Lieferschein LS-VW-60418 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-VW-60418",
+        "supplier": "Varnholm Wärmetechnik",
+        "date": "2026-10-20",
+        "order_number": "KH-26-0527",
+        "remark": "Teillieferung – Restmenge folgt in KW 45",
+        "positions": [
+          {"position": 1, "item": "VW-WP-08", "description": "Luft-Wasser-Wärmepumpe 8 kW, Monoblock, Außenaufstellung", "quantity": "1", "unit": "Stück"},
+          {"position": 3, "item": "VW-KH-1", "description": "Kugelhahn 1 Zoll, mit Thermometer", "quantity": "4", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0527",
+          "supplier": "Varnholm Wärmetechnik",
+          "date": "2026-09-22",
+          "positions": [
+            {"position": 1, "item": "VW-WP-08", "description": "Luft-Wasser-Wärmepumpe 8 kW, Monoblock, Außenaufstellung", "quantity": "1", "unit": "Stück"},
+            {"position": 2, "item": "VW-PS-100", "description": "Pufferspeicher 100 l, für Wärmepumpe", "quantity": "1", "unit": "Stück"},
+            {"position": 3, "item": "VW-KH-1", "description": "Kugelhahn 1 Zoll, mit Thermometer", "quantity": "8", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [
+        {"items": ["VW-PS-100"], "kinds": ["missing_item"]},
+        {"items": ["VW-KH-1"], "kinds": ["wrong_quantity"]}
+      ]
+    },
+    {
+      "id": "k4",
+      "company": "kalvenstett",
+      "about": "no purchase order on the note: hand it to a person",
+      "message": "Lieferschein LS-OS-241033 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-OS-241033",
+        "supplier": "Ostrelt Haustechnik-Großhandel",
+        "date": "2026-10-20",
+        "order_number": null,
+        "remark": "Telefonisch bestellt",
+        "positions": [
+          {"position": 1, "item": "OS-KR-22", "description": "Kupferrohr hart, 22 x 1,0 mm, Stange 5 m", "quantity": "10", "unit": "Stange"},
+          {"position": 2, "item": "OS-RS-22", "description": "Rohrschelle mit Gummieinlage, 22 mm", "quantity": "50", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [],
+      "expect": "hand_off",
+      "findings": []
+    },
+    {
+      "id": "k5",
+      "company": "kalvenstett",
+      "about": "a bathroom order with three discrepancies",
+      "message": "Lieferschein LS-OS-241056 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-OS-241056",
+        "supplier": "Ostrelt Haustechnik-Großhandel",
+        "date": "2026-10-20",
+        "order_number": "KH-26-0535",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "OS-WT-55", "description": "Waschtisch Keramik, 55 x 45 cm, weiß", "quantity": "1", "unit": "Stück"},
+          {"position": 2, "item": "OS-WC-WH", "description": "Wand-WC spülrandlos, weiß", "quantity": "1", "unit": "Stück"},
+          {"position": 3, "item": "OS-EV-12", "description": "Eckventil 1/2 Zoll, mit Schubrosette, verchromt", "quantity": "2", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0535",
+          "supplier": "Ostrelt Haustechnik-Großhandel",
+          "date": "2026-10-01",
+          "positions": [
+            {"position": 1, "item": "OS-WT-60", "description": "Waschtisch Keramik, 60 x 48 cm, weiß", "quantity": "1", "unit": "Stück"},
+            {"position": 2, "item": "OS-WC-WH", "description": "Wand-WC spülrandlos, weiß", "quantity": "1", "unit": "Stück"},
+            {"position": 3, "item": "OS-WS-SC", "description": "WC-Sitz mit Absenkautomatik, weiß", "quantity": "1", "unit": "Stück"},
+            {"position": 4, "item": "OS-EV-12", "description": "Eckventil 1/2 Zoll, mit Schubrosette, verchromt", "quantity": "4", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [
+        {"items": ["OS-WT-60", "OS-WT-55"], "kinds": ["wrong_item"]},
+        {"items": ["OS-WS-SC"], "kinds": ["missing_item"]},
+        {"items": ["OS-EV-12"], "kinds": ["wrong_quantity"]}
+      ]
+    },
+    {
+      "id": "k6",
+      "company": "kalvenstett",
+      "about": "two valves too many",
+      "message": "Lieferschein LS-OS-241078 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-OS-241078",
+        "supplier": "Ostrelt Haustechnik-Großhandel",
+        "date": "2026-10-20",
+        "order_number": "KH-26-0540",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "OS-TV-12", "description": "Thermostatventil-Unterteil 1/2 Zoll, Durchgang", "quantity": "12", "unit": "Stück"},
+          {"position": 2, "item": "OS-TK-01", "description": "Thermostatkopf mit Flüssigfühler", "quantity": "10", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0540",
+          "supplier": "Ostrelt Haustechnik-Großhandel",
+          "date": "2026-10-16",
+          "positions": [
+            {"position": 1, "item": "OS-TV-12", "description": "Thermostatventil-Unterteil 1/2 Zoll, Durchgang", "quantity": "10", "unit": "Stück"},
+            {"position": 2, "item": "OS-TK-01", "description": "Thermostatkopf mit Flüssigfühler", "quantity": "10", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["OS-TV-12"], "kinds": ["wrong_quantity"]}]
+    }
+  ]
+}
