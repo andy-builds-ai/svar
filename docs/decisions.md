@@ -1257,8 +1257,11 @@ above name is split in two: this one picks the model among the four
 candidates and deploys nothing; Vard in operation in Frankfurt, with a
 trigger for new delivery notes, memory of corrections, pausing and approvals
 at work, follows with a plan of its own. `scripts/receiving_probe.py` now
-measures 24 cases. The first twelve stay as they were, so that a result
-compares with the first build; their notes have two or three positions. The
+measures 24 cases. The documents of the first twelve stay as they were; their
+notes have two or three positions. The task text has three new sentences and
+the check six tools instead of five, so a result on those twelve compares with
+the first build only roughly: when one changes, the new task text may be the
+reason. The
 other twelve are harder, three of each kind, as the operator chose them: long
 notes of 23 to 40 positions; the rest of a partial delivery, compared with
 what is still open after the earlier deliveries, which a new tool,
