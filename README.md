@@ -341,7 +341,9 @@ Node.js 22, the AWS CDK CLI (`npm install -g aws-cdk@2.1142.0`) and, for
 everything after the tests, AWS credentials. `constraints.txt` pins every
 Python package to the version the tests pass on. The tests and `ruff` need
 no AWS; CI (`.github/workflows/ci.yml`) runs them on every push and pull
-request to `main`, and `cdk synth` for both regions.
+request to `main`, and `cdk synth` for both regions. Coding agents such as
+Claude Code work in this repository under the rules in
+[AGENTS.md](AGENTS.md).
 
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
