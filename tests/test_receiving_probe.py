@@ -285,12 +285,15 @@ def converse_error(code: str) -> Exception:
     return ClientError({"Error": {"Code": code, "Message": "no"}}, "Converse")
 
 
-def test_a_request_the_model_does_not_accept_is_a_result(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_a_request_the_model_does_not_accept_is_a_result_that_misses_everything(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
 ) -> None:
     assert run_main(monkeypatch, runtime_raising(converse_error("ValidationException"))) == 0
     captured = capsys.readouterr()
-    assert f"| {probe.MODELS[0].name} | 0/24 |" in captured.out
+    expected = sum(len(case["findings"]) for case in loaded[1])
+    assert f"| {probe.MODELS[0].name} | 0/24 | 0/24 | {expected} |" in captured.out
     assert "| p1 | 1 | no | 0 | - |" in captured.out and "failed calls" not in captured.err
 
 

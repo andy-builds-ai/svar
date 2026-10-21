@@ -320,6 +320,7 @@ def run_case(
         return {
             "passed": False,
             "why": f"error: {exc}",
+            "missed": len(case["findings"]),
             "call_failed": error_code(exc) != REFUSED_AS_SENT,
         }
     kept = {
@@ -334,7 +335,8 @@ def run_case(
         call = outcome.failed[0]
         why = f"error: {call.name} failed: {call.failed}"
         print(f"{model.name} {label}: {why}", file=sys.stderr)
-        return {"passed": False, "why": why, "call_failed": True, **kept}
+        missed = len(case["findings"])
+        return {"passed": False, "why": why, "missed": missed, "call_failed": True, **kept}
     marks = judge(case, outcome)
     verdict = "passed" if marks["passed"] else f"FAILED ({marks['why']})"
     print(f"{model.name} {label}: {verdict}", file=sys.stderr)
@@ -368,7 +370,7 @@ def run_model(
             except (CostLimitReached, AwsProblem) as stop:
                 where = " at the cost limit" if isinstance(stop, CostLimitReached) else ""
                 stopped = f"stopped{where}: {stop}"
-                marks = {"passed": False, "why": stopped}
+                marks = {"passed": False, "why": stopped, "missed": len(case["findings"])}
                 print(f"{model.name} {name}: {stopped}", file=sys.stderr)
             rows.append(
                 {
@@ -444,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m scripts.receiving_probe",
         description="Measure how cleanly each Frankfurt model checks delivery notes with tools.",
     )
-    parser.add_argument("--model", action="append", help="a model name from MODELS")
+    parser.add_argument("--model", action="append", help="a model name of the region's table")
     parser.add_argument("--cases", type=Path, default=CASES_FILE)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--region", default=DEFAULT_REGION)
@@ -463,7 +465,8 @@ def main(argv: list[str] | None = None) -> int:
     models = [m for m in table if not args.model or m.name in args.model]
     unknown = set(args.model or []) - {m.name for m in table}
     if unknown or not models:
-        print(f"error: unknown model {sorted(unknown)}; known: {[m.name for m in table]}")
+        known = [m.name for m in table]
+        print(f"error: unknown model {sorted(unknown)}; known: {known}", file=sys.stderr)
         return 2
     outside = [m.model_id for m in models if not stays_in_the_eu(m.model_id)]
     if outside:

@@ -369,7 +369,7 @@
       "id": "p7",
       "company": "pellwick",
       "group": "long",
-      "about": "a long note: 24 timber positions, one missing and one short",
+      "about": "a long note: 23 of 24 timber positions ordered, one missing and one short",
       "message": "Lieferschein LS-HT-58258 ist eingegangen.",
       "delivery_note": {
         "note_number": "LS-HT-58258",
@@ -798,7 +798,7 @@
       "id": "p10",
       "company": "pellwick",
       "group": "supplier_number",
-      "about": "stock fittings ordered by our own numbers, the note gives the supplier's: one set short",
+      "about": "stock fittings ordered by our own numbers, the note gives the supplier's: two sets short",
       "message": "Lieferschein LS-QB-11930 ist eingegangen.",
       "delivery_note": {
         "note_number": "LS-QB-11930",

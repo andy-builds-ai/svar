@@ -931,7 +931,8 @@ ordered article. With `--repeat N` every case runs N rounds, all cases once
 before the next round, and the marks count over all of them. The first table
 ranks the models: most cases passed first; at a tie, fewest expected
 discrepancies missed (the column Missed), since a missed shortfall costs money
-and nobody notices it; then the lower cost. It gives each model's marks,
+and nobody notices it; then the lower cost. A case that got no answer, or
+stopped, misses all of its discrepancies. It gives each model's marks,
 invalid calls, mean steps, cost and wall time; under it each model's cases with
 their round, steps, cost and seconds. `--out` holds the same, every call with
 its input and result, and the tokens of every model call (`usage`).
