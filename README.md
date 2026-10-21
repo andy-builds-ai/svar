@@ -187,13 +187,9 @@ not broken down. The whole rehearsal with all measurements took 11 minutes
   answers to English documents. A withheld answer's text is not kept, so
   whether each was right is not known; that the check withholds right ones
   there is measured (3 of 19 in the grounding row above).
-- The 6 of 42 questions built to tempt the model that were not right are not
-  listed for the Frankfurt run of 14.10.2026, and neither is whether a check
-  withheld each. For Nova Pro in Ireland on 14.10.2026 the six that were not
-  right were c10, c20, c21, c22, c24 and c32, with each of two prompt
-  wordings, and no answer added a figure
-  ([decisions.md:944](docs/decisions.md?plain=1#L944)); the entry does not
-  say what each one got instead.
+- In the Frankfurt control run of 14.10.2026, 6 of 42 questions built to
+  tempt the model were not answered right; which six, and whether a check
+  withheld them, is not recorded here.
 - The models do not answer the same question the same way twice. One run of
   each set is one sample and gives no rate.
 - The German documents of the fictional craft firm are not in this

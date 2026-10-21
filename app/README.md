@@ -451,8 +451,7 @@ for a demo key it is the count and the TTL repair, which a plan item never
 needs). A demo question is still one write.
 
 **A full quota** is a **429** with one sentence, in the language of the
-request. From the next deploy on it reads (until then the deployed function
-asks the reader to get in touch with their contact person):
+request. It reads:
 
 - *This key's quota of 6,000 questions for this month is reached. Please ask
   whoever gave you this key for more questions.* (*Das Kontingent von 6.000
