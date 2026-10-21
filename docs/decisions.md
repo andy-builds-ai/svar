@@ -1394,13 +1394,14 @@ The findings:
    also the slowest of the three: 1,791 s for the 72 cases, 20.8 s the median
    case, and 97.1 s the longest (`p7`, round 1).
 
-The pick: by the rule, MiniMax M2.5 stands first in the second run with 67 of
-72, against 57 and 51. Devstral 2 123B has no row in `VENDOR_SETTINGS` and
-ran only in the first run, with 58. MiniMax M2.1 had 69 in the first run and
-is out of the choice. The two runs differ in settings and in the version of
-the loop, so a row of one run and a row of the other do not rank two models
-against each other; the pick sets M2.5 of the second run against the first
-run's rows, and on that the operator chose.
+The pick rests on the second run. There, with the settings of the makers,
+MiniMax M2.5 stands first by the rule, with 67 of 72 against 57 and 51, and
+the operator chose on that. Devstral 2 123B was not part of that run: the
+operator chose it from the proposal MiniMax M2.1, MiniMax M2.5, Nemotron 3
+Super and gpt-oss-20b, and M2.1 dropped out afterwards. So Devstral has no
+row in `VENDOR_SETTINGS`; in the first run it passed 58 of 72. The two runs
+differ in settings and in the version of the loop, so a row of one run and a
+row of the other do not rank two models against each other.
 
 What this does not show. The 24 cases are made up, twelve of them in this
 build, and their documents come from the case file, not from a real system.

@@ -87,7 +87,7 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
 
 ## Decisions and what each one costs
 
-98 decisions are written down with their dates and reasons in
+99 decisions are written down with their dates and reasons in
 [docs/decisions.md](docs/decisions.md). The ones that shape the system:
 
 - **Nothing with a monthly base fee**
