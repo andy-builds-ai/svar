@@ -1284,6 +1284,131 @@ of the case file fails the run, since it says nothing about the model.
 all 24 cases against those twelve on a run against a stub; reckoned, not
 measured.
 
+**2026-10-21 — MiniMax M2.5 is Vard's model.** The operator decided after
+the paid runs of `scripts/receiving_probe.py` in eu-central-1 on the 24 cases:
+the four candidates, Claude Sonnet 4.6 once, and three of the candidates
+again, each called as its maker recommends. Every candidate ran three rounds,
+so 72 cases. The entries above say the second build picks the model; this one
+is the pick and what it rests on. The rule is that of the entry above: the
+most cases passed, then the fewest discrepancies missed, then the cheaper,
+because a missed shortfall costs money and nobody notices it.
+
+*The first run*, 13:30 to 14:01, 0.599 USD of at most 1.00, used the settings
+of the first build: temperature 0, no top_p, `maxTokens` 4,096, the model's
+reasoning left out, a read timeout of 40 s. "Missed" counts discrepancies;
+"closed right" counts the cases, of 72, that ended with the right tool.
+
+| Model | Passed | Missed | Closed right | USD | Median seconds per case |
+|---|---|---|---|---|---|
+| MiniMax M2.1 | 69 | 3 | 72 | 0.277 | 9.4 |
+| Nemotron 3 Super | 64 | 12 | 68 | 0.111 | 5.4 |
+| Devstral 2 123B | 58 | 7 | 66 | 0.173 | 3.2 |
+| gpt-oss-20b | 49 | 29 | 52 | 0.038 | 2.2 |
+
+Passed by round, of 24: MiniMax M2.1 23, 24 and 22; Nemotron 21, 22 and 21;
+Devstral 20, 19 and 19; gpt-oss-20b 15, 17 and 17. Two calls ran past the
+40 s (Nemotron in `p4`, Devstral in `p8`, both in round 3) and the run ended
+with exit code 2; the two cases are counted in the table. 19 of the 72 cases
+of gpt-oss-20b ended in a `ValidationException`, a fault of the loop (finding
+1 below).
+
+*Claude Sonnet 4.6*, once, 14:01 to 14:03, 0.708 USD of at most 1.30, passed
+24 of 24 and missed nothing. It runs behind the EU profile, which routes to
+every EU region, so it is no candidate. It shows that the cases can be solved.
+
+*MiniMax M2.1 left the choice.* The operator decided so because AWS lists it
+as Legacy, with end of life on 30.03.2027, and MiniMax M2.5 as Active (AWS
+model cards, read on 21.10.2026:
+[M2.1](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-minimax-minimax-m2-1.html),
+[M2.5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-minimax-minimax-m2-5.html)).
+MiniMax M2.5, the newer model of the same maker, took its place. It was no
+candidate: it had passed 21 of 24 on the twelve cases of the first build
+(entry "The first build of Vard closes with four candidates"). It ran only in
+the second run, so no run measured it at the settings of the first.
+
+*Each model as its maker recommends.* The operator decided that the loop
+should hold no model back, so `--vendor-settings` calls the three models that
+stayed with the settings of their makers (`VENDOR_SETTINGS` in the script,
+with the source of each row), `maxTokens` 8,192 and a read timeout of 300 s:
+
+| Model | temperature | top_p | Reasoning given back |
+|---|---|---|---|
+| MiniMax M2.5 | 1.0 | 0.95 | yes |
+| Nemotron 3 Super | 1.0 | 0.95 | no |
+| gpt-oss-20b | 1.0 | 1.0 | yes |
+
+The `top_k` of 40 that MiniMax names is no field of Converse's
+`inferenceConfig` and is not set. A direct call of Converse on 21.10.2026
+returned the reasoning as a `reasoningContent` block for MiniMax M2.5 and
+gpt-oss-20b, and only text for Nemotron 3 Super, so there is nothing of
+Nemotron's to give back. A live probe, one rest delivery (`p8`) per model, cost
+0.006 USD: Bedrock took all three settings. MiniMax M2.5 and Nemotron passed
+the case; gpt-oss-20b reported an article as missing where its quantity was
+short.
+
+*The second run*, 15:12 to 16:08, 0.382 USD of at most 1.50, ran the three
+models with these settings, three rounds, 24 cases.
+
+| Model | Passed | Missed | Closed right | Invalid calls | USD | Median seconds per case |
+|---|---|---|---|---|---|---|
+| MiniMax M2.5 | 67 | 6 | 69 | 0 | 0.222 | 20.8 |
+| Nemotron 3 Super | 57 | 11 | 62 | 0 | 0.114 | 5.3 |
+| gpt-oss-20b | 51 | 7 | 69 | 25 | 0.046 | 2.8 |
+
+Passed by round, of 24: MiniMax M2.5 23, 22 and 22; Nemotron 18, 19 and 20;
+gpt-oss-20b 16, 18 and 17. No reply was cut off at 8,192 tokens; the longest
+was 3,258 tokens (gpt-oss-20b). The run ended with exit code 2 because of
+three read timeouts of Nemotron; its cases are counted in the table.
+
+The findings:
+
+1. **A name Bedrock rejects ended cases of gpt-oss-20b.** In the first run
+   the loop wrote the model's tool name into the conversation as it came.
+   The name did not fit Bedrock's pattern for tool names (letters, digits,
+   `_` and `-`), the loop refused the call, and Bedrock refused the next
+   request that held the name. That is the 19 cases. The loop now writes a
+   stand-in name (`invalid_tool_name`) into the conversation and keeps the
+   model's own for the call, which still counts as invalid. In the second run
+   gpt-oss-20b wrote 25 such names, 23 of the form
+   `get_purchase_order<|channel|>commentary` and 2 ending in `<|channel|>json`.
+   The loop refused each, Bedrock took the conversation, and no case ended in
+   a `ValidationException`. The rule stays that an invalid call fails the
+   case. 17 of the 21 cases it failed held one; in 16 of those 17 the model
+   had otherwise found everything, made nothing up and closed with the right
+   tool.
+2. **Nemotron 3 Super ran past the read timeout again.** In the second run
+   three calls did not answer within 300 s (`p3` and `k4` in round 2, `k12` in
+   round 3). Together they took 900.6 s of the model's 1,309.0 s. The longer
+   timeout did not help; whether those calls would ever have answered is not
+   known.
+3. **Nemotron 3 Super did worse with its maker's settings.** It passed 64 of
+   72 in the first run and 57 in the second, and closed right in 68 and 62.
+   The second run changed temperature, top_p, `maxTokens` and the read
+   timeout together, and ran on a later version of the loop; the runs do not
+   say which of these moved the result. A run of Nemotron at temperature 0 and
+   300 s would tell; it was not made.
+4. **MiniMax M2.5 still misses.** It failed 5 of 72 cases and missed 6
+   discrepancies. In three of the five it closed a note that held a
+   discrepancy with `report_match` (`k3` in round 1, `k1` and `k11` in round
+   3). `k11`, the successor article, failed in two of three rounds. It is
+   also the slowest of the three: 1,791 s for the 72 cases, 20.8 s the median
+   case, and 97.1 s the longest (`p7`, round 1).
+
+The pick: by the rule, MiniMax M2.5 stands first in the second run with 67 of
+72, against 57 and 51. Devstral 2 123B has no row in `VENDOR_SETTINGS` and
+ran only in the first run, with 58. MiniMax M2.1 had 69 in the first run and
+is out of the choice. The two runs differ in settings and in the version of
+the loop, so a row of one run and a row of the other do not rank two models
+against each other; the pick sets M2.5 of the second run against the first
+run's rows, and on that the operator chose.
+
+What this does not show. The 24 cases are made up, twelve of them in this
+build, and their documents come from the case file, not from a real system.
+Between rounds a model's passed cases moved by up to two. The first twelve cases
+compare with the first build only roughly (entry above). Nothing of Vard is
+deployed. The runs of 21.10.2026 cost 1.696 USD together with the live
+probe: 0.599, 0.708, 0.382 and 0.006.
+
 ## Code
 
 **2026-09-23, replaced 2026-10-07 — Files over 500 lines stayed whole.**

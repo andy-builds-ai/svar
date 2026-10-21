@@ -938,8 +938,8 @@ their round, steps, cost and seconds. `--out` holds the same, every call with
 its input and result, and the tokens of every model call (`usage`).
 `--keep-reasoning` gives a model's reasoning (Bedrock's `reasoningContent`
 blocks) back in the conversation as it came; without it the reasoning stays
-out, as on the runs of 20. and 21.10.2026. `--out` says for every model which
-it was.
+out, as on the runs of 20.10.2026 and the first two of 21.10.2026. `--out` says
+for every model which it was.
 `--vendor-settings` calls each model of `VENDOR_SETTINGS` in the script as its
 maker recommends: temperature and top_p, its reasoning given back or not,
 `maxTokens` 8,192 and a read timeout of 300 s instead of 40. Each row names its
@@ -950,7 +950,8 @@ refuses as sent fails the run with exit code 2, since the probe chose its values
 
 `--max-usd` (2.25 by default) is a hard limit. Before every model call the
 probe works out the most the call can cost: the request's size in UTF-8 bytes
-plus 500, as input tokens, and `maxTokens` (4,096) as output tokens, at the
+plus 500, as input tokens, and the request's `maxTokens` (4,096, or 8,192 with
+`--vendor-settings`) as output tokens, at the
 model's price in `infra/answer_models.py`. If what the run has spent plus that
 would pass the limit, the call is not made: the tables and `--out` are written
 and the run ends with exit code 2. A call that fails keeps its most counted,

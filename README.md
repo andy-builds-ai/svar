@@ -285,9 +285,14 @@ Vard is an agent. He takes on one responsibility after another, works on
 each with tools, and a person decides what happens. His first is the
 receiving check: he fetches a delivery note that has come in, fetches the
 purchase order it names, compares them and reports what differs. His second
-build picks his model among the four candidates below, on 24 cases instead of
-twelve, the new ones harder; its paid run is still to come
-([decisions.md:1254](docs/decisions.md?plain=1#L1254)). Running him in
+build picked his model on 24 cases instead of twelve, the new ones harder
+([decisions.md:1254](docs/decisions.md?plain=1#L1254)). It started from the
+four candidates below; MiniMax M2.1 dropped out, and MiniMax M2.5, the newer
+model of the same maker, took its place. The operator chose M2.5: it passed
+the most cases of the models measured with their makers' settings, and his
+rule puts the fewest missed discrepancies next, because a missed shortfall
+costs money and nobody notices it
+([decisions.md:1287](docs/decisions.md?plain=1#L1287)). Running him in
 Frankfurt, with a trigger for new delivery notes, memory of corrections and
 pausing, follows as a stage of its own. A support inbox, to be tried on the
 made-up software company Quillmoor, is planned after that.
@@ -322,6 +327,30 @@ four Frankfurt models at 23 of 24 are the candidates. Claude Sonnet 4.6 and
 Nova Pro run behind the EU profile, which routes to every EU region, and
 stand as a comparison only.
 
+**Measured on 21.10.2026 in Frankfurt**, 24 made-up cases, three rounds, so 72
+cases a model ([decisions.md:1287](docs/decisions.md?plain=1#L1287)). The
+four candidates ran first with the settings of the first build: MiniMax M2.1
+passed 69, Nemotron 3 Super 64, Devstral 2 123B 58 and gpt-oss-20b 49. 19 of
+gpt-oss-20b's cases ended in an error of Vard's loop, which is fixed. MiniMax
+M2.1 was left out of the choice because AWS lists it as Legacy, with end of
+life on 30.03.2027. Claude Sonnet 4.6, run once to see that the cases can be
+solved, passed all 24. Then three models ran again, each as its maker
+recommends (temperature, top_p, its reasoning given back or not, a read
+timeout of 300 s):
+
+| Model | Passed, of 72 | Discrepancies missed | USD | Median seconds per case |
+|---|---|---|---|---|
+| MiniMax M2.5 | 67 | 6 | 0.222 | 20.8 |
+| Nemotron 3 Super | 57 | 11 | 0.114 | 5.3 |
+| gpt-oss-20b | 51 | 7 | 0.046 | 2.8 |
+
+Three of Nemotron's calls did not answer within 300 s. gpt-oss-20b wrote 25
+tool names that do not exist, and a case with such a call fails. MiniMax
+M2.5 missed discrepancies in 5 cases, in three of them it closed the note as
+matching, and it is the slowest of the three. The two runs used different settings, so
+their rows do not compare directly. The cases are made up, twelve of them in
+this build; the result says nothing about real delivery notes.
+
 **What Vard does not do yet.** So far he is only measured: nothing of him is
 deployed, nothing starts him when a delivery note comes in, he remembers no
 correction, and he books nothing. The documents come from the case file, not
@@ -332,8 +361,10 @@ python -m scripts.receiving_probe --out receiving.json   # every model of FRANKF
 ```
 
 It calls real models in `eu-central-1`; the two full runs on 20.10.2026, on
-the first twelve cases, cost 0.488 and 0.490 USD. `--max-usd` stops it before any call that could take it
-past the limit. How it scores:
+the first twelve cases, cost 0.488 and 0.490 USD, and the runs of 21.10.2026,
+on all 24 cases, 0.599 (four candidates), 0.708 (Claude Sonnet 4.6) and 0.382
+USD (three models with `--vendor-settings`). `--max-usd` stops it before any
+call that could take it past the limit. How it scores:
 [scripts/README.md](scripts/README.md#receiving_probe--which-model-vard-checks-deliveries-with).
 
 ## Build and test it
