@@ -8,7 +8,8 @@ refusal and counts as invalid. A tool that fails while it runs does not stop the
 its error goes back to the model under the key "error", and the call keeps it; the model did nothing
 wrong, so the call is not invalid. Into the conversation goes back only what Bedrock takes: a
 call whose name, id or input it would refuse stands there with a valid stand-in, while the `Call`
-keeps what the model sent and the refusal names it. The client is anything with Bedrock's
+keeps what the model sent and the refusal names it. A model's reasoning stays out of the
+conversation unless `keep_reasoning` asks for it back. The client is anything with Bedrock's
 `converse`; the loop imports nothing of AWS.
 """
 
@@ -171,13 +172,18 @@ def answer(call: Call) -> Any:
     return call.result
 
 
-def kept(content: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    """The blocks of a reply that go back into the conversation: text that is not empty, and
-    tool calls. Reasoning stays out; not every model is known to take it back."""
+def kept(
+    content: Sequence[Mapping[str, Any]], keep_reasoning: bool = False
+) -> list[Mapping[str, Any]]:
+    """The blocks of a reply that go back into the conversation, in their order: text that is
+    not empty, and tool calls. Reasoning (`reasoningContent`) goes back as it came only with
+    `keep_reasoning`: not every model is known to take it back, and some need it."""
     return [
         block
         for block in content
-        if "toolUse" in block or (isinstance(block.get("text"), str) and block["text"].strip())
+        if "toolUse" in block
+        or (isinstance(block.get("text"), str) and block["text"].strip())
+        or (keep_reasoning and "reasoningContent" in block)
     ]
 
 
@@ -206,6 +212,7 @@ def run(
     approve: Approve | None = None,
     max_tokens: int = 2048,
     temperature: float = 0.0,
+    keep_reasoning: bool = False,
 ) -> Outcome:
     """Work through one message: call the model, run or refuse its tool calls, repeat."""
     tools = {tool.name: tool for tool in responsibility.tools}
@@ -232,7 +239,7 @@ def run(
             outcome.ended = ANSWERED
             return outcome
         sent, history = [], []
-        for block in kept(content):
+        for block in kept(content, keep_reasoning):
             if "toolUse" in block:
                 sent.append(sendable(block["toolUse"], outcome.steps, len(sent) + 1, taken))
                 block = {"toolUse": sent[-1]}

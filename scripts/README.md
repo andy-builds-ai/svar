@@ -936,6 +936,9 @@ stopped, misses all of its discrepancies. It gives each model's marks,
 invalid calls, mean steps, cost and wall time; under it each model's cases with
 their round, steps, cost and seconds. `--out` holds the same, every call with
 its input and result, and the tokens of every model call (`usage`).
+`--keep-reasoning` gives a model's reasoning (Bedrock's `reasoningContent`
+blocks) back in the conversation as it came; without it the reasoning stays
+out, as on the runs of 20. and 21.10.2026, and `--out` says which it was.
 
 `--max-usd` (2.25 by default) is a hard limit. Before every model call the
 probe works out the most the call can cost: the request's size in UTF-8 bytes

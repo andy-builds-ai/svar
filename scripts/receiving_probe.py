@@ -14,6 +14,7 @@ the run past it is not made.
 """
 
 import argparse
+import base64
 import dataclasses
 import json
 import statistics
@@ -153,10 +154,17 @@ def tokens_cost(model: AnswerModel, usage: Mapping[str, Any]) -> Decimal:
     ) / 1000
 
 
+def wire(value: Any) -> str:
+    """Bytes in a request, as redacted reasoning is, the way they travel: in base64."""
+    if isinstance(value, bytes | bytearray):
+        return base64.b64encode(value).decode("ascii")
+    raise TypeError(f"{type(value).__name__} cannot be sent")
+
+
 def call_ceiling(model: AnswerModel, request: Mapping[str, Any]) -> Decimal:
     """The most a call can cost: a token is never shorter than a byte, so the request's UTF-8
     size plus the template bounds the input, and maxTokens the output."""
-    size = len(json.dumps(request, ensure_ascii=False).encode("utf-8"))
+    size = len(json.dumps(request, ensure_ascii=False, default=wire).encode("utf-8"))
     return (
         (size + TEMPLATE_TOKENS) * Decimal(model.input_per_1k)
         + request["inferenceConfig"]["maxTokens"] * Decimal(model.output_per_1k)
@@ -299,6 +307,7 @@ def run_case(
     companies: Mapping[str, str],
     case: Mapping[str, Any],
     label: str,
+    keep_reasoning: bool = False,
 ) -> dict[str, Any]:
     """The marks of one case. `CostLimitReached`, a missing login and a missing permission
     stop the run; any other failed call, and a tool that failed, is a row."""
@@ -309,6 +318,7 @@ def run_case(
             case_responsibility(companies, case),
             case["message"],
             max_tokens=MAX_TOKENS,
+            keep_reasoning=keep_reasoning,
         )
     except Exception as exc:  # noqa: BLE001 - only botocore's are read below
         if not type(exc).__module__.startswith("botocore"):
@@ -354,6 +364,7 @@ def run_model(
     companies: Mapping[str, str],
     cases: Sequence[Mapping[str, Any]],
     rounds: int = 1,
+    keep_reasoning: bool = False,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """The rows of one model, every case once a round, and why the run stopped, if it did: at
     the cost limit, or for a missing login or permission. The rows before the stop are kept; they
@@ -366,7 +377,7 @@ def run_model(
             started, spent, calls = time.perf_counter(), meter.spent, meter.calls
             stopped = None
             try:
-                marks = run_case(meter, model, companies, case, name)
+                marks = run_case(meter, model, companies, case, name, keep_reasoning)
             except (CostLimitReached, AwsProblem) as stop:
                 where = " at the cost limit" if isinstance(stop, CostLimitReached) else ""
                 stopped = f"stopped{where}: {stop}"
@@ -452,6 +463,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--max-usd", type=usd, default=DEFAULT_MAX_USD)
     parser.add_argument("--repeat", type=rounds_count, default=1, help="rounds over all cases")
+    parser.add_argument(
+        "--keep-reasoning",
+        action="store_true",
+        help="give a model's reasoning back in the conversation (off on 20. and 21.10.2026)",
+    )
     args = parser.parse_args(argv)
     if not args.region.startswith("eu-"):
         print(f"error: {args.region} is not an EU region", file=sys.stderr)
@@ -483,13 +499,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         meter.runtime = model_client(args.region)
         for model in models:
-            rows, stopped = run_model(meter, model, companies, cases, args.repeat)
+            rows, stopped = run_model(
+                meter, model, companies, cases, args.repeat, args.keep_reasoning
+            )
             runs[model.name] = rows
             summaries.append(summarise(model, rows, stopped is not None))
             if args.out:
                 result = {
                     "max_usd": str(args.max_usd),
                     "repeat": args.repeat,
+                    "keep_reasoning": args.keep_reasoning,
                     "summaries": ranked(summaries),
                     "runs": runs,
                 }

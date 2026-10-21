@@ -1,5 +1,6 @@
 """Vard's loop without AWS: a scripted model, and a second responsibility that is no receiving."""
 
+import copy
 import json
 import re
 from collections.abc import Sequence
@@ -372,3 +373,33 @@ def test_a_result_the_loop_cannot_tell_fails_the_tool_and_the_loop_goes_on() -> 
     outcome = engine.run(model, "m", with_tool(odd), "T-1")
     (failed,) = outcome.failed
     assert failed.failed.startswith("TypeError") and outcome.ended == engine.CLOSED
+
+
+#: The two forms of ReasoningContentBlock in the bedrock-runtime service model: reasoningText
+#: (text, signature) or redactedContent (a blob).
+THOUGHT = {"reasoningContent": {"reasoningText": {"text": "Erst lesen.", "signature": "c2ln"}}}
+REDACTED = {"reasoningContent": {"redactedContent": b"\x00\x01opaque"}}
+
+
+class Keeping(Scripted):
+    """A model that keeps each request as it was sent, bytes and all."""
+
+    def converse(self, **request: Any) -> dict[str, Any]:
+        self.requests.append(copy.deepcopy(request))
+        return self.replies.pop(0)
+
+
+@pytest.mark.parametrize("keep", [True, False])
+@pytest.mark.parametrize("thought", [THOUGHT, REDACTED], ids=["text", "redacted"])
+def test_the_reasoning_goes_back_only_when_asked_for(keep: bool, thought: dict[str, Any]) -> None:
+    model = Keeping(
+        [
+            reply(thought, {"text": "Ich lese."}, use("get_ticket", {"ticket": "T-1"})),
+            reply(thought, use("close_ticket", {"ticket": "T-1"}, 2)),
+        ]
+    )
+    outcome = engine.run(model, "m", support_inbox({"T-1": "x"}, []), "T-1", keep_reasoning=keep)
+    assert outcome.ended == engine.CLOSED
+    history = model.requests[1]["messages"][1]["content"]
+    expected = [thought, {"text": "Ich lese."}, use("get_ticket", {"ticket": "T-1"})]
+    assert history == (expected if keep else expected[1:])

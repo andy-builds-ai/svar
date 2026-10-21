@@ -546,3 +546,52 @@ def test_a_tool_of_the_case_file_that_fails_fails_the_run(
     assert rows["p1"]["why"] == "error: get_purchase_order failed: KeyError: 'index'"
     assert rows["p1"]["call_failed"] and rows["p1"]["calls"][1]["failed"] == "KeyError: 'index'"
     assert rows["k4"]["passed"] and not rows["k4"].get("call_failed")
+
+
+class Thinking(Clerk):
+    """The clerk, with a thought before each reply; it counts the later requests that hand a
+    thought back."""
+
+    def __init__(self, cases: Sequence[dict[str, Any]]) -> None:
+        super().__init__(cases)
+        self.handed_back = 0
+
+    def converse(self, **request: Any) -> dict[str, Any]:
+        history = [block for m in request["messages"] for block in m["content"]]
+        self.handed_back += any("reasoningContent" in block for block in history)
+        answer = super().converse(**request)
+        thought = {"reasoningContent": {"reasoningText": {"text": "Erst lesen."}}}
+        answer["output"]["message"]["content"].insert(0, thought)
+        return answer
+
+
+@pytest.mark.parametrize("keep", [True, False])
+def test_keep_reasoning_hands_the_thought_back_and_says_so_in_out(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+    keep: bool,
+) -> None:
+    clerk = Thinking(loaded[1])
+    out = tmp_path / "receiving.json"
+    argv = ["--out", str(out), *(["--keep-reasoning"] if keep else [])]
+    assert run_main(monkeypatch, clerk, *argv) == 0
+    result = json.loads(out.read_text(encoding="utf-8"))
+    assert result["keep_reasoning"] is keep
+    assert (clerk.handed_back > 0) is keep
+    (summary,) = result["summaries"]
+    assert summary["passed"] == "24/24"
+
+
+def test_redacted_reasoning_counts_in_the_ceiling_as_it_travels() -> None:
+    model = probe.MODELS[0]
+    blob = b"\x00" * 300
+    request = {
+        "messages": [
+            {"role": "assistant", "content": [{"reasoningContent": {"redactedContent": blob}}]}
+        ],
+        "inferenceConfig": {"maxTokens": 2048},
+    }
+    plain = {**request, "messages": []}
+    grown = probe.call_ceiling(model, request) - probe.call_ceiling(model, plain)
+    assert grown >= 400 * Decimal(model.input_per_1k) / 1000  # 300 bytes are 400 in base64
