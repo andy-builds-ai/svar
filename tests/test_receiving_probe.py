@@ -1,6 +1,7 @@
 """The receiving probe: how a check is judged, the rounds and the ranking, the cost limit,
 without AWS. The case file has its own tests in test_receiving_cases.py."""
 
+import copy
 import json
 import re
 from collections.abc import Sequence
@@ -638,3 +639,143 @@ def test_the_output_prints_a_lone_surrogate_as_its_escape(monkeypatch: pytest.Mo
     print(f"Lieferschein {LONE} ü")
     stream.flush()
     assert raw.getvalue() == "Lieferschein \\ud800 ü\n".encode()
+
+
+class Recording(Thinking):
+    """The thinking clerk, which also keeps each model's inferenceConfig and the thoughts it was
+    handed back."""
+
+    def __init__(self, cases: Sequence[dict[str, Any]]) -> None:
+        super().__init__(cases)
+        self.configs: dict[str, set[str]] = {}
+        self.thoughts: dict[str, int] = {}
+
+    def converse(self, **request: Any) -> dict[str, Any]:
+        model = request["modelId"]
+        self.configs.setdefault(model, set()).add(json.dumps(request["inferenceConfig"]))
+        before = self.handed_back
+        answer = super().converse(**request)
+        self.thoughts[model] = self.thoughts.get(model, 0) + self.handed_back - before
+        return answer
+
+
+#: Three models of the vendors' table, and one without a row.
+VENDOR_RUN = ["MiniMax M2.5", "Nemotron 3 Super", "gpt-oss-20b", "gpt-oss-120b"]
+
+
+def ids(names: Sequence[str]) -> dict[str, str]:
+    return {m.name: m.model_id for m in probe.MODELS if m.name in names}
+
+
+@pytest.mark.parametrize("vendor", [True, False])
+def test_vendor_settings_call_each_model_as_its_maker_recommends(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+    vendor: bool,
+) -> None:
+    clerk = Recording(loaded[1])
+    monkeypatch.setattr(probe, "model_client", lambda region: clerk)
+    out = tmp_path / "receiving.json"
+    argv = [arg for name in VENDOR_RUN for arg in ("--model", name)] + ["--out", str(out)]
+    assert probe.main([*argv, *(["--vendor-settings"] if vendor else [])]) == 0
+    model_id = ids(VENDOR_RUN)
+    configs = {name: clerk.configs[model_id[name]] for name in VENDOR_RUN}
+    before = {json.dumps({"maxTokens": 4096, "temperature": 0.0})}
+    if vendor:
+        assert configs["MiniMax M2.5"] == {
+            json.dumps({"maxTokens": 8192, "temperature": 1.0, "topP": 0.95})
+        }
+        assert configs["Nemotron 3 Super"] == configs["MiniMax M2.5"]
+        assert configs["gpt-oss-20b"] == {
+            json.dumps({"maxTokens": 8192, "temperature": 1.0, "topP": 1.0})
+        }
+    else:
+        assert all(configs[name] == before for name in VENDOR_RUN[:3])
+    assert configs["gpt-oss-120b"] == before
+    handed = {name: clerk.thoughts.get(model_id[name], 0) > 0 for name in VENDOR_RUN}
+    assert handed == {
+        "MiniMax M2.5": vendor,
+        "Nemotron 3 Super": False,
+        "gpt-oss-20b": vendor,
+        "gpt-oss-120b": False,
+    }
+    result = json.loads(out.read_text(encoding="utf-8"))
+    origin = {s["model"]: s["settings"]["from"] for s in result["summaries"]}
+    assert origin["gpt-oss-120b"] == ("no vendor row, defaults" if vendor else "defaults")
+    assert origin["MiniMax M2.5"] == ("vendor" if vendor else "defaults")
+    assert result["vendor_settings"] is vendor
+    assert result["keep_reasoning"] is (None if vendor else False)
+    printed = capsys.readouterr()
+    assert "Settings: no vendor row, defaults: temperature 0.0" in printed.out or not vendor
+    assert ("MiniMax M2.5: vendor: temperature 1.0, top_p 0.95" in printed.err) is vendor
+
+
+MINIMAX = next(m for m in probe.MODELS if m.name == "MiniMax M2.5")
+
+
+class Keeps(Clerk):
+    """The clerk, keeping every request as sent."""
+
+    def __init__(self, cases: Sequence[dict[str, Any]]) -> None:
+        super().__init__(cases)
+        self.sent: list[dict[str, Any]] = []
+
+    def converse(self, **request: Any) -> dict[str, Any]:
+        self.sent.append(copy.deepcopy(request))
+        return super().converse(**request)
+
+
+def minimax_run(
+    monkeypatch: pytest.MonkeyPatch, cases: list[dict[str, Any]], limit: str, vendor: bool
+) -> Keeps:
+    clerk = Keeps(cases)
+    monkeypatch.setattr(probe, "model_client", lambda region: clerk)
+    argv = ["--model", MINIMAX.name, "--max-usd", limit]
+    probe.main([*argv, *(["--vendor-settings"] if vendor else [])])
+    return clerk
+
+
+def test_the_cost_limit_counts_the_vendors_higher_max_tokens(
+    monkeypatch: pytest.MonkeyPatch, loaded: tuple[dict[str, str], list[dict[str, Any]]]
+) -> None:
+    """A limit just above the first call's ceiling at 4,096 output tokens lets that call through
+    with the defaults, and stops it with the vendor's 8,192."""
+    before = minimax_run(monkeypatch, loaded[1], "100", vendor=False).sent[0]
+    vendor = minimax_run(monkeypatch, loaded[1], "100", vendor=True).sent[0]
+    ceilings = [probe.call_ceiling(MINIMAX, request) for request in (before, vendor)]
+    assert (
+        ceilings[1] - ceilings[0]
+        == 4096 * Decimal(MINIMAX.output_per_1k) / 1000
+        + (
+            Decimal(len(json.dumps(vendor)) - len(json.dumps(before)))
+            * Decimal(MINIMAX.input_per_1k)
+        )
+        / 1000
+    )
+    limit = str(ceilings[0] + Decimal("0.0001"))
+    assert len(minimax_run(monkeypatch, loaded[1], limit, vendor=False).sent) == 1
+    assert minimax_run(monkeypatch, loaded[1], limit, vendor=True).sent == []
+
+
+def test_a_reply_cut_off_names_the_max_tokens_it_ran_with(
+    cases: dict[str, dict[str, Any]],
+) -> None:
+    cut = engine.Outcome(ended=engine.ANSWERED, steps=1, stop_reason="max_tokens")
+    assert "cut off at 8192 tokens" in probe.judge(cases["p1"], cut, 8192)["why"]
+
+
+@pytest.mark.parametrize("vendor, code", [(True, 2), (False, 0)])
+def test_a_refused_request_with_a_vendor_row_is_the_probes_mistake(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    vendor: bool,
+    code: int,
+) -> None:
+    monkeypatch.setattr(
+        probe, "model_client", lambda region: runtime_raising(converse_error("ValidationException"))
+    )
+    argv = ["--model", "MiniMax M2.5", *(["--vendor-settings"] if vendor else [])]
+    assert probe.main(argv) == code
+    assert ("error: failed calls, counted as failed" in capsys.readouterr().err) is vendor

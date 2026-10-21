@@ -212,12 +212,16 @@ def run(
     approve: Approve | None = None,
     max_tokens: int = 2048,
     temperature: float = 0.0,
+    top_p: float | None = None,
     keep_reasoning: bool = False,
 ) -> Outcome:
     """Work through one message: call the model, run or refuse its tool calls, repeat."""
     tools = {tool.name: tool for tool in responsibility.tools}
     specs = [tool.spec() for tool in responsibility.tools]
     messages: list[dict[str, Any]] = [{"role": "user", "content": [{"text": message}]}]
+    inference: dict[str, Any] = {"maxTokens": max_tokens, "temperature": temperature}
+    if top_p is not None:
+        inference["topP"] = top_p
     outcome = Outcome()
     # Every call's id in the conversation; a result answers exactly one of them.
     taken: set[str] = set()
@@ -227,7 +231,7 @@ def run(
             system=[{"text": responsibility.task}],
             messages=messages,
             toolConfig={"tools": specs},
-            inferenceConfig={"maxTokens": max_tokens, "temperature": temperature},
+            inferenceConfig=inference,
         )
         outcome.steps += 1
         outcome.usage.append(dict(response.get("usage", {})))

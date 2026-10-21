@@ -42,6 +42,63 @@ MODELS = FRANKFURT_MODELS
 #: positions, must fit. No reply of the twelve short cases was cut off at 2,048 (20.10.2026).
 MAX_TOKENS = 4096
 
+
+@dataclasses.dataclass(frozen=True)
+class Settings:
+    """How a model is called; the defaults are those of the run of 21.10.2026 (the runs of
+    20.10.2026 had maxTokens 2,048)."""
+
+    temperature: float = 0.0
+    top_p: float | None = None
+    keep_reasoning: bool = False
+    max_tokens: int = MAX_TOKENS
+    #: A row of VENDOR_SETTINGS: the probe chose these values, so a request Bedrock refuses as
+    #: sent is the probe's mistake, not the model's.
+    vendor: bool = False
+
+
+#: The settings of the run of 21.10.2026.
+AS_BEFORE = Settings()
+
+#: maxTokens with --vendor-settings; AWS lets MiniMax M2.5 write 8K, Nemotron 3 Super 32K and
+#: gpt-oss-20b 16K (the operator's research, 21.10.2026).
+VENDOR_MAX_TOKENS = 8192
+
+#: What each model's maker recommends, read at the source on 21.10.2026. top_k, which MiniMax
+#: also names (40), is no field of Converse's inferenceConfig and is not set.
+VENDOR_SETTINGS = {
+    # huggingface.co/MiniMaxAI/MiniMax-M2.5; the reasoning goes back, which MiniMax calls
+    # essential: platform.minimax.io/docs/guides/text-m2-function-call
+    "MiniMax M2.5": Settings(1.0, 0.95, True, VENDOR_MAX_TOKENS, vendor=True),
+    # huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16, "reasoning, tool calling,
+    # and general chat alike"; it names no rule for giving the reasoning back, so it stays out.
+    "Nemotron 3 Super": Settings(1.0, 0.95, False, VENDOR_MAX_TOKENS, vendor=True),
+    # github.com/openai/gpt-oss (README); the reasoning of earlier turns stays while the last
+    # assistant message is a tool call:
+    # developers.openai.com/cookbook/articles/gpt-oss/handle-raw-cot
+    "gpt-oss-20b": Settings(1.0, 1.0, True, VENDOR_MAX_TOKENS, vendor=True),
+}
+
+
+def settings_for(model: AnswerModel, vendor: bool, keep_reasoning: bool) -> tuple[Settings, str]:
+    """A model's settings, and where they come from: its maker's with --vendor-settings and a
+    row in the table, else the defaults of the run of 21.10.2026, with the reasoning as
+    --keep-reasoning says."""
+    if vendor and model.name in VENDOR_SETTINGS:
+        return VENDOR_SETTINGS[model.name], "vendor"
+    origin = "no vendor row, defaults" if vendor else "defaults"
+    return Settings(keep_reasoning=keep_reasoning), origin
+
+
+def settings_text(settings: Mapping[str, Any]) -> str:
+    top_p = "no top_p" if settings["top_p"] is None else f"top_p {settings['top_p']}"
+    reasoning = "reasoning given back" if settings["keep_reasoning"] else "reasoning left out"
+    return (
+        f"{settings['from']}: temperature {settings['temperature']}, {top_p}, {reasoning}, "
+        f"maxTokens {settings['max_tokens']}"
+    )
+
+
 #: About twice what one round of all eleven models is reckoned to cost on the 24 cases: 0.49 USD
 #: measured for the first twelve (20.10.2026), times 2.29, the request bytes of all 24 cases
 #: against those twelve on a run against a stub. The paid run sets its own with --max-usd.
@@ -265,7 +322,9 @@ ENDINGS = {
 }
 
 
-def judge(case: Mapping[str, Any], outcome: engine.Outcome) -> dict[str, Any]:
+def judge(
+    case: Mapping[str, Any], outcome: engine.Outcome, max_tokens: int = MAX_TOKENS
+) -> dict[str, Any]:
     """Whether the check closed rightly, found every discrepancy and made none up."""
     closing = outcome.closing
     names = [call.name for call in closing]
@@ -281,7 +340,7 @@ def judge(case: Mapping[str, Any], outcome: engine.Outcome) -> dict[str, Any]:
     elif not names:
         cut_off = outcome.ended == engine.ANSWERED and outcome.stop_reason == CUT_OFF
         why.append(
-            f"cut off at {MAX_TOKENS} tokens without a closing tool"
+            f"cut off at {max_tokens} tokens without a closing tool"
             if cut_off
             else ENDINGS[outcome.ended]
         )
@@ -308,7 +367,7 @@ def run_case(
     companies: Mapping[str, str],
     case: Mapping[str, Any],
     label: str,
-    keep_reasoning: bool = False,
+    settings: Settings = AS_BEFORE,
 ) -> dict[str, Any]:
     """The marks of one case. `CostLimitReached`, a missing login and a missing permission
     stop the run; any other failed call, and a tool that failed, is a row."""
@@ -318,8 +377,10 @@ def run_case(
             model.model_id,
             case_responsibility(companies, case),
             case["message"],
-            max_tokens=MAX_TOKENS,
-            keep_reasoning=keep_reasoning,
+            max_tokens=settings.max_tokens,
+            temperature=settings.temperature,
+            top_p=settings.top_p,
+            keep_reasoning=settings.keep_reasoning,
         )
     except Exception as exc:  # noqa: BLE001 - only botocore's are read below
         if not type(exc).__module__.startswith("botocore"):
@@ -332,7 +393,8 @@ def run_case(
             "passed": False,
             "why": f"error: {exc}",
             "missed": len(case["findings"]),
-            "call_failed": error_code(exc) != REFUSED_AS_SENT,
+            # Refused as sent is the model's result, unless the vendor row set the request.
+            "call_failed": settings.vendor or error_code(exc) != REFUSED_AS_SENT,
         }
     kept = {
         "ended": outcome.ended,
@@ -348,7 +410,7 @@ def run_case(
         print(f"{model.name} {label}: {why}", file=sys.stderr)
         missed = len(case["findings"])
         return {"passed": False, "why": why, "missed": missed, "call_failed": True, **kept}
-    marks = judge(case, outcome)
+    marks = judge(case, outcome, settings.max_tokens)
     verdict = "passed" if marks["passed"] else f"FAILED ({marks['why']})"
     print(f"{model.name} {label}: {verdict}", file=sys.stderr)
     return {**marks, **kept}
@@ -365,7 +427,7 @@ def run_model(
     companies: Mapping[str, str],
     cases: Sequence[Mapping[str, Any]],
     rounds: int = 1,
-    keep_reasoning: bool = False,
+    settings: Settings = AS_BEFORE,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """The rows of one model, every case once a round, and why the run stopped, if it did: at
     the cost limit, or for a missing login or permission. The rows before the stop are kept; they
@@ -378,7 +440,7 @@ def run_model(
             started, spent, calls = time.perf_counter(), meter.spent, meter.calls
             stopped = None
             try:
-                marks = run_case(meter, model, companies, case, name, keep_reasoning)
+                marks = run_case(meter, model, companies, case, name, settings)
             except (CostLimitReached, AwsProblem) as stop:
                 where = " at the cost limit" if isinstance(stop, CostLimitReached) else ""
                 stopped = f"stopped{where}: {stop}"
@@ -469,6 +531,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="give a model's reasoning back in the conversation (off on 20. and 21.10.2026)",
     )
+    parser.add_argument(
+        "--vendor-settings",
+        action="store_true",
+        help="call each model of VENDOR_SETTINGS as its maker recommends, with its reasoning "
+        f"as the table says and maxTokens {VENDOR_MAX_TOKENS}",
+    )
     args = parser.parse_args(argv)
     if not args.region.startswith("eu-"):
         print(f"error: {args.region} is not an EU region", file=sys.stderr)
@@ -500,16 +568,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         meter.runtime = model_client(args.region)
         for model in models:
-            rows, stopped = run_model(
-                meter, model, companies, cases, args.repeat, args.keep_reasoning
-            )
+            settings, origin = settings_for(model, args.vendor_settings, args.keep_reasoning)
+            print(f"{model.name}: {settings_text(called(settings, origin))}", file=sys.stderr)
+            rows, stopped = run_model(meter, model, companies, cases, args.repeat, settings)
             runs[model.name] = rows
-            summaries.append(summarise(model, rows, stopped is not None))
+            summary = summarise(model, rows, stopped is not None)
+            summaries.append({**summary, "settings": called(settings, origin)})
             if args.out:
                 result = {
                     "max_usd": str(args.max_usd),
                     "repeat": args.repeat,
-                    "keep_reasoning": args.keep_reasoning,
+                    # With --vendor-settings a row decides; each model's settings say.
+                    "keep_reasoning": None if args.vendor_settings else args.keep_reasoning,
+                    "vendor_settings": args.vendor_settings,
                     "summaries": ranked(summaries),
                     "runs": runs,
                 }
@@ -537,6 +608,11 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def called(settings: Settings, origin: str) -> dict[str, Any]:
+    """The settings a model ran with, as --out keeps them."""
+    return {**dataclasses.asdict(settings), "from": origin}
+
+
 def seconds_text(value: float | None) -> str:
     return "-" if value is None else f"{value:.1f}"
 
@@ -559,8 +635,11 @@ def print_tables(
             f"| {s['closed_right']} | {s['invalid_calls']} | {steps} | {s['cost_usd']:.5f} "
             f"| {seconds_text(s['seconds'])} | {seconds_text(s['median_seconds'])} |"
         )
-    for model in [s["model"] for s in order]:
+    for s in order:
+        model = s["model"]
         print(f"\n### {model}\n")
+        if "settings" in s:
+            print(f"Settings: {settings_text(s['settings'])}\n")
         print("| Case | Round | Passed | Steps | Invalid calls | USD | Seconds | Why |")
         print("|---|---|---|---|---|---|---|---|")
         for r in runs[model]:

@@ -403,3 +403,13 @@ def test_the_reasoning_goes_back_only_when_asked_for(keep: bool, thought: dict[s
     history = model.requests[1]["messages"][1]["content"]
     expected = [thought, {"text": "Ich lese."}, use("get_ticket", {"ticket": "T-1"})]
     assert history == (expected if keep else expected[1:])
+
+
+def test_top_p_goes_to_converse_only_when_given() -> None:
+    plain = Scripted([reply(use("close_ticket", {"ticket": "T-1"}))])
+    engine.run(plain, "m", support_inbox({}, []), "T-1")
+    assert plain.requests[0]["inferenceConfig"] == {"maxTokens": 2048, "temperature": 0.0}
+    tuned = Scripted([reply(use("close_ticket", {"ticket": "T-1"}))])
+    engine.run(tuned, "m", support_inbox({}, []), "T-1", temperature=1.0, top_p=0.95)
+    config = tuned.requests[0]["inferenceConfig"]
+    assert config == {"maxTokens": 2048, "temperature": 1.0, "topP": 0.95}

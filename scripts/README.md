@@ -938,7 +938,14 @@ their round, steps, cost and seconds. `--out` holds the same, every call with
 its input and result, and the tokens of every model call (`usage`).
 `--keep-reasoning` gives a model's reasoning (Bedrock's `reasoningContent`
 blocks) back in the conversation as it came; without it the reasoning stays
-out, as on the runs of 20. and 21.10.2026, and `--out` says which it was.
+out, as on the runs of 20. and 21.10.2026. `--out` says for every model which
+it was.
+`--vendor-settings` calls each model of `VENDOR_SETTINGS` in the script as its
+maker recommends: temperature and top_p, its reasoning given back or not, and
+`maxTokens` 8,192. Each row names its source. A model without a row keeps the
+defaults (temperature 0, no top_p, `maxTokens` 4,096). The output and `--out`
+say for every model which settings it ran with. With a row, a request Bedrock
+refuses as sent fails the run with exit code 2, since the probe chose its values.
 
 `--max-usd` (2.25 by default) is a hard limit. Before every model call the
 probe works out the most the call can cost: the request's size in UTF-8 bytes
