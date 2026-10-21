@@ -42,7 +42,8 @@ class Clerk:
         self.request_bytes: list[int] = []
 
     def converse(self, **request: Any) -> dict[str, Any]:
-        self.request_bytes.append(len(json.dumps(request, ensure_ascii=False).encode("utf-8")))
+        sent = json.dumps(request, ensure_ascii=False).encode("utf-8", "surrogatepass")
+        self.request_bytes.append(len(sent))
         messages = request["messages"]
         note = NOTE.search(messages[0]["content"][0]["text"]).group()  # type: ignore[union-attr]
         case = self.cases[note]
@@ -595,3 +596,45 @@ def test_redacted_reasoning_counts_in_the_ceiling_as_it_travels() -> None:
     plain = {**request, "messages": []}
     grown = probe.call_ceiling(model, request) - probe.call_ceiling(model, plain)
     assert grown >= 400 * Decimal(model.input_per_1k) / 1000  # 300 bytes are 400 in base64
+
+
+#: A lone surrogate, as Python's json.loads makes of "\ud800" in a reply botocore reads.
+LONE = "\ud800"
+
+
+class Surrogates(Clerk):
+    """The clerk, with a lone surrogate in a text block of every reply."""
+
+    def converse(self, **request: Any) -> dict[str, Any]:
+        answer = super().converse(**request)
+        answer["output"]["message"]["content"].insert(0, {"text": f"Lese {LONE}"})
+        return answer
+
+
+def test_a_lone_surrogate_in_a_reply_neither_stops_the_limit_nor_empties_out(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    out = tmp_path / "receiving.json"
+    assert run_main(monkeypatch, Surrogates(loaded[1]), "--out", str(out)) == 0
+    result = json.loads(out.read_text(encoding="utf-8"))
+    rows = result["runs"][probe.MODELS[0].name]
+    assert len(rows) == 24 and all(row["passed"] for row in rows)
+    assert rows[0]["text"].startswith(f"Lese {LONE}")
+
+
+def test_the_output_prints_a_lone_surrogate_as_its_escape(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import sys
+
+    from scripts import utf8_output
+
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252", newline="\n")
+    monkeypatch.setattr(sys, "stdout", stream)
+    monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
+    utf8_output()
+    print(f"Lieferschein {LONE} ü")
+    stream.flush()
+    assert raw.getvalue() == "Lieferschein \\ud800 ü\n".encode()

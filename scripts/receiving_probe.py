@@ -164,7 +164,8 @@ def wire(value: Any) -> str:
 def call_ceiling(model: AnswerModel, request: Mapping[str, Any]) -> Decimal:
     """The most a call can cost: a token is never shorter than a byte, so the request's UTF-8
     size plus the template bounds the input, and maxTokens the output."""
-    size = len(json.dumps(request, ensure_ascii=False, default=wire).encode("utf-8"))
+    text = json.dumps(request, ensure_ascii=False, default=wire)
+    size = len(text.encode("utf-8", "surrogatepass"))  # a lone surrogate counts, three bytes
     return (
         (size + TEMPLATE_TOKENS) * Decimal(model.input_per_1k)
         + request["inferenceConfig"]["maxTokens"] * Decimal(model.output_per_1k)
@@ -512,8 +513,11 @@ def main(argv: list[str] | None = None) -> int:
                     "summaries": ranked(summaries),
                     "runs": runs,
                 }
+                # A lone surrogate is written as its JSON escape, so the file stays readable.
                 args.out.write_text(
-                    json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+                    json.dumps(result, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                    errors="backslashreplace",
                 )
             if stopped:
                 print_tables(summaries, runs)
