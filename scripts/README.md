@@ -13,7 +13,7 @@ Eleven commands, all run from the repository root:
 | `python -m scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
 | `python -m scripts.control_eval` | Asks 42 fixed questions of every model of `FRANKFURT_MODELS` the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
 | `python -m scripts.tool_probe` | Gives every model of `FRANKFURT_MODELS` six orders to record with one tool: whether it fills the tool cleanly and asks back instead of guessing. |
-| `python -m scripts.receiving_probe` | Lets every model of `FRANKFURT_MODELS` check twelve delivery notes against their purchase orders through Vard's tool loop: whether it finds every discrepancy, makes none up and closes with the right tool. |
+| `python -m scripts.receiving_probe` | Lets every model of `FRANKFURT_MODELS` check 24 delivery notes against their purchase orders through Vard's tool loop: whether it finds every discrepancy, makes none up and closes with the right tool; ranks the models by cases passed, then by discrepancies missed. |
 | `python -m scripts.rehearsal` | Sets up a new workspace on the deployed stack with the same commands as any other, runs the measurements against it, and times every step. |
 
 ## What they need
@@ -886,48 +886,69 @@ exit code 2. A missing login or permission stops it at once.
 ```bash
 python -m scripts.receiving_probe --model "Qwen3 235B A22B 2507" --out receiving.json
 python -m scripts.receiving_probe --max-usd 1.00     # every model of FRANKFURT_MODELS, at most 1 USD
+python -m scripts.receiving_probe --model gpt-oss-20b --repeat 3   # every case three times
 ```
 
 Vard takes on one responsibility after another, and a person decides; his
 first is the receiving check. A model works in his loop (`vard/engine.py`)
-with the receiving responsibility (`vard/receiving.py`) and five tools, all
-allowed: `get_delivery_note`, `get_purchase_order`, and the three that close
-the check, `report_discrepancies`, `report_match` and `hand_off`. There is no
+with the receiving responsibility (`vard/receiving.py`) and six tools, all
+allowed: `get_delivery_note`, `get_purchase_order`, `get_earlier_deliveries`
+(the notes that came in before for an order), and the three that close the
+check, `report_discrepancies`, `report_match` and `hand_off`. There is no
 tool to book with; a call to a tool that is not offered, like one to book, is
 refused, told to the model and counted as invalid, and so is a call without
-its required fields. The loop ends when a closing tool has run, when the model
-answers without a tool, or after 8 model calls.
+its required fields. A tool that fails while it runs is no refusal: its error
+goes back to the model as the tool's result, and the call is not invalid. The
+loop ends when a closing tool has run, when the model answers without a tool,
+or after 8 model calls.
 
-`receiving-cases.json` holds twelve German cases, six for Pellwick Joinery and
-six for Kalvenstett Haustechnik; the documents are made up, the businesses'
+`receiving-cases.json` holds 24 German cases, twelve for Pellwick Joinery and
+twelve for Kalvenstett Haustechnik; the documents are made up, the businesses'
 trades are taken from their documents. Each case starts with "Lieferschein …
 ist eingegangen." and says which tool should close it and which discrepancies,
-by article number and kind, should be reported: everything agrees (also with
-German numbers like "1.250,00" against "1.250", and with boxes of 200 against
-pieces), a quantity short or over, a position missing or extra, a similar but
-wrong article, a wrong unit, a partial delivery whose open rest is reported, a
-note without a purchase order to hand off, and three discrepancies at once.
+by article number and kind, should be reported. The first twelve have notes of
+two or three positions: everything agrees (also with German numbers like
+"1.250,00" against "1.250", and with boxes of 200 against pieces), a quantity
+short or over, a position missing or extra, a similar but wrong article, a
+wrong unit, a partial delivery whose open rest is reported, a note without a
+purchase order to hand off, and three discrepancies at once. The other twelve
+are harder, three of each kind: long notes of 23 to 40 positions with one to
+three discrepancies among them; the rest of a partial delivery, compared with
+what is still open after the earlier deliveries, which brings exactly the
+rest, too little or too much; orders that list the supplier's article number
+beside the business's own while the note gives only the supplier's, once with
+a successor article in place of the ordered one, which is a wrong article; and
+a note addressed to the other business, for an order of that business, which
+the business that has the note does not have: it goes to a person.
 
 A case passes when exactly one closing tool ran and it is the right one, every
 expected discrepancy is reported with its kind, none is made up, and no call
 was invalid. A wrong article counts as reported too when the ordered one is
 reported missing and the delivered one extra: a person sees both all the same.
 One of the two alone does not, and counts as made up, and so do both with their
-kinds swapped. The first table gives each model's marks, invalid calls, mean
-steps, cost and wall time; under it each model's cases with steps, cost and
-seconds. `--out` holds the same and every call with its input and result.
+kinds swapped. The business's own number and the supplier's both name an
+ordered article. With `--repeat N` every case runs N rounds, all cases once
+before the next round, and the marks count over all of them. The first table
+ranks the models: most cases passed first; at a tie, fewest expected
+discrepancies missed (the column Missed), since a missed shortfall costs money
+and nobody notices it; then the lower cost. It gives each model's marks,
+invalid calls, mean steps, cost and wall time; under it each model's cases with
+their round, steps, cost and seconds. `--out` holds the same, every call with
+its input and result, and the tokens of every model call (`usage`).
 
-`--max-usd` (1.50 by default) is a hard limit. Before every model call the
+`--max-usd` (2.25 by default) is a hard limit. Before every model call the
 probe works out the most the call can cost: the request's size in UTF-8 bytes
-plus 500, as input tokens, and `maxTokens` (2,048) as output tokens, at the
+plus 500, as input tokens, and `maxTokens` (4,096) as output tokens, at the
 model's price in `infra/answer_models.py`. If what the run has spent plus that
 would pass the limit, the call is not made: the tables and `--out` are written
 and the run ends with exit code 2. A call that fails keeps its most counted,
-since AWS may have billed it. Claude Sonnet 4.6 is last in the table, so the
-cheaper models are measured first. A missing login or permission stops the run
-the same way, with the cases measured so far kept. A request Bedrock refuses
-as sent fails its case and is a result; any other failed call fails the run
-with exit code 2, as in `tool_probe`. `--region` takes the models and prices
+since AWS may have billed it. Claude Sonnet 4.6 is last in `FRANKFURT_MODELS`,
+so the cheaper models are measured first. A missing login or permission stops
+the run the same way, with the cases measured so far kept. A request Bedrock
+refuses as sent fails its case and is a result; any other failed call fails the
+run with exit code 2, as in `tool_probe`, and so does a tool of the case file
+that fails, since neither says anything about the model. `--region` takes the
+models and prices
 `infra/answer_models.py` gives that region: Frankfurt by default, Ireland with
 `--region eu-west-1`; a region without a table there is refused.
 

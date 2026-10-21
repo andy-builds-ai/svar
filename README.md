@@ -87,7 +87,7 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
 
 ## Decisions and what each one costs
 
-97 decisions are written down with their dates and reasons in
+98 decisions are written down with their dates and reasons in
 [docs/decisions.md](docs/decisions.md). The ones that shape the system:
 
 - **Nothing with a monthly base fee**
@@ -284,11 +284,13 @@ Prices, the counter, the page and how each number was taken:
 Vard is an agent. He takes on one responsibility after another, works on
 each with tools, and a person decides what happens. His first is the
 receiving check: he fetches a delivery note that has come in, fetches the
-purchase order it names, compares them and reports what differs. The next
-build of Vard brings a trigger for new delivery notes, memory of corrections
-and pausing, and picks his model among the four candidates below with more
-and harder cases. A support inbox, to be tried on the made-up software
-company Quillmoor, is planned after that.
+purchase order it names, compares them and reports what differs. His second
+build picks his model among the four candidates below, on 24 cases instead of
+twelve, the new ones harder; its paid run is still to come
+([decisions.md:1254](docs/decisions.md?plain=1#L1254)). Running him in
+Frankfurt, with a trigger for new delivery notes, memory of corrections and
+pausing, follows as a stage of its own. A support inbox, to be tried on the
+made-up software company Quillmoor, is planned after that.
 
 The loop is `vard/engine.py`: a model calls tools turn after turn until a
 tool that closes the task has run, it answers without a tool, or the step
@@ -298,7 +300,7 @@ that is not offered, a denied one, one nobody approved and one without its
 required fields is not run; the model is told why, and the call counts as
 invalid. The loop knows no task of its own: a responsibility brings the task
 text, the tools and the step limit (`vard/receiving.py`). The receiving check
-has five tools, all allowed, and none of them books.
+has six tools, all allowed, and none of them books.
 
 **Measured on 20.10.2026 in Frankfurt**, twelve made-up cases, two runs of
 every model ([decisions.md:1218](docs/decisions.md?plain=1#L1218)):
@@ -326,11 +328,11 @@ correction, and he books nothing. The documents come from the case file, not
 from a real system.
 
 ```bash
-python -m scripts.receiving_probe --out receiving.json   # every model of FRANKFURT_MODELS, at most 1.50 USD
+python -m scripts.receiving_probe --out receiving.json   # every model of FRANKFURT_MODELS, at most 2.25 USD
 ```
 
-It calls real models in `eu-central-1`; the two full runs on 20.10.2026 cost
-0.488 and 0.490 USD. `--max-usd` stops it before any call that could take it
+It calls real models in `eu-central-1`; the two full runs on 20.10.2026, on
+the first twelve cases, cost 0.488 and 0.490 USD. `--max-usd` stops it before any call that could take it
 past the limit. How it scores:
 [scripts/README.md](scripts/README.md#receiving_probe--which-model-vard-checks-deliveries-with).
 
@@ -348,7 +350,7 @@ Claude Code work in this repository under the rules in
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
-pytest -q                                  # 1,521 tests, no AWS needed; one is skipped without a time zone database
+pytest -q                                  # 1,543 tests, no AWS needed; one is skipped without a time zone database
 ruff check && ruff format --check
 ```
 

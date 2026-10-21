@@ -1251,6 +1251,36 @@ among them with more and harder cases and brings the trigger, the memory of
 corrections and pausing of the entry "A measurement picks Vard's model"; the
 loop takes any of them, the model being one argument of `vard.engine.run`.
 
+**2026-10-21 — The second build of Vard only picks his model; running him is a
+stage of its own.** The operator decided. The next build that the two entries
+above name is split in two: this one picks the model among the four
+candidates and deploys nothing; Vard in operation in Frankfurt, with a
+trigger for new delivery notes, memory of corrections, pausing and approvals
+at work, follows with a plan of its own. `scripts/receiving_probe.py` now
+measures 24 cases. The first twelve stay as they were, so that a result
+compares with the first build; their notes have two or three positions. The
+other twelve are harder, three of each kind, as the operator chose them: long
+notes of 23 to 40 positions; the rest of a partial delivery, compared with
+what is still open after the earlier deliveries, which a new tool,
+`get_earlier_deliveries`, fetches; the supplier's article numbers on the note
+against the business's own in the order, once with a successor article,
+which counts as a wrong article for a person to decide on; and a note
+addressed to the other business, for an order of that business, which the
+business that has the note does not have, to hand off. A delivery note that
+comes in twice is not among them. With `--repeat` every case runs several
+rounds, since a model's result moved by up to two cases between the two runs.
+The models are ranked by the cases passed; at a tie the one that misses fewer
+discrepancies wins, then the cheaper, because a missed shortfall costs money
+and nobody notices it. A tool that fails no longer ends Vard's loop: its error
+goes back to the model as the tool's result; in the measurement a failed tool
+of the case file fails the run, since it says nothing about the model.
+`maxTokens` is 4,096: no case of the two runs ended in a reply cut off at
+2,048, but their notes were short, and the runs kept no token counts per call;
+`--out` now keeps them. The default `--max-usd` is 2.25 USD, about twice the
+0.49 USD measured for the first twelve cases times 2.29, the request bytes of
+all 24 cases against those twelve on a run against a stub; reckoned, not
+measured.
+
 ## Code
 
 **2026-09-23, replaced 2026-10-07 — Files over 500 lines stayed whole.**

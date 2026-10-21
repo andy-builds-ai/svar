@@ -182,7 +182,7 @@ tests/       stack template, answer function, scripts, page
    ([README](../README.md#measured)). *(done)*
 9. **Vard:** his loop and the receiving check, measured with eleven models on
    twelve made-up cases on 20.10.2026. Not deployed
-   ([README](../README.md#vard)). *(first build done; the next build picks his
-   model)*
+   ([README](../README.md#vard)). *(first build done; the second, which picks
+   his model on 24 cases, is built, its paid run still to come)*
 10. **Release:** screenshots and a walkthrough *(done)*. There is no tagged
     version.
