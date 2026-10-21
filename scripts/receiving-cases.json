@@ -364,6 +364,612 @@
       ],
       "expect": "report_discrepancies",
       "findings": [{"items": ["OS-TV-12"], "kinds": ["wrong_quantity"]}]
+    },
+    {
+      "id": "p7",
+      "company": "pellwick",
+      "group": "long",
+      "about": "a long note: 24 timber positions, one missing and one short",
+      "message": "Lieferschein LS-HT-58258 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-HT-58258",
+        "supplier": "Holvane Timber",
+        "recipient": "Pellwick Joinery",
+        "date": "2026-10-21",
+        "order_number": "PW-2026-0344",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "HT-LAE-6878", "description": "Sibirische Lärche, Kantholz 68 x 78 mm, keilgezinkt, 4,8 m", "quantity": "24", "unit": "Stück"},
+          {"position": 2, "item": "HT-LAE-6892", "description": "Sibirische Lärche, Kantholz 68 x 92 mm, keilgezinkt, 4,8 m", "quantity": "12", "unit": "Stück"},
+          {"position": 3, "item": "HT-LAE-68115", "description": "Sibirische Lärche, Kantholz 68 x 115 mm, keilgezinkt, 4,8 m", "quantity": "8", "unit": "Stück"},
+          {"position": 4, "item": "HT-LAE-SB-150", "description": "Sibirische Lärche, Fensterbankprofil 150 mm, 3,0 m", "quantity": "6", "unit": "Stück"},
+          {"position": 5, "item": "HT-LAE-GL-3018", "description": "Sibirische Lärche, Glasleiste 30 x 18 mm, 3,0 m", "quantity": "40", "unit": "Stück"},
+          {"position": 6, "item": "HT-LAE-WS-5870", "description": "Sibirische Lärche, Wetterschenkel 58 x 70 mm, 3,0 m", "quantity": "10", "unit": "Stück"},
+          {"position": 7, "item": "HT-EI-40-200", "description": "Europäische Eiche, Bohle 40 mm, 200 mm breit, 3,0 m", "quantity": "10", "unit": "Stück"},
+          {"position": 8, "item": "HT-EI-40-250", "description": "Europäische Eiche, Bohle 40 mm, 250 mm breit, 3,0 m", "quantity": "8", "unit": "Stück"},
+          {"position": 10, "item": "HT-EI-TS-1000", "description": "Eiche Treppenstufe, 40 x 280 x 1.000 mm, keilgezinkt", "quantity": "14", "unit": "Stück"},
+          {"position": 11, "item": "HT-EI-TS-1100", "description": "Eiche Treppenstufe, 40 x 280 x 1.100 mm, keilgezinkt", "quantity": "3", "unit": "Stück"},
+          {"position": 12, "item": "HT-EI-SS-1000", "description": "Eiche Setzstufe, 20 x 190 x 1.000 mm", "quantity": "14", "unit": "Stück"},
+          {"position": 13, "item": "HT-EI-TW-4800", "description": "Eiche Treppenwange, 52 x 300 mm, 4,8 m", "quantity": "2", "unit": "Stück"},
+          {"position": 14, "item": "HT-EI-HL-3000", "description": "Eiche Handlauf, rund 45 mm, 3,0 m", "quantity": "4", "unit": "Stück"},
+          {"position": 15, "item": "HT-EI-GS-900", "description": "Eiche Geländerstab, 32 x 32 mm, 900 mm", "quantity": "36", "unit": "Stück"},
+          {"position": 16, "item": "HT-EI-PF-1200", "description": "Eiche Pfosten, 90 x 90 mm, 1.200 mm", "quantity": "3", "unit": "Stück"},
+          {"position": 17, "item": "HT-KI-LH-18", "description": "Kiefer Leimholzplatte, keilgezinkt, 18 mm, 600 x 2.000 mm", "quantity": "16", "unit": "Stück"},
+          {"position": 18, "item": "HT-KI-LH-27", "description": "Kiefer Leimholzplatte, keilgezinkt, 27 mm, 600 x 2.000 mm", "quantity": "6", "unit": "Stück"},
+          {"position": 19, "item": "HT-KI-LE-2020", "description": "Kiefer Leiste, 20 x 20 mm, 2,4 m", "quantity": "30", "unit": "Stück"},
+          {"position": 20, "item": "HT-KI-KH-4060", "description": "Kiefer Kantholz, 40 x 60 mm, 3,0 m", "quantity": "20", "unit": "Stück"},
+          {"position": 21, "item": "HT-EI-UL-24", "description": "Eiche Umleimer, 24 mm, Rolle 50 m", "quantity": "2", "unit": "Rolle"},
+          {"position": 22, "item": "HT-EI-FB-26250", "description": "Eiche Fensterbank innen, 26 x 250 mm, 2,0 m", "quantity": "5", "unit": "Stück"},
+          {"position": 23, "item": "HT-LAE-DL-1958", "description": "Sibirische Lärche, Deckleiste 19 x 58 mm, 3,0 m", "quantity": "20", "unit": "Stück"},
+          {"position": 24, "item": "HT-EI-VS-15", "description": "Eiche Viertelstab, 15 x 15 mm, 2,4 m", "quantity": "24", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0344",
+          "supplier": "Holvane Timber",
+          "date": "2026-10-16",
+          "positions": [
+            {"position": 1, "item": "HT-LAE-6878", "description": "Sibirische Lärche, Kantholz 68 x 78 mm, keilgezinkt, 4,8 m", "quantity": "24", "unit": "Stück"},
+            {"position": 2, "item": "HT-LAE-6892", "description": "Sibirische Lärche, Kantholz 68 x 92 mm, keilgezinkt, 4,8 m", "quantity": "12", "unit": "Stück"},
+            {"position": 3, "item": "HT-LAE-68115", "description": "Sibirische Lärche, Kantholz 68 x 115 mm, keilgezinkt, 4,8 m", "quantity": "8", "unit": "Stück"},
+            {"position": 4, "item": "HT-LAE-SB-150", "description": "Sibirische Lärche, Fensterbankprofil 150 mm, 3,0 m", "quantity": "6", "unit": "Stück"},
+            {"position": 5, "item": "HT-LAE-GL-3018", "description": "Sibirische Lärche, Glasleiste 30 x 18 mm, 3,0 m", "quantity": "40", "unit": "Stück"},
+            {"position": 6, "item": "HT-LAE-WS-5870", "description": "Sibirische Lärche, Wetterschenkel 58 x 70 mm, 3,0 m", "quantity": "10", "unit": "Stück"},
+            {"position": 7, "item": "HT-EI-40-200", "description": "Europäische Eiche, Bohle 40 mm, 200 mm breit, 3,0 m", "quantity": "10", "unit": "Stück"},
+            {"position": 8, "item": "HT-EI-40-250", "description": "Europäische Eiche, Bohle 40 mm, 250 mm breit, 3,0 m", "quantity": "8", "unit": "Stück"},
+            {"position": 9, "item": "HT-EI-52-250", "description": "Europäische Eiche, Bohle 52 mm, 250 mm breit, 3,0 m", "quantity": "6", "unit": "Stück"},
+            {"position": 10, "item": "HT-EI-TS-1000", "description": "Eiche Treppenstufe, 40 x 280 x 1.000 mm, keilgezinkt", "quantity": "14", "unit": "Stück"},
+            {"position": 11, "item": "HT-EI-TS-1100", "description": "Eiche Treppenstufe, 40 x 280 x 1.100 mm, keilgezinkt", "quantity": "3", "unit": "Stück"},
+            {"position": 12, "item": "HT-EI-SS-1000", "description": "Eiche Setzstufe, 20 x 190 x 1.000 mm", "quantity": "14", "unit": "Stück"},
+            {"position": 13, "item": "HT-EI-TW-4800", "description": "Eiche Treppenwange, 52 x 300 mm, 4,8 m", "quantity": "2", "unit": "Stück"},
+            {"position": 14, "item": "HT-EI-HL-3000", "description": "Eiche Handlauf, rund 45 mm, 3,0 m", "quantity": "4", "unit": "Stück"},
+            {"position": 15, "item": "HT-EI-GS-900", "description": "Eiche Geländerstab, 32 x 32 mm, 900 mm", "quantity": "36", "unit": "Stück"},
+            {"position": 16, "item": "HT-EI-PF-1200", "description": "Eiche Pfosten, 90 x 90 mm, 1.200 mm", "quantity": "3", "unit": "Stück"},
+            {"position": 17, "item": "HT-KI-LH-18", "description": "Kiefer Leimholzplatte, keilgezinkt, 18 mm, 600 x 2.000 mm", "quantity": "18", "unit": "Stück"},
+            {"position": 18, "item": "HT-KI-LH-27", "description": "Kiefer Leimholzplatte, keilgezinkt, 27 mm, 600 x 2.000 mm", "quantity": "6", "unit": "Stück"},
+            {"position": 19, "item": "HT-KI-LE-2020", "description": "Kiefer Leiste, 20 x 20 mm, 2,4 m", "quantity": "30", "unit": "Stück"},
+            {"position": 20, "item": "HT-KI-KH-4060", "description": "Kiefer Kantholz, 40 x 60 mm, 3,0 m", "quantity": "20", "unit": "Stück"},
+            {"position": 21, "item": "HT-EI-UL-24", "description": "Eiche Umleimer, 24 mm, Rolle 50 m", "quantity": "2", "unit": "Rolle"},
+            {"position": 22, "item": "HT-EI-FB-26250", "description": "Eiche Fensterbank innen, 26 x 250 mm, 2,0 m", "quantity": "5", "unit": "Stück"},
+            {"position": 23, "item": "HT-LAE-DL-1958", "description": "Sibirische Lärche, Deckleiste 19 x 58 mm, 3,0 m", "quantity": "20", "unit": "Stück"},
+            {"position": 24, "item": "HT-EI-VS-15", "description": "Eiche Viertelstab, 15 x 15 mm, 2,4 m", "quantity": "24", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [
+        {"items": ["HT-EI-52-250"], "kinds": ["missing_item"]},
+        {"items": ["HT-KI-LH-18"], "kinds": ["wrong_quantity"]}
+      ]
+    },
+    {
+      "id": "k7",
+      "company": "kalvenstett",
+      "group": "long",
+      "about": "a long note: 40 positions for a bathroom and heating job, three discrepancies among numbers written two ways and pipe by the bar",
+      "message": "Lieferschein LS-OS-241102 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-OS-241102",
+        "supplier": "Ostrelt Haustechnik-Großhandel",
+        "recipient": "Kalvenstett Haustechnik",
+        "date": "2026-10-21",
+        "order_number": "KH-26-0544",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "OS-KR-15", "description": "Kupferrohr hart, 15 x 1,0 mm, Stange 5 m", "quantity": "20", "unit": "Stange"},
+          {"position": 2, "item": "OS-KR-18", "description": "Kupferrohr hart, 18 x 1,0 mm, Stange 5 m", "quantity": "12", "unit": "Stange"},
+          {"position": 3, "item": "OS-KR-22", "description": "Kupferrohr hart, 22 x 1,0 mm, Stange 5 m", "quantity": "25", "unit": "Stange à 5 m"},
+          {"position": 4, "item": "OS-PF-W15", "description": "Pressfitting Winkel 90°, Kupfer, 15 mm", "quantity": "40", "unit": "Stück"},
+          {"position": 5, "item": "OS-PF-W18", "description": "Pressfitting Winkel 90°, Kupfer, 18 mm", "quantity": "30", "unit": "Stück"},
+          {"position": 6, "item": "OS-PF-W22", "description": "Pressfitting Winkel 90°, Kupfer, 22 mm", "quantity": "20", "unit": "Stück"},
+          {"position": 7, "item": "OS-PF-T15", "description": "Pressfitting T-Stück, Kupfer, 15 mm", "quantity": "15", "unit": "Stück"},
+          {"position": 8, "item": "OS-PF-T18", "description": "Pressfitting T-Stück, Kupfer, 18 mm", "quantity": "10", "unit": "Stück"},
+          {"position": 9, "item": "OS-PF-M15", "description": "Pressfitting Muffe, Kupfer, 15 mm", "quantity": "20", "unit": "Stück"},
+          {"position": 10, "item": "OS-PF-M18", "description": "Pressfitting Muffe, Kupfer, 18 mm", "quantity": "20", "unit": "Stück"},
+          {"position": 11, "item": "OS-PF-M22", "description": "Pressfitting Muffe, Kupfer, 22 mm", "quantity": "10", "unit": "Stück"},
+          {"position": 12, "item": "OS-MV-16", "description": "Mehrschichtverbundrohr 16 x 2,0 mm, Rolle 200 m", "quantity": "250,00", "unit": "m"},
+          {"position": 13, "item": "OS-MV-PW16", "description": "Pressfitting Winkel für Mehrschichtverbundrohr, 16 mm", "quantity": "25", "unit": "Stück"},
+          {"position": 14, "item": "OS-MV-PT16", "description": "Pressfitting T-Stück für Mehrschichtverbundrohr, 16 mm", "quantity": "12", "unit": "Stück"},
+          {"position": 15, "item": "OS-RS-15", "description": "Rohrschelle mit Gummieinlage, 15 mm", "quantity": "60", "unit": "Stück"},
+          {"position": 16, "item": "OS-RS-18", "description": "Rohrschelle mit Gummieinlage, 18 mm", "quantity": "40", "unit": "Stück"},
+          {"position": 17, "item": "OS-RS-22", "description": "Rohrschelle mit Gummieinlage, 22 mm", "quantity": "30", "unit": "Stück"},
+          {"position": 18, "item": "OS-DR-15", "description": "Rohrisolierung 15 x 9 mm, 2 m", "quantity": "30", "unit": "Stück"},
+          {"position": 19, "item": "OS-DR-22", "description": "Rohrisolierung 22 x 13 mm, 2 m", "quantity": "20", "unit": "Stück"},
+          {"position": 20, "item": "OS-KH-12", "description": "Kugelhahn 1/2 Zoll, mit Flügelgriff", "quantity": "6", "unit": "Stück"},
+          {"position": 21, "item": "OS-KH-34", "description": "Kugelhahn 3/4 Zoll, mit Flügelgriff", "quantity": "4", "unit": "Stück"},
+          {"position": 22, "item": "OS-EV-12", "description": "Eckventil 1/2 Zoll, mit Schubrosette, verchromt", "quantity": "6", "unit": "Stück"},
+          {"position": 23, "item": "OS-PF-T28", "description": "Pressfitting T-Stück, Kupfer, 28 mm", "quantity": "8", "unit": "Stück"},
+          {"position": 24, "item": "OS-WT-60", "description": "Waschtisch Keramik, 60 x 48 cm, weiß", "quantity": "1", "unit": "Stück"},
+          {"position": 25, "item": "OS-WC-WH", "description": "Wand-WC spülrandlos, weiß", "quantity": "1", "unit": "Stück"},
+          {"position": 26, "item": "OS-WS-SC", "description": "WC-Sitz mit Absenkautomatik, weiß", "quantity": "1", "unit": "Stück"},
+          {"position": 27, "item": "OS-VE-112", "description": "Vorwandelement für Wand-WC, Bauhöhe 112 cm", "quantity": "1", "unit": "Stück"},
+          {"position": 28, "item": "OS-BP-WS", "description": "Betätigungsplatte für Vorwandelement, weiß", "quantity": "1", "unit": "Stück"},
+          {"position": 29, "item": "OS-WM-EH", "description": "Waschtisch-Einhebelmischer, verchromt", "quantity": "1", "unit": "Stück"},
+          {"position": 30, "item": "OS-SY-114", "description": "Röhrensifon 1 1/4 Zoll, verchromt", "quantity": "1", "unit": "Stück"},
+          {"position": 31, "item": "OS-DR-80", "description": "Duschrinne Edelstahl, 80 cm", "quantity": "1", "unit": "Stück"},
+          {"position": 32, "item": "OS-DT-AP", "description": "Duschthermostat Aufputz, verchromt", "quantity": "1", "unit": "Stück"},
+          {"position": 33, "item": "OS-BG-HB", "description": "Brausegarnitur mit Handbrause und Stange 90 cm", "quantity": "1", "unit": "Stück"},
+          {"position": 34, "item": "OS-HK-22-6010", "description": "Heizkörper Typ 22, 600 x 1.000 mm", "quantity": "2", "unit": "Stück"},
+          {"position": 35, "item": "OS-BH-12050", "description": "Badheizkörper 1.200 x 500 mm, weiß", "quantity": "1", "unit": "Stück"},
+          {"position": 36, "item": "OS-TV-12", "description": "Thermostatventil-Unterteil 1/2 Zoll, Durchgang", "quantity": "3", "unit": "Stück"},
+          {"position": 37, "item": "OS-TK-01", "description": "Thermostatkopf mit Flüssigfühler", "quantity": "3", "unit": "Stück"},
+          {"position": 38, "item": "OS-RV-12", "description": "Rücklaufverschraubung 1/2 Zoll, Durchgang", "quantity": "3", "unit": "Stück"},
+          {"position": 39, "item": "OS-GD-12", "description": "Gewindedichtband PTFE, Rolle 12 m", "quantity": "10", "unit": "Rolle"},
+          {"position": 40, "item": "OS-SI-WS", "description": "Sanitärsilikon weiß, Kartusche 310 ml", "quantity": "1", "unit": "Kartusche"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0544",
+          "supplier": "Ostrelt Haustechnik-Großhandel",
+          "date": "2026-10-16",
+          "positions": [
+            {"position": 1, "item": "OS-KR-15", "description": "Kupferrohr hart, 15 x 1,0 mm, Stange 5 m", "quantity": "20", "unit": "Stange"},
+            {"position": 2, "item": "OS-KR-18", "description": "Kupferrohr hart, 18 x 1,0 mm, Stange 5 m", "quantity": "12", "unit": "Stange"},
+            {"position": 3, "item": "OS-KR-22", "description": "Kupferrohr hart, 22 x 1,0 mm, Stange 5 m", "quantity": "125", "unit": "m"},
+            {"position": 4, "item": "OS-PF-W15", "description": "Pressfitting Winkel 90°, Kupfer, 15 mm", "quantity": "40", "unit": "Stück"},
+            {"position": 5, "item": "OS-PF-W18", "description": "Pressfitting Winkel 90°, Kupfer, 18 mm", "quantity": "30", "unit": "Stück"},
+            {"position": 6, "item": "OS-PF-W22", "description": "Pressfitting Winkel 90°, Kupfer, 22 mm", "quantity": "30", "unit": "Stück"},
+            {"position": 7, "item": "OS-PF-T15", "description": "Pressfitting T-Stück, Kupfer, 15 mm", "quantity": "15", "unit": "Stück"},
+            {"position": 8, "item": "OS-PF-T18", "description": "Pressfitting T-Stück, Kupfer, 18 mm", "quantity": "10", "unit": "Stück"},
+            {"position": 9, "item": "OS-PF-M15", "description": "Pressfitting Muffe, Kupfer, 15 mm", "quantity": "20", "unit": "Stück"},
+            {"position": 10, "item": "OS-PF-M18", "description": "Pressfitting Muffe, Kupfer, 18 mm", "quantity": "20", "unit": "Stück"},
+            {"position": 11, "item": "OS-PF-M22", "description": "Pressfitting Muffe, Kupfer, 22 mm", "quantity": "10", "unit": "Stück"},
+            {"position": 12, "item": "OS-MV-16", "description": "Mehrschichtverbundrohr 16 x 2,0 mm, Rolle 200 m", "quantity": "250", "unit": "m"},
+            {"position": 13, "item": "OS-MV-PW16", "description": "Pressfitting Winkel für Mehrschichtverbundrohr, 16 mm", "quantity": "25", "unit": "Stück"},
+            {"position": 14, "item": "OS-MV-PT16", "description": "Pressfitting T-Stück für Mehrschichtverbundrohr, 16 mm", "quantity": "12", "unit": "Stück"},
+            {"position": 15, "item": "OS-RS-15", "description": "Rohrschelle mit Gummieinlage, 15 mm", "quantity": "60", "unit": "Stück"},
+            {"position": 16, "item": "OS-RS-18", "description": "Rohrschelle mit Gummieinlage, 18 mm", "quantity": "40", "unit": "Stück"},
+            {"position": 17, "item": "OS-RS-22", "description": "Rohrschelle mit Gummieinlage, 22 mm", "quantity": "30", "unit": "Stück"},
+            {"position": 18, "item": "OS-DR-15", "description": "Rohrisolierung 15 x 9 mm, 2 m", "quantity": "30", "unit": "Stück"},
+            {"position": 19, "item": "OS-DR-22", "description": "Rohrisolierung 22 x 13 mm, 2 m", "quantity": "20", "unit": "Stück"},
+            {"position": 20, "item": "OS-KH-12", "description": "Kugelhahn 1/2 Zoll, mit Flügelgriff", "quantity": "6", "unit": "Stück"},
+            {"position": 21, "item": "OS-KH-34", "description": "Kugelhahn 3/4 Zoll, mit Flügelgriff", "quantity": "4", "unit": "Stück"},
+            {"position": 22, "item": "OS-EV-12", "description": "Eckventil 1/2 Zoll, mit Schubrosette, verchromt", "quantity": "6", "unit": "Stück"},
+            {"position": 23, "item": "OS-PF-T22", "description": "Pressfitting T-Stück, Kupfer, 22 mm", "quantity": "8", "unit": "Stück"},
+            {"position": 24, "item": "OS-WT-60", "description": "Waschtisch Keramik, 60 x 48 cm, weiß", "quantity": "1", "unit": "Stück"},
+            {"position": 25, "item": "OS-WC-WH", "description": "Wand-WC spülrandlos, weiß", "quantity": "1", "unit": "Stück"},
+            {"position": 26, "item": "OS-WS-SC", "description": "WC-Sitz mit Absenkautomatik, weiß", "quantity": "1", "unit": "Stück"},
+            {"position": 27, "item": "OS-VE-112", "description": "Vorwandelement für Wand-WC, Bauhöhe 112 cm", "quantity": "1", "unit": "Stück"},
+            {"position": 28, "item": "OS-BP-WS", "description": "Betätigungsplatte für Vorwandelement, weiß", "quantity": "1", "unit": "Stück"},
+            {"position": 29, "item": "OS-WM-EH", "description": "Waschtisch-Einhebelmischer, verchromt", "quantity": "1", "unit": "Stück"},
+            {"position": 30, "item": "OS-SY-114", "description": "Röhrensifon 1 1/4 Zoll, verchromt", "quantity": "1", "unit": "Stück"},
+            {"position": 31, "item": "OS-DR-80", "description": "Duschrinne Edelstahl, 80 cm", "quantity": "1", "unit": "Stück"},
+            {"position": 32, "item": "OS-DT-AP", "description": "Duschthermostat Aufputz, verchromt", "quantity": "1", "unit": "Stück"},
+            {"position": 33, "item": "OS-BG-HB", "description": "Brausegarnitur mit Handbrause und Stange 90 cm", "quantity": "1", "unit": "Stück"},
+            {"position": 34, "item": "OS-HK-22-6010", "description": "Heizkörper Typ 22, 600 x 1.000 mm", "quantity": "2", "unit": "Stück"},
+            {"position": 35, "item": "OS-BH-12050", "description": "Badheizkörper 1.200 x 500 mm, weiß", "quantity": "1", "unit": "Stück"},
+            {"position": 36, "item": "OS-TV-12", "description": "Thermostatventil-Unterteil 1/2 Zoll, Durchgang", "quantity": "3", "unit": "Stück"},
+            {"position": 37, "item": "OS-TK-01", "description": "Thermostatkopf mit Flüssigfühler", "quantity": "3", "unit": "Stück"},
+            {"position": 38, "item": "OS-RV-12", "description": "Rücklaufverschraubung 1/2 Zoll, Durchgang", "quantity": "3", "unit": "Stück"},
+            {"position": 39, "item": "OS-GD-12", "description": "Gewindedichtband PTFE, Rolle 12 m", "quantity": "10", "unit": "Rolle"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [
+        {"items": ["OS-PF-W22"], "kinds": ["wrong_quantity"]},
+        {"items": ["OS-PF-T22", "OS-PF-T28"], "kinds": ["wrong_item"]},
+        {"items": ["OS-SI-WS"], "kinds": ["extra_item"]}
+      ]
+    },
+    {
+      "id": "k8",
+      "company": "kalvenstett",
+      "group": "long",
+      "about": "a long note: 30 positions for a heat pump, one quantity with its digits swapped",
+      "message": "Lieferschein LS-VW-60455 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-VW-60455",
+        "supplier": "Varnholm Wärmetechnik",
+        "recipient": "Kalvenstett Haustechnik",
+        "date": "2026-10-21",
+        "order_number": "KH-26-0547",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "VW-WP-08", "description": "Luft-Wasser-Wärmepumpe 8 kW, Monoblock, Außenaufstellung", "quantity": "1", "unit": "Stück"},
+          {"position": 2, "item": "VW-PS-100", "description": "Pufferspeicher 100 l, für Wärmepumpe", "quantity": "1", "unit": "Stück"},
+          {"position": 3, "item": "VW-WS-300", "description": "Warmwasserspeicher 300 l, für Wärmepumpe", "quantity": "1", "unit": "Stück"},
+          {"position": 4, "item": "VW-KH-1", "description": "Kugelhahn 1 Zoll, mit Thermometer", "quantity": "8", "unit": "Stück"},
+          {"position": 5, "item": "VW-AG-35", "description": "Ausdehnungsgefäß 35 l, für Heizung", "quantity": "1", "unit": "Stück"},
+          {"position": 6, "item": "VW-HP-25", "description": "Hocheffizienzpumpe DN 25", "quantity": "1", "unit": "Stück"},
+          {"position": 7, "item": "VW-UV-1", "description": "3-Wege-Umschaltventil 1 Zoll", "quantity": "1", "unit": "Stück"},
+          {"position": 8, "item": "VW-SF-1", "description": "Schmutzfänger mit Magnetitabscheider, 1 Zoll", "quantity": "1", "unit": "Stück"},
+          {"position": 9, "item": "VW-WR-28", "description": "Edelstahl-Wellrohr, gedämmt, 28 mm", "quantity": "25", "unit": "m"},
+          {"position": 10, "item": "VW-KV-28", "description": "Klemmverschraubung für Wellrohr 28 mm", "quantity": "8", "unit": "Stück"},
+          {"position": 11, "item": "VW-WK-WP", "description": "Wandkonsole für Außeneinheit", "quantity": "1", "unit": "Stück"},
+          {"position": 12, "item": "VW-SD-4", "description": "Schwingungsdämpfer, Satz mit 4 Stück", "quantity": "1", "unit": "Satz"},
+          {"position": 13, "item": "VW-KL-32", "description": "Kondensatleitung 32 mm", "quantity": "10", "unit": "m"},
+          {"position": 14, "item": "VW-FBH-1620", "description": "Fußbodenheizungsrohr PE-RT 16 x 2,0 mm, Rolle 250 m", "quantity": "500", "unit": "m"},
+          {"position": 15, "item": "VW-NP-30", "description": "Noppensystemplatte 30 mm, für Rohr 14-17 mm", "quantity": "147,6", "unit": "m²"},
+          {"position": 16, "item": "VW-HV-8", "description": "Heizkreisverteiler Edelstahl, 8 Heizkreise", "quantity": "1", "unit": "Stück"},
+          {"position": 17, "item": "VW-VS-8", "description": "Verteilerschrank Unterputz, für 8 Heizkreise", "quantity": "1", "unit": "Stück"},
+          {"position": 18, "item": "VW-RD-8150", "description": "Randdämmstreifen 8 x 150 mm, Rolle 50 m", "quantity": "4", "unit": "Rolle"},
+          {"position": 19, "item": "VW-PE-02", "description": "PE-Folie 0,2 mm, Rolle 50 m²", "quantity": "3", "unit": "Rolle"},
+          {"position": 20, "item": "VW-EK-16", "description": "Eurokonus-Verschraubung 16 x 2,0 mm", "quantity": "16", "unit": "Stück"},
+          {"position": 21, "item": "VW-RT-FB", "description": "Raumthermostat für Fußbodenheizung", "quantity": "6", "unit": "Stück"},
+          {"position": 22, "item": "VW-SA-24", "description": "Stellantrieb 24 V, stromlos geschlossen", "quantity": "8", "unit": "Stück"},
+          {"position": 23, "item": "VW-KL-8", "description": "Klemmleiste 24 V, für 8 Stellantriebe", "quantity": "1", "unit": "Stück"},
+          {"position": 24, "item": "VW-TN-1417", "description": "Tackernadel für Rohr 14-17 mm, Beutel 300 Stück", "quantity": "4", "unit": "Beutel"},
+          {"position": 25, "item": "VW-TF-PS", "description": "Tauchfühler für Pufferspeicher", "quantity": "2", "unit": "Stück"},
+          {"position": 26, "item": "VW-AF-WP", "description": "Außenfühler für Wärmepumpe", "quantity": "1", "unit": "Stück"},
+          {"position": 27, "item": "VW-KP-34", "description": "Kappenventil 3/4 Zoll", "quantity": "21", "unit": "Stück"},
+          {"position": 28, "item": "VW-SE-38", "description": "Schnellentlüfter 3/8 Zoll", "quantity": "4", "unit": "Stück"},
+          {"position": 29, "item": "VW-MM-04", "description": "Manometer 0-4 bar, 1/4 Zoll", "quantity": "2", "unit": "Stück"},
+          {"position": 30, "item": "VW-DS-25", "description": "Dämmschale für Pumpengruppe DN 25", "quantity": "1", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0547",
+          "supplier": "Varnholm Wärmetechnik",
+          "date": "2026-10-17",
+          "positions": [
+            {"position": 1, "item": "VW-WP-08", "description": "Luft-Wasser-Wärmepumpe 8 kW, Monoblock, Außenaufstellung", "quantity": "1", "unit": "Stück"},
+            {"position": 2, "item": "VW-PS-100", "description": "Pufferspeicher 100 l, für Wärmepumpe", "quantity": "1", "unit": "Stück"},
+            {"position": 3, "item": "VW-WS-300", "description": "Warmwasserspeicher 300 l, für Wärmepumpe", "quantity": "1", "unit": "Stück"},
+            {"position": 4, "item": "VW-KH-1", "description": "Kugelhahn 1 Zoll, mit Thermometer", "quantity": "8", "unit": "Stück"},
+            {"position": 5, "item": "VW-AG-35", "description": "Ausdehnungsgefäß 35 l, für Heizung", "quantity": "1", "unit": "Stück"},
+            {"position": 6, "item": "VW-HP-25", "description": "Hocheffizienzpumpe DN 25", "quantity": "1", "unit": "Stück"},
+            {"position": 7, "item": "VW-UV-1", "description": "3-Wege-Umschaltventil 1 Zoll", "quantity": "1", "unit": "Stück"},
+            {"position": 8, "item": "VW-SF-1", "description": "Schmutzfänger mit Magnetitabscheider, 1 Zoll", "quantity": "1", "unit": "Stück"},
+            {"position": 9, "item": "VW-WR-28", "description": "Edelstahl-Wellrohr, gedämmt, 28 mm", "quantity": "25", "unit": "m"},
+            {"position": 10, "item": "VW-KV-28", "description": "Klemmverschraubung für Wellrohr 28 mm", "quantity": "8", "unit": "Stück"},
+            {"position": 11, "item": "VW-WK-WP", "description": "Wandkonsole für Außeneinheit", "quantity": "1", "unit": "Stück"},
+            {"position": 12, "item": "VW-SD-4", "description": "Schwingungsdämpfer, Satz mit 4 Stück", "quantity": "1", "unit": "Satz"},
+            {"position": 13, "item": "VW-KL-32", "description": "Kondensatleitung 32 mm", "quantity": "10", "unit": "m"},
+            {"position": 14, "item": "VW-FBH-1620", "description": "Fußbodenheizungsrohr PE-RT 16 x 2,0 mm, Rolle 250 m", "quantity": "500", "unit": "m"},
+            {"position": 15, "item": "VW-NP-30", "description": "Noppensystemplatte 30 mm, für Rohr 14-17 mm", "quantity": "147,60", "unit": "m²"},
+            {"position": 16, "item": "VW-HV-8", "description": "Heizkreisverteiler Edelstahl, 8 Heizkreise", "quantity": "1", "unit": "Stück"},
+            {"position": 17, "item": "VW-VS-8", "description": "Verteilerschrank Unterputz, für 8 Heizkreise", "quantity": "1", "unit": "Stück"},
+            {"position": 18, "item": "VW-RD-8150", "description": "Randdämmstreifen 8 x 150 mm, Rolle 50 m", "quantity": "4", "unit": "Rolle"},
+            {"position": 19, "item": "VW-PE-02", "description": "PE-Folie 0,2 mm, Rolle 50 m²", "quantity": "3", "unit": "Rolle"},
+            {"position": 20, "item": "VW-EK-16", "description": "Eurokonus-Verschraubung 16 x 2,0 mm", "quantity": "16", "unit": "Stück"},
+            {"position": 21, "item": "VW-RT-FB", "description": "Raumthermostat für Fußbodenheizung", "quantity": "6", "unit": "Stück"},
+            {"position": 22, "item": "VW-SA-24", "description": "Stellantrieb 24 V, stromlos geschlossen", "quantity": "8", "unit": "Stück"},
+            {"position": 23, "item": "VW-KL-8", "description": "Klemmleiste 24 V, für 8 Stellantriebe", "quantity": "1", "unit": "Stück"},
+            {"position": 24, "item": "VW-TN-1417", "description": "Tackernadel für Rohr 14-17 mm, Beutel 300 Stück", "quantity": "4", "unit": "Beutel"},
+            {"position": 25, "item": "VW-TF-PS", "description": "Tauchfühler für Pufferspeicher", "quantity": "2", "unit": "Stück"},
+            {"position": 26, "item": "VW-AF-WP", "description": "Außenfühler für Wärmepumpe", "quantity": "1", "unit": "Stück"},
+            {"position": 27, "item": "VW-KP-34", "description": "Kappenventil 3/4 Zoll", "quantity": "12", "unit": "Stück"},
+            {"position": 28, "item": "VW-SE-38", "description": "Schnellentlüfter 3/8 Zoll", "quantity": "4", "unit": "Stück"},
+            {"position": 29, "item": "VW-MM-04", "description": "Manometer 0-4 bar, 1/4 Zoll", "quantity": "2", "unit": "Stück"},
+            {"position": 30, "item": "VW-DS-25", "description": "Dämmschale für Pumpengruppe DN 25", "quantity": "1", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["VW-KP-34"], "kinds": ["wrong_quantity"]}]
+    },
+    {
+      "id": "k9",
+      "company": "kalvenstett",
+      "group": "rest",
+      "about": "the rest of a partial delivery, exactly what was still open",
+      "message": "Lieferschein LS-VW-60471 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-VW-60471",
+        "supplier": "Varnholm Wärmetechnik",
+        "recipient": "Kalvenstett Haustechnik",
+        "date": "2026-10-21",
+        "order_number": "KH-26-0549",
+        "remark": "Restlieferung zu Lieferschein LS-VW-60426",
+        "positions": [
+          {"position": 2, "item": "VW-PS-100", "description": "Pufferspeicher 100 l, für Wärmepumpe", "quantity": "1", "unit": "Stück"},
+          {"position": 3, "item": "VW-KH-1", "description": "Kugelhahn 1 Zoll, mit Thermometer", "quantity": "4", "unit": "Stück"},
+          {"position": 4, "item": "VW-AG-35", "description": "Ausdehnungsgefäß 35 l, für Heizung", "quantity": "1", "unit": "Stück"}
+        ]
+      },
+      "earlier_deliveries": [
+        {
+          "note_number": "LS-VW-60426",
+          "supplier": "Varnholm Wärmetechnik",
+          "recipient": "Kalvenstett Haustechnik",
+          "date": "2026-10-20",
+          "order_number": "KH-26-0549",
+          "remark": "Teillieferung – Restmenge folgt",
+          "positions": [
+            {"position": 1, "item": "VW-WP-08", "description": "Luft-Wasser-Wärmepumpe 8 kW, Monoblock, Außenaufstellung", "quantity": "1", "unit": "Stück"},
+            {"position": 3, "item": "VW-KH-1", "description": "Kugelhahn 1 Zoll, mit Thermometer", "quantity": "4", "unit": "Stück"}
+          ]
+        }
+      ],
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0549",
+          "supplier": "Varnholm Wärmetechnik",
+          "date": "2026-10-05",
+          "positions": [
+            {"position": 1, "item": "VW-WP-08", "description": "Luft-Wasser-Wärmepumpe 8 kW, Monoblock, Außenaufstellung", "quantity": "1", "unit": "Stück"},
+            {"position": 2, "item": "VW-PS-100", "description": "Pufferspeicher 100 l, für Wärmepumpe", "quantity": "1", "unit": "Stück"},
+            {"position": 3, "item": "VW-KH-1", "description": "Kugelhahn 1 Zoll, mit Thermometer", "quantity": "8", "unit": "Stück"},
+            {"position": 4, "item": "VW-AG-35", "description": "Ausdehnungsgefäß 35 l, für Heizung", "quantity": "1", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_match",
+      "findings": []
+    },
+    {
+      "id": "p8",
+      "company": "pellwick",
+      "group": "rest",
+      "about": "the rest after two partial deliveries, two pieces short of what was open",
+      "message": "Lieferschein LS-HT-58263 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-HT-58263",
+        "supplier": "Holvane Timber",
+        "recipient": "Pellwick Joinery",
+        "date": "2026-10-21",
+        "order_number": "PW-2026-0297",
+        "remark": "Restlieferung zu Lieferschein LS-HT-58133",
+        "positions": [
+          {"position": 1, "item": "HT-LAE-6878", "description": "Sibirische Lärche, Kantholz 68 x 78 mm, keilgezinkt, 4,8 m", "quantity": "8", "unit": "Stück"}
+        ]
+      },
+      "earlier_deliveries": [
+        {
+          "note_number": "LS-HT-58016",
+          "supplier": "Holvane Timber",
+          "recipient": "Pellwick Joinery",
+          "date": "2026-10-09",
+          "order_number": "PW-2026-0297",
+          "remark": "Teillieferung – Restmenge folgt",
+          "positions": [
+            {"position": 1, "item": "HT-LAE-6878", "description": "Sibirische Lärche, Kantholz 68 x 78 mm, keilgezinkt, 4,8 m", "quantity": "18", "unit": "Stück"}
+          ]
+        },
+        {
+          "note_number": "LS-HT-58133",
+          "supplier": "Holvane Timber",
+          "recipient": "Pellwick Joinery",
+          "date": "2026-10-14",
+          "order_number": "PW-2026-0297",
+          "remark": "Teillieferung – Restmenge folgt",
+          "positions": [
+            {"position": 1, "item": "HT-LAE-6878", "description": "Sibirische Lärche, Kantholz 68 x 78 mm, keilgezinkt, 4,8 m", "quantity": "12", "unit": "Stück"},
+            {"position": 2, "item": "HT-EI-40-200", "description": "Europäische Eiche, Bohle 40 mm, 200 mm breit, 3,0 m", "quantity": "6", "unit": "Stück"}
+          ]
+        }
+      ],
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0297",
+          "supplier": "Holvane Timber",
+          "date": "2026-10-01",
+          "positions": [
+            {"position": 1, "item": "HT-LAE-6878", "description": "Sibirische Lärche, Kantholz 68 x 78 mm, keilgezinkt, 4,8 m", "quantity": "40", "unit": "Stück"},
+            {"position": 2, "item": "HT-EI-40-200", "description": "Europäische Eiche, Bohle 40 mm, 200 mm breit, 3,0 m", "quantity": "6", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["HT-LAE-6878"], "kinds": ["wrong_quantity"]}]
+    },
+    {
+      "id": "p9",
+      "company": "pellwick",
+      "group": "rest",
+      "about": "the rest of the hinges, three more than were open",
+      "message": "Lieferschein LS-QB-11921 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-QB-11921",
+        "supplier": "Quarrish Beschläge",
+        "recipient": "Pellwick Joinery",
+        "date": "2026-10-21",
+        "order_number": "PW-2026-0305",
+        "remark": "Restlieferung zu Lieferschein LS-QB-11790",
+        "positions": [
+          {"position": 1, "item": "QB-TB-3D-120", "description": "Türband 3D, verstellbar, bis 120 kg, silber", "quantity": "15", "unit": "Stück"}
+        ]
+      },
+      "earlier_deliveries": [
+        {
+          "note_number": "LS-QB-11790",
+          "supplier": "Quarrish Beschläge",
+          "recipient": "Pellwick Joinery",
+          "date": "2026-10-15",
+          "order_number": "PW-2026-0305",
+          "remark": "Teillieferung – Türbänder folgen",
+          "positions": [
+            {"position": 1, "item": "QB-TB-3D-120", "description": "Türband 3D, verstellbar, bis 120 kg, silber", "quantity": "12", "unit": "Stück"},
+            {"position": 2, "item": "QB-MV-3592", "description": "Mehrfachverriegelung, Dornmaß 35 mm, Entfernung 92 mm, Edelstahl", "quantity": "8", "unit": "Stück"},
+            {"position": 3, "item": "QB-PZ-3545", "description": "Profilzylinder 35/45 mm, mit 5 Schlüsseln", "quantity": "8", "unit": "Stück"}
+          ]
+        }
+      ],
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0305",
+          "supplier": "Quarrish Beschläge",
+          "date": "2026-10-05",
+          "positions": [
+            {"position": 1, "item": "QB-TB-3D-120", "description": "Türband 3D, verstellbar, bis 120 kg, silber", "quantity": "24", "unit": "Stück"},
+            {"position": 2, "item": "QB-MV-3592", "description": "Mehrfachverriegelung, Dornmaß 35 mm, Entfernung 92 mm, Edelstahl", "quantity": "8", "unit": "Stück"},
+            {"position": 3, "item": "QB-PZ-3545", "description": "Profilzylinder 35/45 mm, mit 5 Schlüsseln", "quantity": "8", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["QB-TB-3D-120"], "kinds": ["wrong_quantity"]}]
+    },
+    {
+      "id": "p10",
+      "company": "pellwick",
+      "group": "supplier_number",
+      "about": "stock fittings ordered by our own numbers, the note gives the supplier's: one set short",
+      "message": "Lieferschein LS-QB-11930 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-QB-11930",
+        "supplier": "Quarrish Beschläge",
+        "recipient": "Pellwick Joinery",
+        "date": "2026-10-21",
+        "order_number": "PW-2026-0349",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "QB-DK-1200", "description": "Dreh-Kipp-Beschlag Grundgarnitur, Flügelhöhe 800 bis 1.200 mm", "quantity": "6", "unit": "Satz"},
+          {"position": 2, "item": "QB-DK-1600", "description": "Dreh-Kipp-Beschlag Grundgarnitur, Flügelhöhe 1.200 bis 1.600 mm", "quantity": "4", "unit": "Satz"},
+          {"position": 3, "item": "QB-FG-AL35", "description": "Fenstergriff Aluminium, silber, Stift 35 mm", "quantity": "12", "unit": "Stück"},
+          {"position": 4, "item": "QB-EL-DK", "description": "Ecklager für Dreh-Kipp-Beschlag", "quantity": "12", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "PW-2026-0349",
+          "supplier": "Quarrish Beschläge",
+          "date": "2026-10-16",
+          "positions": [
+            {"position": 1, "item": "PA-B-1120", "supplier_item": "QB-DK-1200", "description": "Dreh-Kipp-Beschlag Grundgarnitur, Flügelhöhe 800 bis 1.200 mm", "quantity": "8", "unit": "Satz"},
+            {"position": 2, "item": "PA-B-1121", "supplier_item": "QB-DK-1600", "description": "Dreh-Kipp-Beschlag Grundgarnitur, Flügelhöhe 1.200 bis 1.600 mm", "quantity": "4", "unit": "Satz"},
+            {"position": 3, "item": "PA-B-1130", "supplier_item": "QB-FG-AL35", "description": "Fenstergriff Aluminium, silber, Stift 35 mm", "quantity": "12", "unit": "Stück"},
+            {"position": 4, "item": "PA-B-1140", "supplier_item": "QB-EL-DK", "description": "Ecklager für Dreh-Kipp-Beschlag", "quantity": "12", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["PA-B-1120", "QB-DK-1200"], "kinds": ["wrong_quantity"]}]
+    },
+    {
+      "id": "k10",
+      "company": "kalvenstett",
+      "group": "supplier_number",
+      "about": "stock fittings ordered by our own numbers, the note gives the supplier's: everything agrees",
+      "message": "Lieferschein LS-OS-241125 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-OS-241125",
+        "supplier": "Ostrelt Haustechnik-Großhandel",
+        "recipient": "Kalvenstett Haustechnik",
+        "date": "2026-10-21",
+        "order_number": "KH-26-0551",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "OS-PF-B15", "description": "Pressfitting Bogen 90°, Kupfer, 15 mm", "quantity": "50", "unit": "Stück"},
+          {"position": 2, "item": "OS-PF-B18", "description": "Pressfitting Bogen 90°, Kupfer, 18 mm", "quantity": "30", "unit": "Stück"},
+          {"position": 3, "item": "OS-FD-SO", "description": "Fiberdichtungen, Sortiment 1/2 bis 1 Zoll, 120 Stück", "quantity": "2", "unit": "Packung"},
+          {"position": 4, "item": "OS-HZ-100", "description": "Hanf, Zopf 100 g", "quantity": "10", "unit": "Stück"},
+          {"position": 5, "item": "OS-DP-65", "description": "Gewindedichtpaste, Dose 65 g", "quantity": "6", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0551",
+          "supplier": "Ostrelt Haustechnik-Großhandel",
+          "date": "2026-10-17",
+          "positions": [
+            {"position": 1, "item": "KA-1015", "supplier_item": "OS-PF-B15", "description": "Pressfitting Bogen 90°, Kupfer, 15 mm", "quantity": "50", "unit": "Stück"},
+            {"position": 2, "item": "KA-1018", "supplier_item": "OS-PF-B18", "description": "Pressfitting Bogen 90°, Kupfer, 18 mm", "quantity": "30", "unit": "Stück"},
+            {"position": 3, "item": "KA-2210", "supplier_item": "OS-FD-SO", "description": "Fiberdichtungen, Sortiment 1/2 bis 1 Zoll, 120 Stück", "quantity": "2", "unit": "Packung"},
+            {"position": 4, "item": "KA-3105", "supplier_item": "OS-HZ-100", "description": "Hanf, Zopf 100 g", "quantity": "10", "unit": "Stück"},
+            {"position": 5, "item": "KA-3106", "supplier_item": "OS-DP-65", "description": "Gewindedichtpaste, Dose 65 g", "quantity": "6", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_match",
+      "findings": []
+    },
+    {
+      "id": "k11",
+      "company": "kalvenstett",
+      "group": "supplier_number",
+      "about": "a successor article in place of the ordered safety valve",
+      "message": "Lieferschein LS-OS-241139 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-OS-241139",
+        "supplier": "Ostrelt Haustechnik-Großhandel",
+        "recipient": "Kalvenstett Haustechnik",
+        "date": "2026-10-21",
+        "order_number": "KH-26-0553",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "OS-SV-12-N", "description": "Sicherheitsventil 1/2 Zoll, 3 bar, Nachfolgeartikel für OS-SV-12", "quantity": "4", "unit": "Stück"},
+          {"position": 2, "item": "OS-KF-12", "description": "KFE-Hahn 1/2 Zoll", "quantity": "10", "unit": "Stück"},
+          {"position": 3, "item": "OS-MM-04", "description": "Manometer 0-4 bar, 1/4 Zoll", "quantity": "3", "unit": "Stück"},
+          {"position": 4, "item": "OS-SE-38", "description": "Schnellentlüfter 3/8 Zoll", "quantity": "6", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [
+        {
+          "order_number": "KH-26-0553",
+          "supplier": "Ostrelt Haustechnik-Großhandel",
+          "date": "2026-10-19",
+          "positions": [
+            {"position": 1, "item": "KA-4012", "supplier_item": "OS-SV-12", "description": "Sicherheitsventil 1/2 Zoll, 3 bar", "quantity": "4", "unit": "Stück"},
+            {"position": 2, "item": "KA-4020", "supplier_item": "OS-KF-12", "description": "KFE-Hahn 1/2 Zoll", "quantity": "10", "unit": "Stück"},
+            {"position": 3, "item": "KA-4031", "supplier_item": "OS-MM-04", "description": "Manometer 0-4 bar, 1/4 Zoll", "quantity": "3", "unit": "Stück"},
+            {"position": 4, "item": "KA-4044", "supplier_item": "OS-SE-38", "description": "Schnellentlüfter 3/8 Zoll", "quantity": "6", "unit": "Stück"}
+          ]
+        }
+      ],
+      "expect": "report_discrepancies",
+      "findings": [{"items": ["KA-4012", "OS-SV-12", "OS-SV-12-N"], "kinds": ["wrong_item"]}]
+    },
+    {
+      "id": "p11",
+      "company": "pellwick",
+      "group": "other_company",
+      "about": "a note addressed to Kalvenstett Haustechnik for its own order, shower parts",
+      "message": "Lieferschein LS-OS-241151 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-OS-241151",
+        "supplier": "Ostrelt Haustechnik-Großhandel",
+        "recipient": "Kalvenstett Haustechnik",
+        "date": "2026-10-21",
+        "order_number": "KH-26-0556",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "OS-DW-90", "description": "Duschwanne Acryl, 90 x 90 cm, weiß", "quantity": "1", "unit": "Stück"},
+          {"position": 2, "item": "OS-DA-90", "description": "Duschabtrennung Glas, 90 x 90 cm", "quantity": "1", "unit": "Stück"},
+          {"position": 3, "item": "OS-AG-90", "description": "Ablaufgarnitur für Duschwanne, 90 mm", "quantity": "1", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [],
+      "expect": "hand_off",
+      "findings": []
+    },
+    {
+      "id": "k12",
+      "company": "kalvenstett",
+      "group": "other_company",
+      "about": "a note addressed to Pellwick Joinery for its own order, oak treads",
+      "message": "Lieferschein LS-HT-58271 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-HT-58271",
+        "supplier": "Holvane Timber",
+        "recipient": "Pellwick Joinery",
+        "date": "2026-10-21",
+        "order_number": "PW-2026-0352",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "HT-EI-TS-1000", "description": "Eiche Treppenstufe, 40 x 280 x 1.000 mm, keilgezinkt", "quantity": "14", "unit": "Stück"},
+          {"position": 2, "item": "HT-EI-HL-3000", "description": "Eiche Handlauf, rund 45 mm, 3,0 m", "quantity": "2", "unit": "Stück"}
+        ]
+      },
+      "purchase_orders": [],
+      "expect": "hand_off",
+      "findings": []
+    },
+    {
+      "id": "p12",
+      "company": "pellwick",
+      "group": "other_company",
+      "about": "a note addressed to Kalvenstett Haustechnik for its own order, screws Pellwick buys too",
+      "message": "Lieferschein LS-FB-77158 ist eingegangen.",
+      "delivery_note": {
+        "note_number": "LS-FB-77158",
+        "supplier": "Fennow Befestigungstechnik",
+        "recipient": "Kalvenstett Haustechnik",
+        "date": "2026-10-21",
+        "order_number": "KH-26-0558",
+        "remark": "",
+        "positions": [
+          {"position": 1, "item": "FB-ES-560", "description": "Edelstahlschraube A2, Senkkopf, 5 x 60 mm", "quantity": "5", "unit": "Karton à 200 Stück"},
+          {"position": 2, "item": "FB-ND-840", "description": "Nylondübel 8 x 40 mm", "quantity": "4", "unit": "Karton à 100 Stück"}
+        ]
+      },
+      "purchase_orders": [],
+      "expect": "hand_off",
+      "findings": []
     }
   ]
 }

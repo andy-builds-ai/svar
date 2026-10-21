@@ -6,7 +6,7 @@ books nothing, and there is no tool to book with. Where the documents come from 
 own system.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vard.engine import Level, Responsibility, Tool
@@ -18,8 +18,9 @@ KINDS = ("wrong_item", "wrong_quantity", "missing_item", "extra_item", "wrong_un
 #: closed rightly when exactly one of them ran.
 CLOSING = ("report_discrepancies", "report_match", "hand_off")
 
-#: Fetching the note and the order and reporting take three steps; the rest is room for a
-#: model that fetches one thing per step or tries again after a refusal.
+#: Fetching the note and the order and reporting take three steps, a rest delivery a fourth for
+#: the earlier deliveries; the rest is room for a model that fetches one thing per step or tries
+#: again after a refusal.
 MAX_STEPS = 8
 
 TASK = """You check incoming deliveries for {company}.
@@ -28,7 +29,11 @@ names with get_purchase_order, and compare them position by position: article, q
 Quantities are written the German way: a point groups thousands and a comma marks decimals, so
 "1.250,50" is one thousand two hundred and fifty and a half. A quantity in another unit is no
 discrepancy when the pack size on the note makes it the same amount. A delivery marked as
-partial is still compared with the whole order, so that what is still open is reported.
+partial is still compared with the whole order, so that what is still open is reported. A
+delivery marked as the rest of an earlier one is compared with what is still open of its order
+after the earlier deliveries; fetch them with get_earlier_deliveries. A note may name the
+supplier's article number; the order lists it beside ours. An article sent as a successor or
+replacement of the ordered one is a wrong_item: a person decides whether to keep it.
 Then close the check with exactly one tool:
 - report_discrepancies, with every discrepancy and nothing else;
 - report_match, when everything agrees;
@@ -38,6 +43,9 @@ You do not book anything; a person decides what happens with the delivery. Write
 
 #: Finds a document by its number; None when there is none.
 Find = Callable[[str], Mapping[str, Any] | None]
+
+#: Finds the delivery notes that came in earlier for a purchase order; none, when none did.
+FindEarlier = Callable[[str], Sequence[Mapping[str, Any]]]
 
 
 def text_input(**fields: str) -> dict[str, Any]:
@@ -96,11 +104,21 @@ def lookup(find: Find, key: str, what: str) -> Callable[[dict[str, Any]], Any]:
     return run
 
 
+def earlier(find: FindEarlier) -> Callable[[dict[str, Any]], Any]:
+    def run(given: dict[str, Any]) -> Any:
+        number = str(given["order_number"])
+        return {"order_number": number, "deliveries": [dict(note) for note in find(number)]}
+
+    return run
+
+
 def recorded(given: dict[str, Any]) -> dict[str, bool]:
     return {"recorded": True}
 
 
-def responsibility(company: str, find_order: Find, find_note: Find) -> Responsibility:
+def responsibility(
+    company: str, find_order: Find, find_note: Find, find_earlier: FindEarlier
+) -> Responsibility:
     """The receiving check for one business, with its own way of finding its documents."""
     allowed = Level.ALLOWED
     return Responsibility(
@@ -119,6 +137,13 @@ def responsibility(company: str, find_order: Find, find_note: Find) -> Responsib
                 text_input(order_number="The number of the purchase order."),
                 allowed,
                 lookup(find_order, "order_number", "purchase order"),
+            ),
+            Tool(
+                "get_earlier_deliveries",
+                "Fetch the delivery notes that came in earlier for one of our purchase orders.",
+                text_input(order_number="The number of the purchase order."),
+                allowed,
+                earlier(find_earlier),
             ),
             Tool(
                 "report_discrepancies",

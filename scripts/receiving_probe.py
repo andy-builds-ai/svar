@@ -5,7 +5,9 @@ purchase order it names, compare them and report to a person, who decides. Each 
 `receiving-cases.json` runs through Vard's loop (`vard/engine.py`) with the receiving
 responsibility (`vard/receiving.py`); the documents come from the case, nothing goes to a real
 system. Measured per model and case: every discrepancy found, none made up, the right closing
-tool, the invalid tool calls, the steps, the cost and the time. No guardrail, no knowledge base:
+tool, the invalid tool calls, the steps, the cost and the time; with ``--repeat`` each case runs
+that many times. The models are ranked by the cases passed, then by the discrepancies missed, then
+by the cost. No guardrail, no knowledge base:
 only the model, in ``--region`` or behind an EU profile, with the models and prices
 `infra/answer_models.py` gives that region. ``--max-usd`` is a hard limit: a call that could take
 the run past it is not made.
@@ -35,12 +37,14 @@ DEFAULT_REGION = "eu-central-1"
 
 MODELS = FRANKFURT_MODELS
 
-#: A report of three discrepancies, and the reasoning gpt-oss writes before it, must fit.
-MAX_TOKENS = 2048
+#: A report of three discrepancies, and the reasoning a model writes before it over a note of 40
+#: positions, must fit. No reply of the twelve short cases was cut off at 2,048 (20.10.2026).
+MAX_TOKENS = 4096
 
-#: About twice what twelve cases of three steps were reckoned to cost all eleven models (0.71 USD,
-#: docs/decisions.md); the paid run sets its own with --max-usd.
-DEFAULT_MAX_USD = Decimal("1.50")
+#: About twice what one round of all eleven models is reckoned to cost on the 24 cases: 0.49 USD
+#: measured for the first twelve (20.10.2026), times 2.29, the request bytes of all 24 cases
+#: against those twelve on a run against a stub. The paid run sets its own with --max-usd.
+DEFAULT_MAX_USD = Decimal("2.25")
 
 #: Added to a request's size for the model's chat template around it.
 TEMPLATE_TOKENS = 500
@@ -72,17 +76,35 @@ def load_cases(path: Path) -> tuple[dict[str, str], list[dict[str, Any]]]:
         name, note = case["id"], case["delivery_note"]
         if case["company"] not in companies:
             raise ValueError(f"{name}: unknown company {case['company']!r}")
-        numbers = [note["note_number"], *(o.get("order_number") for o in case["purchase_orders"])]
+        earlier = case.get("earlier_deliveries", [])
+        if not (
+            isinstance(earlier, list)
+            and all(
+                isinstance(e, dict) and e.get("order_number") == note["order_number"]
+                for e in earlier
+            )
+        ):
+            raise ValueError(f"{name}: an earlier delivery is a note of the same purchase order")
+        notes = [note, *earlier]
+        numbers = [n.get("note_number") for n in notes]
+        numbers += [o.get("order_number") for o in case["purchase_orders"]]
         if not (all(isinstance(n, str) and n for n in numbers) and "order_number" in note):
             raise ValueError(f"{name}: every document carries its number, a note its order's")
+        if len({number(n["note_number"]) for n in notes}) != len(notes):
+            raise ValueError(f"{name}: two delivery notes share a number")
         if note["note_number"] not in case["message"]:
             raise ValueError(f"{name}: the message must name the delivery note")
-        for document in (note, *case["purchase_orders"]):
+        for document in (*notes, *case["purchase_orders"]):
             positions = document["positions"]
             if not (
                 isinstance(positions, list)
                 and positions
-                and all(isinstance(p, dict) and texts([p.get("item")]) for p in positions)
+                and all(
+                    isinstance(p, dict)
+                    and texts([p.get("item")])
+                    and (p.get("supplier_item") is None or texts([p["supplier_item"]]))
+                    for p in positions
+                )
             ):
                 raise ValueError(f"{name}: every document lists its positions, each its item")
         if case["expect"] not in receiving.CLOSING:
@@ -111,10 +133,16 @@ def finder(documents: Sequence[Mapping[str, Any]], key: str) -> receiving.Find:
 def case_responsibility(
     companies: Mapping[str, str], case: Mapping[str, Any]
 ) -> engine.Responsibility:
+    """The business sees its own documents only: its orders, the note and the notes before it."""
+    earlier = case.get("earlier_deliveries", [])
+    by_order: dict[str, list[Mapping[str, Any]]] = {}
+    for note in earlier:
+        by_order.setdefault(number(note["order_number"]), []).append(note)
     return receiving.responsibility(
         companies[case["company"]],
         find_order=finder(case["purchase_orders"], "order_number"),
-        find_note=finder([case["delivery_note"]], "note_number"),
+        find_note=finder([case["delivery_note"], *earlier], "note_number"),
+        find_earlier=lambda wanted: by_order.get(number(wanted), []),
     )
 
 
@@ -189,7 +217,14 @@ def matches(expected: Mapping[str, Any], given: tuple[str, str]) -> bool:
 
 
 def items_of(*documents: Mapping[str, Any]) -> set[str]:
-    return {number(p["item"]) for document in documents for p in document["positions"]}
+    """Every article number of the documents, the supplier's beside ours where both are given."""
+    return {
+        number(p[key])
+        for document in documents
+        for p in document["positions"]
+        for key in ("item", "supplier_item")
+        if p.get(key)
+    }
 
 
 def meeting(
@@ -252,16 +287,21 @@ def judge(case: Mapping[str, Any], outcome: engine.Outcome) -> dict[str, Any]:
         "why": "; ".join(why),
         "closed_right": closed_right,
         "found_all": not missed,
+        "missed": len(missed),
         "none_made_up": not made_up,
         "invalid_calls": len(invalid),
     }
 
 
 def run_case(
-    meter: Meter, model: AnswerModel, companies: Mapping[str, str], case: Mapping[str, Any]
+    meter: Meter,
+    model: AnswerModel,
+    companies: Mapping[str, str],
+    case: Mapping[str, Any],
+    label: str,
 ) -> dict[str, Any]:
     """The marks of one case. `CostLimitReached`, a missing login and a missing permission
-    stop the run; any other failed call is a row."""
+    stop the run; any other failed call, and a tool that failed, is a row."""
     try:
         outcome = engine.run(
             meter,
@@ -276,22 +316,34 @@ def run_case(
         # A missing login or permission is no answer of the model: stop the run.
         if is_login_problem(exc) or error_code(exc) in {"AccessDenied", "AccessDeniedException"}:
             raise AwsProblem(explain(f"Asking {model.name}", exc)) from exc
-        print(f"{model.name} {case['id']}: error {exc}", file=sys.stderr)
+        print(f"{model.name} {label}: error {exc}", file=sys.stderr)
         return {
             "passed": False,
             "why": f"error: {exc}",
             "call_failed": error_code(exc) != REFUSED_AS_SENT,
         }
-    marks = judge(case, outcome)
-    verdict = "passed" if marks["passed"] else f"FAILED ({marks['why']})"
-    print(f"{model.name} {case['id']}: {verdict}", file=sys.stderr)
-    return {
-        **marks,
+    kept = {
         "ended": outcome.ended,
         "stop_reason": outcome.stop_reason,
         "calls": [dataclasses.asdict(call) for call in outcome.calls],
         "text": outcome.text,
+        "usage": outcome.usage,
     }
+    if outcome.failed:
+        # A tool of the case file failed: no answer of the model, the run fails as for a timeout.
+        call = outcome.failed[0]
+        why = f"error: {call.name} failed: {call.failed}"
+        print(f"{model.name} {label}: {why}", file=sys.stderr)
+        return {"passed": False, "why": why, "call_failed": True, **kept}
+    marks = judge(case, outcome)
+    verdict = "passed" if marks["passed"] else f"FAILED ({marks['why']})"
+    print(f"{model.name} {label}: {verdict}", file=sys.stderr)
+    return {**marks, **kept}
+
+
+def label(row: Mapping[str, Any], rounds: int) -> str:
+    """A case as named in the output: its id, and its round when there are several."""
+    return row["id"] if rounds == 1 else f"{row['id']}/{row['round']}"
 
 
 def run_model(
@@ -299,32 +351,37 @@ def run_model(
     model: AnswerModel,
     companies: Mapping[str, str],
     cases: Sequence[Mapping[str, Any]],
+    rounds: int = 1,
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """The rows of one model, and why the run stopped, if it did: at the cost limit, or for a
-    missing login or permission. The rows before the stop are kept; they are paid for."""
+    """The rows of one model, every case once a round, and why the run stopped, if it did: at
+    the cost limit, or for a missing login or permission. The rows before the stop are kept; they
+    are paid for, and the rounds before it are whole."""
     meter.model = model
     rows: list[dict[str, Any]] = []
-    for case in cases:
-        started, spent, calls = time.perf_counter(), meter.spent, meter.calls
-        stopped = None
-        try:
-            marks = run_case(meter, model, companies, case)
-        except (CostLimitReached, AwsProblem) as stop:
-            where = " at the cost limit" if isinstance(stop, CostLimitReached) else ""
-            stopped = f"stopped{where}: {stop}"
-            marks = {"passed": False, "why": stopped}
-            print(f"{model.name} {case['id']}: {stopped}", file=sys.stderr)
-        rows.append(
-            {
-                "id": case["id"],
-                **marks,
-                "steps": meter.calls - calls,
-                "seconds": time.perf_counter() - started,
-                "cost_usd": float(meter.spent - spent),
-            }
-        )
-        if stopped:
-            return rows, stopped
+    for round_ in range(1, rounds + 1):
+        for case in cases:
+            name = label({"id": case["id"], "round": round_}, rounds)
+            started, spent, calls = time.perf_counter(), meter.spent, meter.calls
+            stopped = None
+            try:
+                marks = run_case(meter, model, companies, case, name)
+            except (CostLimitReached, AwsProblem) as stop:
+                where = " at the cost limit" if isinstance(stop, CostLimitReached) else ""
+                stopped = f"stopped{where}: {stop}"
+                marks = {"passed": False, "why": stopped}
+                print(f"{model.name} {name}: {stopped}", file=sys.stderr)
+            rows.append(
+                {
+                    "id": case["id"],
+                    "round": round_,
+                    **marks,
+                    "steps": meter.calls - calls,
+                    "seconds": time.perf_counter() - started,
+                    "cost_usd": float(meter.spent - spent),
+                }
+            )
+            if stopped:
+                return rows, stopped
     return rows, None
 
 
@@ -335,10 +392,13 @@ def summarise(
         return f"{sum(bool(r.get(key)) for r in rows)}/{len(rows)}"
 
     seconds = [r["seconds"] for r in rows]
+    rounds = max((r.get("round", 1) for r in rows), default=1)
     return {
         "model": model.name,
         "passed": count("passed"),
+        "passed_cases": sum(bool(r.get("passed")) for r in rows),
         "found_all": count("found_all"),
+        "missed": sum(r.get("missed", 0) for r in rows),
         "none_made_up": count("none_made_up"),
         "closed_right": count("closed_right"),
         "invalid_calls": sum(r.get("invalid_calls", 0) for r in rows),
@@ -346,10 +406,26 @@ def summarise(
         "cost_usd": sum(r["cost_usd"] for r in rows),
         "seconds": sum(seconds),
         "median_seconds": statistics.median(seconds) if seconds else None,
-        "failed": {r["id"]: r["why"] for r in rows if not r["passed"]},
-        "failed_calls": [r["id"] for r in rows if r.get("call_failed")],
+        "failed": {label(r, rounds): r["why"] for r in rows if not r["passed"]},
+        "failed_calls": [label(r, rounds) for r in rows if r.get("call_failed")],
         "stopped": stopped,
     }
+
+
+def ranked(summaries: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """Most cases passed first; at a tie, fewest discrepancies missed, since a missed shortfall
+    costs money and nobody notices it; then the cheaper (the operator, 21.10.2026)."""
+    return sorted(summaries, key=lambda s: (-s["passed_cases"], s["missed"], s["cost_usd"]))
+
+
+def rounds_count(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{text!r} is no whole number of 1 or more")
+    return value
 
 
 def usd(text: str) -> Decimal:
@@ -373,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--max-usd", type=usd, default=DEFAULT_MAX_USD)
+    parser.add_argument("--repeat", type=rounds_count, default=1, help="rounds over all cases")
     args = parser.parse_args(argv)
     if not args.region.startswith("eu-"):
         print(f"error: {args.region} is not an EU region", file=sys.stderr)
@@ -403,11 +480,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         meter.runtime = model_client(args.region)
         for model in models:
-            rows, stopped = run_model(meter, model, companies, cases)
+            rows, stopped = run_model(meter, model, companies, cases, args.repeat)
             runs[model.name] = rows
             summaries.append(summarise(model, rows, stopped is not None))
             if args.out:
-                result = {"max_usd": str(args.max_usd), "summaries": summaries, "runs": runs}
+                result = {
+                    "max_usd": str(args.max_usd),
+                    "repeat": args.repeat,
+                    "summaries": ranked(summaries),
+                    "runs": runs,
+                }
                 args.out.write_text(
                     json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
@@ -436,27 +518,28 @@ def seconds_text(value: float | None) -> str:
 def print_tables(
     summaries: Sequence[Mapping[str, Any]], runs: Mapping[str, Sequence[Mapping[str, Any]]]
 ) -> None:
-    """The models measured so far, then each model's cases, as Markdown tables."""
+    """The models measured so far, ranked, then each model's cases, as Markdown tables."""
+    order = ranked(summaries)
     print(
-        "| Model | Passed | All found | None made up | Right close | Invalid calls | Mean steps "
-        "| USD | Seconds | Median seconds per case |"
+        "| Model | Passed | All found | Missed | None made up | Right close | Invalid calls "
+        "| Mean steps | USD | Seconds | Median seconds per case |"
     )
-    print("|---|---|---|---|---|---|---|---|---|---|")
-    for s in summaries:
+    print("|---|---|---|---|---|---|---|---|---|---|---|")
+    for s in order:
         steps = "-" if s["mean_steps"] is None else f"{s['mean_steps']:.1f}"
         passed = f"{s['passed']} (stopped)" if s["stopped"] else s["passed"]
         print(
-            f"| {s['model']} | {passed} | {s['found_all']} | {s['none_made_up']} "
+            f"| {s['model']} | {passed} | {s['found_all']} | {s['missed']} | {s['none_made_up']} "
             f"| {s['closed_right']} | {s['invalid_calls']} | {steps} | {s['cost_usd']:.5f} "
             f"| {seconds_text(s['seconds'])} | {seconds_text(s['median_seconds'])} |"
         )
-    for model, rows in runs.items():
+    for model in [s["model"] for s in order]:
         print(f"\n### {model}\n")
-        print("| Case | Passed | Steps | Invalid calls | USD | Seconds | Why |")
-        print("|---|---|---|---|---|---|---|")
-        for r in rows:
+        print("| Case | Round | Passed | Steps | Invalid calls | USD | Seconds | Why |")
+        print("|---|---|---|---|---|---|---|---|")
+        for r in runs[model]:
             print(
-                f"| {r['id']} | {'yes' if r['passed'] else 'no'} | {r['steps']} "
+                f"| {r['id']} | {r['round']} | {'yes' if r['passed'] else 'no'} | {r['steps']} "
                 f"| {r.get('invalid_calls', '-')} | {r['cost_usd']:.5f} "
                 f"| {seconds_text(r['seconds'])} | {r['why'] or '-'} |"
             )

@@ -1,4 +1,5 @@
-"""The receiving probe: its cases, how a check is judged, the cost limit, without AWS."""
+"""The receiving probe: how a check is judged, the rounds and the ranking, the cost limit,
+without AWS. The case file has its own tests in test_receiving_cases.py."""
 
 import json
 import re
@@ -10,7 +11,7 @@ from typing import Any
 import pytest
 
 from scripts import receiving_probe as probe
-from vard import engine, receiving
+from vard import engine
 
 NOTE = re.compile(r"LS-[A-Z]+-\d+")
 
@@ -32,7 +33,8 @@ def last_result(messages: Sequence[dict[str, Any]]) -> Any:
 
 class Clerk:
     """A model that does each check the way its case says it should be done: it fetches the
-    note, reads the order number off the result, fetches the order and closes."""
+    note, reads the order number off the result, fetches the order, for a rest delivery the
+    earlier deliveries too, and closes; a note to hand off it hands off once it has read it."""
 
     def __init__(self, cases: Sequence[dict[str, Any]], booking: bool = False) -> None:
         self.cases = {case["delivery_note"]["note_number"]: case for case in cases}
@@ -52,9 +54,11 @@ class Clerk:
         if result.get("error"):
             return reply(use("get_delivery_note", {"note_number": note}))
         if "note_number" in result:
-            if result["order_number"] is None:
-                return reply(use("hand_off", {"note_number": note, "reason": "Keine Bestellung."}))
+            if case["expect"] == "hand_off":
+                return reply(use("hand_off", {"note_number": note, "reason": "Nicht prüfbar."}))
             return reply(use("get_purchase_order", {"order_number": result["order_number"]}))
+        if "deliveries" not in result and case.get("earlier_deliveries"):
+            return reply(use("get_earlier_deliveries", {"order_number": result["order_number"]}))
         findings = [
             {"item": f["items"][-1], "kind": f["kinds"][0], "ordered": "", "delivered": ""}
             for f in case["findings"]
@@ -71,78 +75,6 @@ def loaded() -> tuple[dict[str, str], list[dict[str, Any]]]:
 @pytest.fixture(scope="module")
 def cases(loaded: tuple[dict[str, str], list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
     return {case["id"]: case for case in loaded[1]}
-
-
-def items(document: dict[str, Any]) -> set[str]:
-    return {position["item"] for position in document["positions"]}
-
-
-def test_twelve_cases_split_between_two_businesses(cases: dict[str, dict[str, Any]]) -> None:
-    companies = [case["company"] for case in cases.values()]
-    assert (len(cases), companies.count("pellwick"), companies.count("kalvenstett")) == (12, 6, 6)
-
-
-def test_every_kind_and_every_close_is_asked_for(cases: dict[str, dict[str, Any]]) -> None:
-    kinds = {kind for case in cases.values() for f in case["findings"] for kind in f["kinds"]}
-    assert kinds == set(receiving.KINDS)
-    assert {case["expect"] for case in cases.values()} == set(receiving.CLOSING)
-
-
-def test_each_expected_finding_stands_in_the_documents(cases: dict[str, dict[str, Any]]) -> None:
-    """A missing position is on the order alone, an extra one on the note alone, a wrong
-    article has one number on each, a wrong quantity or unit is on both; a match lists the
-    same articles on both."""
-    for case in cases.values():
-        note = items(case["delivery_note"])
-        orders = case["purchase_orders"]
-        ordered = items(orders[0]) if orders else set()
-        if case["expect"] == "report_match":
-            assert note == ordered, case["id"]
-        for f in case["findings"]:
-            found = set(f["items"])
-            if f["kinds"] == ["missing_item"]:
-                assert found <= ordered - note, case["id"]
-            elif f["kinds"] == ["extra_item"]:
-                assert found <= note - ordered, case["id"]
-            elif f["kinds"] == ["wrong_item"]:
-                assert found & (ordered - note) and found & (note - ordered), case["id"]
-            else:
-                assert found <= ordered & note, case["id"]
-
-
-def test_the_note_without_an_order_number_is_the_one_to_hand_off(
-    cases: dict[str, dict[str, Any]],
-) -> None:
-    for case in cases.values():
-        named = case["delivery_note"]["order_number"]
-        assert (case["expect"] == "hand_off") == (named is None), case["id"]
-        if named is not None:
-            assert [o["order_number"] for o in case["purchase_orders"]] == [named], case["id"]
-
-
-@pytest.mark.parametrize(
-    "change, message",
-    [
-        ({"id": "p1"}, "share an id"),
-        ({"company": "quillmoor"}, "unknown company"),
-        ({"message": "Ein Lieferschein ist eingegangen."}, "name the delivery note"),
-        ({"expect": "book"}, "expect is one of"),
-        ({"findings": [{"items": ["X"], "kinds": ["late"]}]}, "lists its article numbers"),
-        ({"findings": [{"items": ["X"], "kinds": ["wrong_item"]}]}, "only there"),
-    ],
-)
-def test_a_broken_case_is_refused(
-    tmp_path: Path,
-    loaded: tuple[dict[str, str], list[dict[str, Any]]],
-    change: dict[str, Any],
-    message: str,
-) -> None:
-    companies, cases = loaded
-    broken = [cases[0], {**cases[1], **change}] if "id" in change else [{**cases[0], **change}]
-    path = tmp_path / "cases.json"
-    path.write_text(json.dumps({"companies": companies, "cases": broken}), encoding="utf-8")
-    with pytest.raises(ValueError, match=message):
-        probe.load_cases(path)
 
 
 def outcome(*calls: engine.Call, ended: str = engine.CLOSED) -> engine.Outcome:
@@ -255,13 +187,16 @@ def test_a_clerk_that_does_it_right_passes_every_case(
     assert run_main(monkeypatch, Clerk(loaded[1]), "--out", str(out)) == 0
     printed = capsys.readouterr().out
     name = probe.MODELS[0].name
-    assert f"| {name} | 12/12 | 12/12 | 12/12 | 12/12 | 0 |" in printed
-    assert f"### {name}" in printed and "| p1 | yes | 3 | 0 |" in printed
+    assert f"| {name} | 24/24 | 24/24 | 0 | 24/24 | 24/24 | 0 |" in printed
+    assert f"### {name}" in printed and "| p1 | 1 | yes | 3 | 0 |" in printed
+    assert "| p8 | 1 | yes | 4 | 0 |" in printed and "| k12 | 1 | yes | 2 | 0 |" in printed
     result = json.loads(out.read_text(encoding="utf-8"))
     (summary,) = result["summaries"]
     assert summary["seconds"] >= 0 and summary["median_seconds"] >= 0
-    assert all(row["seconds"] >= 0 and row["steps"] in (2, 3) for row in result["runs"][name])
-    assert result["max_usd"] == "1.50"
+    rows = result["runs"][name]
+    assert all(row["seconds"] >= 0 and row["steps"] in (2, 3, 4) for row in rows)
+    assert all(row["usage"] == [reply()["usage"]] * row["steps"] for row in rows)
+    assert (result["max_usd"], result["repeat"]) == (str(probe.DEFAULT_MAX_USD), 1)
 
 
 def test_a_booking_tool_is_refused_counted_and_told(
@@ -272,7 +207,7 @@ def test_a_booking_tool_is_refused_counted_and_told(
     clerk = Clerk(loaded[1], booking=True)
     assert run_main(monkeypatch, clerk) == 0
     printed = capsys.readouterr().out
-    assert f"| {probe.MODELS[0].name} | 0/12 | 12/12 | 12/12 | 12/12 | 12 |" in printed
+    assert f"| {probe.MODELS[0].name} | 0/24 | 24/24 | 0 | 24/24 | 24/24 | 24 |" in printed
     assert "1 invalid calls (book_goods_receipt)" in printed
 
 
@@ -355,8 +290,8 @@ def test_a_request_the_model_does_not_accept_is_a_result(
 ) -> None:
     assert run_main(monkeypatch, runtime_raising(converse_error("ValidationException"))) == 0
     captured = capsys.readouterr()
-    assert f"| {probe.MODELS[0].name} | 0/12 |" in captured.out
-    assert "| p1 | no | 0 | - |" in captured.out and "failed calls" not in captured.err
+    assert f"| {probe.MODELS[0].name} | 0/24 |" in captured.out
+    assert "| p1 | 1 | no | 0 | - |" in captured.out and "failed calls" not in captured.err
 
 
 def test_a_throttled_call_fails_the_run(
@@ -402,35 +337,7 @@ def test_a_cost_limit_that_is_no_amount_above_zero_is_refused(
 
 def test_a_reply_cut_off_at_max_tokens_says_so(cases: dict[str, dict[str, Any]]) -> None:
     cut = engine.Outcome(ended=engine.ANSWERED, steps=1, stop_reason="max_tokens")
-    assert "cut off at 2048 tokens" in probe.judge(cases["p1"], cut)["why"]
-
-
-@pytest.mark.parametrize(
-    "change, message",
-    [
-        (lambda data: data.update(cases=[]), "no cases"),
-        (lambda data: data["cases"][0]["purchase_orders"][0].pop("order_number"), "its number"),
-        (lambda data: data["cases"][0]["delivery_note"].pop("order_number"), "its number"),
-        (lambda data: data["cases"][4]["delivery_note"]["positions"][0].pop("item"), "its item"),
-        (lambda data: data["cases"][4]["purchase_orders"][0]["positions"].append("x"), "its item"),
-    ],
-    ids=[
-        "empty",
-        "order-without-number",
-        "note-without-order-field",
-        "position-without-item",
-        "position-no-object",
-    ],
-)
-def test_a_file_that_would_fail_after_paying_is_refused_before(
-    tmp_path: Path, change: Any, message: str
-) -> None:
-    data = json.loads(probe.CASES_FILE.read_text(encoding="utf-8"))
-    change(data)
-    path = tmp_path / "cases.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
-    with pytest.raises(ValueError, match=message):
-        probe.load_cases(path)
+    assert f"cut off at {probe.MAX_TOKENS} tokens" in probe.judge(cases["p1"], cut)["why"]
 
 
 def test_another_region_measures_its_own_models_at_its_own_prices(
@@ -444,7 +351,7 @@ def test_another_region_measures_its_own_models_at_its_own_prices(
     nova = next(m for m in ANSWER_MODELS if m.name == "Nova Pro")
     assert probe.main(["--region", "eu-west-1", "--model", "Nova Pro"]) == 0
     case_cost = 3 * (1000 * Decimal(nova.input_per_1k) + 100 * Decimal(nova.output_per_1k)) / 1000
-    assert f"| p1 | yes | 3 | 0 | {case_cost:.5f} |" in capsys.readouterr().out
+    assert f"| p1 | 1 | yes | 3 | 0 | {case_cost:.5f} |" in capsys.readouterr().out
     assert probe.main(["--region", "eu-west-1", "--model", "gpt-oss-120b"]) == 2
     assert probe.main(["--region", "eu-north-1"]) == 2
     assert "has no models" in capsys.readouterr().err
@@ -516,3 +423,123 @@ def test_the_halves_with_their_kinds_swapped_fail(cases: dict[str, dict[str, Any
 def test_the_halves_beside_a_wrong_item_make_nothing_up(cases: dict[str, dict[str, Any]]) -> None:
     marks = probe.judge(cases["k5"], outcome(report(*K5, *K5_HALVES)))
     assert marks["passed"]
+
+
+def test_every_round_runs_every_case_and_the_marks_count_over_all(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    out = tmp_path / "receiving.json"
+    assert run_main(monkeypatch, Clerk(loaded[1]), "--repeat", "2", "--out", str(out)) == 0
+    name = probe.MODELS[0].name
+    assert f"| {name} | 48/48 | 48/48 | 0 | 48/48 | 48/48 | 0 |" in capsys.readouterr().out
+    result = json.loads(out.read_text(encoding="utf-8"))
+    ids = [case["id"] for case in loaded[1]]
+    rounds = [(row["id"], row["round"]) for row in result["runs"][name]]
+    assert rounds == [(i, 1) for i in ids] + [(i, 2) for i in ids]
+    assert result["repeat"] == 2
+
+
+def test_a_failed_case_is_named_with_its_round(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    out = tmp_path / "receiving.json"
+    clerk = Clerk(loaded[1], booking=True)
+    assert run_main(monkeypatch, clerk, "--repeat", "2", "--out", str(out)) == 0
+    (summary,) = json.loads(out.read_text(encoding="utf-8"))["summaries"]
+    assert len(summary["failed"]) == 48 and {"p1/1", "p1/2", "k12/2"} <= set(summary["failed"])
+
+
+@pytest.mark.parametrize("rounds", ["0", "-1", "1.5", "x"])
+def test_rounds_that_are_no_whole_number_of_one_or_more_are_refused(
+    rounds: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as stop:
+        probe.main(["--repeat", rounds])
+    assert stop.value.code == 2 and "no whole number of 1 or more" in capsys.readouterr().err
+
+
+def test_missed_counts_each_expected_finding_not_reported(
+    cases: dict[str, dict[str, Any]],
+) -> None:
+    one = report({"item": "OS-SI-WS", "kind": "extra_item"})
+    assert probe.judge(cases["k7"], outcome(one))["missed"] == 2
+    assert probe.judge(cases["k7"], outcome(ended=engine.ANSWERED))["missed"] == 3
+    row = {"id": "k7", "round": 1, "passed": False, "why": "missed", "steps": 3, "seconds": 0.0}
+    row["cost_usd"] = 0.0
+    rows = [{**row, "missed": 2}, {**row, "round": 2, "missed": 3}]
+    assert probe.summarise(probe.MODELS[0], rows, False)["missed"] == 5
+
+
+def summary(model: str, passed: int, missed: int, cost: float) -> dict[str, Any]:
+    return {"model": model, "passed_cases": passed, "missed": missed, "cost_usd": cost}
+
+
+def test_the_models_rank_by_cases_passed_then_by_discrepancies_missed_then_by_cost() -> None:
+    given = [
+        summary("cheap, misses three", 20, 3, 0.01),
+        summary("dear, misses one", 20, 1, 0.05),
+        summary("passes most", 21, 9, 0.90),
+        summary("cheaper, misses one", 20, 1, 0.02),
+    ]
+    assert [s["model"] for s in probe.ranked(given)] == [
+        "passes most",
+        "cheaper, misses one",
+        "dear, misses one",
+        "cheap, misses three",
+    ]
+
+
+def test_the_table_and_out_list_the_models_in_their_rank(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    first, second = probe.MODELS[0], probe.MODELS[1]
+
+    class FirstBooks(Clerk):
+        def converse(self, **request: Any) -> dict[str, Any]:
+            self.booking = request["modelId"] == first.model_id
+            return super().converse(**request)
+
+    monkeypatch.setattr(probe, "model_client", lambda region: FirstBooks(loaded[1]))
+    out = tmp_path / "receiving.json"
+    argv = ["--model", first.name, "--model", second.name, "--out", str(out)]
+    assert probe.main(argv) == 0
+    printed = capsys.readouterr().out
+    assert printed.index(f"| {second.name} | 24/24") < printed.index(f"| {first.name} | 0/24")
+    assert printed.index(f"### {second.name}") < printed.index(f"### {first.name}")
+    summaries = json.loads(out.read_text(encoding="utf-8"))["summaries"]
+    assert [s["model"] for s in summaries] == [second.name, first.name]
+
+
+def test_a_tool_of_the_case_file_that_fails_fails_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    def broken(wanted: str) -> None:
+        raise KeyError("index")
+
+    finder = probe.finder
+    monkeypatch.setattr(
+        probe,
+        "finder",
+        lambda documents, key: broken if key == "order_number" else finder(documents, key),
+    )
+    out = tmp_path / "receiving.json"
+    assert run_main(monkeypatch, Clerk(loaded[1]), "--out", str(out)) == 2
+    assert "error: failed calls, counted as failed" in capsys.readouterr().err
+    rows = {
+        r["id"]: r
+        for r in json.loads(out.read_text(encoding="utf-8"))["runs"][probe.MODELS[0].name]
+    }
+    assert rows["p1"]["why"] == "error: get_purchase_order failed: KeyError: 'index'"
+    assert rows["p1"]["call_failed"] and rows["p1"]["calls"][1]["failed"] == "KeyError: 'index'"
+    assert rows["k4"]["passed"] and not rows["k4"].get("call_failed")
