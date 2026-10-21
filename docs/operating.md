@@ -49,8 +49,8 @@ no own domain and no WAF in front of it. The region and the account come
 from outside: the region from `-c region=`, the account from the AWS profile.
 
 ```bash
-cdk bootstrap aws://<account>/eu-central-1 --profile <profile>
-cdk deploy -c region=eu-central-1 --profile <profile>
+cdk bootstrap aws://<account>/eu-central-1
+cdk deploy -c region=eu-central-1
 ```
 
 A new account may allow only 10 concurrent Lambda executions, all of which
@@ -62,8 +62,7 @@ of the function too, so loading the page takes up to five executions for a
 moment; Frankfurt therefore reserves `ANSWER_MAX_CONCURRENCY` plus
 `PAGE_LOAD_CONCURRENCY`, 5 + 5 = 10, and an account needs room for that
 beside the 10 Lambda keeps unreserved. Without the reservation, the page and
-the questions share whatever the account allows. Every script then takes `--region eu-central-1`, with
-`AWS_PROFILE=<profile>` for the account.
+the questions share whatever the account allows. Every script then takes `--region eu-central-1`.
 
 The first deploy of the distribution takes a few minutes longer than the
 others: CloudFront rolls a new configuration out to its edge locations before

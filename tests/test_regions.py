@@ -218,7 +218,7 @@ def test_the_fallback_tells_the_function_its_model_and_frankfurt_prices(
 
 
 def test_a_stack_without_reserved_concurrency_leaves_it_to_the_account() -> None:
-    """The sub-account allowed 10 concurrent executions and Lambda keeps 10 unreserved."""
+    """An account that allows only 10 concurrent executions keeps all 10 unreserved."""
     stack = stack_in("eu-central-1", answer_max_concurrency=None)
     template = Template.from_stack(stack)
     properties = resource_of(stack, template, stack.answer_function)["Properties"]

@@ -111,11 +111,9 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
   ([decisions.md:979](docs/decisions.md?plain=1#L979)): no setting keeps
   CloudFront's edge locations inside Germany. The price: no domain of its own
   and no WAF. What caps a flood is the number of executions Lambda allows at
-  once. The stack is built to reserve 10 executions for the function there:
-  5 for questions and 5 more for loading the page, in one pool that
-  questions may take whole. The Frankfurt account allows only 10 executions
-  in all, so the stack runs there without the reservation, and the account's
-  limit is the cap
+  once. The stack reserves 10 executions for the function there: 5 for
+  questions and 5 more for loading the page, in one pool that questions may
+  take whole, and that reservation is the cap
   ([docs/operating.md](docs/operating.md#another-region)).
 - **In Frankfurt a model in the region checks the topics**
   ([decisions.md:694](docs/decisions.md?plain=1#L694),

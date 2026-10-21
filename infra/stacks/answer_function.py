@@ -83,9 +83,9 @@ ANSWER_TIMEOUT_SECONDS = 195
 ANSWER_MEMORY_MB = 512
 
 #: At most this many answers at once. A new account may allow only 10 concurrent executions
-#: in all and Lambda keeps 10 of them unreserved, so there the reservation fails the deploy (the
-#: sub-account of 06.10.2026: 10). `cdk deploy -c answer_max_concurrency=none` leaves it out;
-#: the account's own limit then caps the function.
+#: in all and Lambda keeps 10 of them unreserved, so there the reservation fails the deploy.
+#: `cdk deploy -c answer_max_concurrency=none` leaves it out; the account's own limit then
+#: caps the function.
 ANSWER_MAX_CONCURRENCY = 5
 
 #: Where the function serves the page itself, the room it gets on top for one page load:

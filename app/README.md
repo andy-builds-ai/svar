@@ -852,7 +852,7 @@ below describe the English one.
 | 401 | No `X-Andur-Key` header, or a key that is not the key of the requested workspace: a wrong key, the key of another workspace, or a workspace that has no key. The last three share one sentence, so the sentence does not tell which workspaces exist (*Getting a key*). No `WWW-Authenticate` in the response: that header names an authentication scheme for `Authorization`, and the key does not travel there. |
 | 402 | A valid key for this workspace with nothing left: its questions are used up, or its window has closed. The sentence says which. Waiting does not help — a new key does. |
 | 405 | Any method other than `POST`. The response carries `Allow: POST`. |
-| 429 | With an `error` sentence: a key on a plan has used its questions for this month or for today (*Plans*); the sentence says which, and the quota comes back with the next day or month. Without one: more requests at once than the function may run (5 in eu-west-1; in eu-central-1 the stack is built to reserve 10, 5 of them for page loads, and in the Frankfurt account, which runs without the reservation, the account's limit of 10 is the cap, see *Configuration*). Lambda refuses those before any code runs, so the body is Lambda's own; with the reservation it is `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
+| 429 | With an `error` sentence: a key on a plan has used its questions for this month or for today (*Plans*); the sentence says which, and the quota comes back with the next day or month. Without one: more requests at once than the function may run (5 in eu-west-1; in eu-central-1 the stack reserves 10, 5 of them for page loads, see *Configuration*). Lambda refuses those before any code runs, so the body is Lambda's own; with the reservation it is `{"Reason": "ReservedFunctionConcurrentInvocationLimitExceeded", "Type": "User", "message": "Rate Exceeded."}`. Five calls from a stranger can hold the service up for everyone; that is a price taken on purpose, see *Configuration*. |
 | 500 | The function is set up wrong (an environment variable, unreadable keys), the workspace's key could not be read and the function holds none younger than 15 minutes (*Getting a key*), the budget table could not be reached or was throttled (log line `budget-unreadable`, and there a retry may well work), or a bug. The body then only says *The service is not configured.* (*Der Dienst ist nicht eingerichtet.*); the cause is in the log. |
 | 502 | Bedrock failed: throttled or busy twice in a row, timed out, access denied (for example a model not enabled in the account), or the model returned an empty answer; or the answer could not be checked for the denied topics, and is not given. The sentence names the cause. When it failed before the model answered, and not by a timeout or an unreadable topic verdict, the question is given back to the key, and the body adds `"refunded": true` and a sentence that says so (*Keys are budgets*). |
 | 503 | This instance has used its 10 reads in 10 seconds for workspaces it holds no key for (*Getting a key*). The response carries `Retry-After: 10`; nothing was read and nothing counted. |
@@ -1048,10 +1048,10 @@ stack); Lambda answers the rest with 429. Where the function serves the page
 itself (eu-central-1), each file of the page is a request as well, so the
 stack reserves 5 more for one page load (`PAGE_LOAD_CONCURRENCY`): 10, of
 which questions may take all. An account that allows only 10 executions in
-all cannot hold that reservation: the Frankfurt stack runs in such an
-account, deployed with `-c answer_max_concurrency=none`, and there the
-account's limit of 10, shared with every function of the account in the
-region, is the cap ([docs/operating.md](../docs/operating.md#another-region)).
+all cannot hold that reservation; there `-c answer_max_concurrency=none`
+leaves it out, and the account's limit, shared with every function of the
+account in the region, is the cap
+([docs/operating.md](../docs/operating.md#another-region)).
 Five concurrent calls from a stranger (ten in Frankfurt) therefore hold the
 service up for everyone — taken on purpose:
 capping the bill matters more here than keeping a demo reachable, and a WAF in

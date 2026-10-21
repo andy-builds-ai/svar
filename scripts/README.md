@@ -970,7 +970,7 @@ models and prices
 ```bash
 python -m scripts.rehearsal --workspace kalvenstett --source ../companies \
   --question "Was kostet eine Stunde für einen Gesellen?" --fact "68 Euro" --plan betrieb \
-  --expect-role OrganizationAccountAccessRole --out-dir ../rehearsal --list
+  --out-dir ../rehearsal --list
 ```
 
 One command for what a new workspace needs once the stack is deployed, in

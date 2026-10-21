@@ -127,7 +127,7 @@ containing `<script>` shows those eight characters.
 | Any status with a JSON `error` | That sentence, unchanged. It comes from the function, in the language the question was asked in, and says it better than the page could. |
 | 402 | The sentence, plus a line (in the page's language) that a new key is what helps. |
 | 429 with a sentence | A key on a plan has reached its quota for the month or the day. The sentence alone: the quota comes back, and a new key is not what helps. |
-| 429 without a sentence | Svar is busy — 5 requests run at a time in eu-west-1; in eu-central-1, where page loads count too, the stack is built to reserve 10, and the Frankfurt account, which runs without the reservation, caps them at its limit of 10; the rest are turned away. |
+| 429 without a sentence | Svar is busy — 5 requests run at a time in eu-west-1; in eu-central-1, where page loads count too, the stack reserves 10; the rest are turned away. |
 | 403 without a sentence | The request was refused on the way in. Not a wrong key — that is a 401 with a sentence. |
 | 504 | The answer took longer than CloudFront waits (120 seconds). The function may still be running it, and the question is already counted. |
 | No response at all | The connection failed. |

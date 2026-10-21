@@ -269,7 +269,7 @@ their own, 10 in 10 seconds per instance across workspaces
 (`WRONG_KEY_READS`): the brake per workspace alone would let wrong keys sent
 round many real workspaces spend the same reads. Over it the cached key
 decides, so a wrong key stays a 401 and a just-changed key waits a few seconds.
-Five instances are Ireland's cap. The Frankfurt stack runs without a reservation
+Five instances are Ireland's cap. The Frankfurt stack reserves 10 executions
 (2026-10-07), so there up to 10 instances may each read 10 times in 10 seconds:
 10 reads a second, a quarter of the 40.
 
@@ -1012,13 +1012,13 @@ The price: no own domain and no WAF in front of the URL, which takes neither
 guard against floods is the concurrency limit. Each file of the page is a
 call of the function, and two questions in flight beside a page load's five
 calls would refuse one of its files with a 429 and leave the page empty,
-its words coming from its scripts. So the Frankfurt stack is built to reserve
-5 more for a page load (`PAGE_LOAD_CONCURRENCY`), 10 in all; questions may
-take all 10, twice as many at once as in Ireland. The Frankfurt account allows
-only 10 executions in all and Lambda keeps 10 unreserved, so the stack runs
-there without the reservation (`-c answer_max_concurrency=none`) and the
-account's limit of 10 is the cap, shared with every function of the account
-in the region (`docs/operating.md`). A page that inlines its files would need
+its words coming from its scripts. So the Frankfurt stack reserves 5 more
+for a page load (`PAGE_LOAD_CONCURRENCY`), 10 in all; questions may take all
+10, twice as many at once as in Ireland, and the reservation is the cap. An
+account that allows only 10 executions in all cannot hold it, since Lambda
+keeps 10 unreserved; there `-c answer_max_concurrency=none` leaves it out and
+the account's limit, shared with every function of the account in the region,
+is the cap (`docs/operating.md`). A page that inlines its files would need
 one call, but the content security policy, shared with Ireland, allows no
 inline script.
 
