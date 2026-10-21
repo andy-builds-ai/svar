@@ -9,13 +9,17 @@ It is shown with made-up companies. Each has its handbooks, policies and
 notes in a folder, and Andur keeps each company's documents in a workspace
 of their own. Whoever holds the workspace's key can ask Svar in plain
 language instead of searching. Every answer carries its sources, and every
-source says which layer it came from — written by a person, produced by a
+source says which layer it came from: written by a person, produced by a
 machine, or merely arrived and not yet sorted. One deployment serves several
-companies, and a question asked in one workspace can never be answered from
-another's documents.
+companies. Every search is filtered to the asking workspace, and the handler
+drops any passage of another workspace before the prompt is built. A test on
+14.10.2026 found none in the search results of another workspace
+([README](../README.md#privacy-and-separation)).
 
-Runs entirely on AWS, defined as code. One command builds it; one command
-removes it.
+Runs entirely on AWS, defined as code. `cdk deploy` builds the stack.
+`cdk destroy` removes it except the documents bucket, which stays. Keys and
+documents are added afterwards with the scripts
+([README](../README.md#build-and-test-it)).
 
 ## The parts
 
@@ -31,12 +35,11 @@ removes it.
 | Budget | DynamoDB, one item per key | A key is an allowance, not a password: a demo key has 10 questions and 48 hours from the first one, a key on a plan a quota per month and per day. Billed per request, so an idle month costs nothing. |
 | Guardrail | Bedrock Guardrails, on the model call and on the excerpts; in Frankfurt gpt-oss-120b in the region for the topics | Refuses legal, tax and medical advice and questions about people, masks personal details in the answer and in the excerpts of its sources, withholds an answer the passages do not carry. Billed per text unit read, or per token for the topic model; nothing while idle. |
 | Page | Static files on S3, private; in Frankfurt a layer of the answer function | Five files, no framework, nothing loaded from another server. |
-| The way in | CloudFront, one distribution; in Frankfurt the answer function's own URL | One https address for the page and for questions. CloudFront's permanent free tier is 1 TB and 10 million requests a month — a demo never leaves it. |
+| The way in | CloudFront, one distribution; in Frankfurt the answer function's own URL | One https address for the page and for questions. CloudFront's permanent free tier is 1 TB and 10 million requests a month; a demo never leaves it. |
 
-What is missing from that list is as deliberate as what is in it: no
-OpenSearch cluster, no NAT gateway, no container service, nothing with a
-monthly base fee. The bill follows use, and when nobody uses it, there
-barely is one.
+The stack has no OpenSearch cluster, no NAT gateway, no container service
+and nothing else with a monthly base fee. Idle, it costs cents
+([README](../README.md#cost-measured)).
 
 ## One address for everything
 
@@ -53,8 +56,8 @@ an origin access control, which means neither is reachable from outside on
 its own: the bucket blocks all public access, and the function URL is set to
 `AWS_IAM`, so it answers 403 to every caller outside this account, and its
 resource policy names CloudFront alone, only for this distribution. Inside
-the account it is not a wall — `AWS_IAM` lets a role here be authorised by
-its own identity policy — so an administrator or a CI role can sign a call
+the account it is not a wall: `AWS_IAM` lets a role here be authorised by
+its own identity policy, so an administrator or a CI role can sign a call
 and reach the function past the distribution. The workspace key, its
 workspace and its budget are checked in the function on every call, wherever
 it came from.
@@ -63,7 +66,7 @@ That shape buys three things. The page calls `/ask` as a relative path, so it
 never has to know its own address and there is no configuration file to keep
 in step. Page and function share an origin, so there is no cross-origin
 request and nothing to allow with CORS. And there is one place in front of
-everything — the place a WAF would go if the demo ever needed one.
+everything, the place a WAF would go if the demo ever needed one.
 
 It costs two things, both in the request and both worth knowing before
 reading the curl examples in [operating.md](operating.md#with-curl):
@@ -79,10 +82,10 @@ reading the curl examples in [operating.md](operating.md#with-curl):
 
 One more consequence, in the [app README](../app/README.md): CloudFront waits
 120 seconds for the function, which may run 195. An answer between the two
-arrives as a 504 while the function finishes it anyway. Answers took 1.8 to
-3.8 seconds inside the function on 23.09.2026 in us-east-1, with both
-guardrails (four answered questions), and 0.7 to 4.4 seconds in eu-west-1
-with Nova Pro on 28.09.2026 (four questions).
+arrives as a 504 while the function finishes it anyway. The median time per
+question was 2.8 and 2.9 seconds in eu-west-1 and 2.3 to 3.0 seconds in
+eu-central-1, measured from a laptop in Germany
+([README](../README.md#measured)).
 
 ## What the stack creates
 
@@ -97,14 +100,14 @@ serves the page from a layer at its own URL. A fill script loads a demo
 corpus of two fictional companies into it, a retrieve script shows that a
 query in one company's workspace never returns the other's documents, and an
 ask script puts a question to the deployed address. The page itself is five
-files in `web/` — no framework, no build step, nothing from another server.
+files in `web/`: no framework, no build step, nothing from another server.
 
 Every key carries a budget. A demo key has ten questions, and 48 hours from
 the first of them; a key on a plan gets a quota from `app/plans.py`, per
 German calendar month and per day, that renews itself. The handler counts a
 question against the key that asked before it
 retrieves anything, in a conditional write against a DynamoDB item found by
-the SHA-256 of the key — one for a demo key, and for a key on a plan a
+the SHA-256 of the key: one for a demo key, and for a key on a plan a
 second after the first has refused it and handed back the plan. A demo key
 with nothing left gets a 402 that says which half ran out; a key on a plan
 whose quota is full gets a 429 that says whether it is the month's or the
@@ -151,20 +154,35 @@ docs/        architecture, operating, retrieval findings, costs, decisions, meta
 tests/       stack template, answer function, scripts, page
 ```
 
-## How it was built, step by step
+## Build steps
 
-1. **Infrastructure** — bucket, vector index, knowledge base, IAM. *(done)*
-2. **Ingest** — a fill script and a fictional demo company, 20–40 documents. *(done)*
-3. **Answering** — Lambda handler with one key per workspace: question,
+1. **Infrastructure:** documents bucket, vector index, knowledge base, IAM.
+   *(done)*
+2. **Ingest:** a fill script and a demo corpus of two made-up companies, 37
+   Markdown documents uploaded as 147 sections. *(done)*
+3. **Answering:** a Lambda handler with one key per workspace: question,
    retrieval, model, answer with sources and layer, token counts per answer
    in the log. *(done)*
-4. **Key budgets** — a key is an allowance: ten questions and 48 hours,
-   counted in DynamoDB. *(done)* A key can carry a plan,
-   a quota per month and per day. *(done; the first key on a plan was set
-   up in eu-central-1 on 07.10.2026)*
-5. **The page** — a page behind CloudFront, with the answer function on the
-   same address. *(done)*
-6. **Guardrails** — topic, PII and hallucination filters, and the cost of
-   every answer in its log line. *(done)*
-7. **Release** — screenshots and a walkthrough *(done)*. There is no tagged
-   version.
+4. **Key budgets:** a key is an allowance, ten questions and 48 hours,
+   counted in DynamoDB. *(done)* A key can carry a plan, a quota per month
+   and per day. *(done; the first key on a plan was set up in eu-central-1
+   on 07.10.2026)*
+5. **The page:** in Ireland behind CloudFront, with the answer function on
+   the same address; in Frankfurt served by the answer function at its own
+   URL. *(done)*
+6. **Guardrails:** topic, masking and grounding checks, and the cost of every
+   answer in its log line. In Frankfurt gpt-oss-120b in the region checks the
+   denied topics. *(done)*
+7. **Two stacks:** Frankfurt (`eu-central-1`) is the main stack, Ireland
+   (`eu-west-1`) the comparison stack where models and checks are measured
+   against each other. Both were deployed on 21.10.2026. *(done)*
+8. **Measurements:** `evaluate`, `control_eval`, `topic_probe`,
+   `grounding_probe` and `rehearsal` against the deployed stacks, in
+   Frankfurt on 14.10.2026 and in Ireland on 16.10.2026
+   ([README](../README.md#measured)). *(done)*
+9. **Vard:** his loop and the receiving check, measured with eleven models on
+   twelve made-up cases on 20.10.2026. Not deployed
+   ([README](../README.md#vard)). *(first build done; the next build picks his
+   model)*
+10. **Release:** screenshots and a walkthrough *(done)*. There is no tagged
+    version.
