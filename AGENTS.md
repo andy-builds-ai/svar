@@ -14,7 +14,7 @@ is defined as code (CDK in Python).
 
 Needs Python 3.11 or newer (CI runs 3.14, the function's runtime in Lambda),
 Node.js 22 (CDK synthesizes through jsii, and some tests run
-`web/markdown.js`) and the CDK CLI (`npm install -g aws-cdk@2.1142.0`).
+`web/markdown.js`) and the CDK CLI (`npm install -g aws-cdk@2.1146.0`).
 
 ```bash
 python -m venv .venv

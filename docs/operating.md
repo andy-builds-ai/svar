@@ -5,7 +5,7 @@ Deploy, fill, ask, test and tear down.
 ## Deploy
 
 Needs Python 3.11+ (tested on 3.14), Node.js 22, the AWS CDK CLI
-(`npm install -g aws-cdk@2.1142.0`) and AWS credentials for the target
+(`npm install -g aws-cdk@2.1146.0`) and AWS credentials for the target
 account. Everything goes to `eu-west-1` (Ireland), the comparison stack,
 unless `-c region=` names another region of `REGIONS` in
 `infra/answer_models.py`; the main stack is the one in `eu-central-1`

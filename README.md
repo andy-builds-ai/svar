@@ -368,7 +368,7 @@ call that could take it past the limit. How it scores:
 ## Build and test it
 
 Needs Python 3.11+ (tested on 3.14, the function's runtime in Lambda),
-Node.js 22, the AWS CDK CLI (`npm install -g aws-cdk@2.1142.0`) and, for
+Node.js 22, the AWS CDK CLI (`npm install -g aws-cdk@2.1146.0`) and, for
 everything after the tests, AWS credentials. `constraints.txt` pins every
 Python package to the version the tests pass on. The tests and `ruff` need
 no AWS; CI (`.github/workflows/ci.yml`) runs them on every push and pull

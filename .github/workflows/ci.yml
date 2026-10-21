@@ -37,5 +37,5 @@ jobs:
 
       # Both regions build from the same code, with the CLI version the README names.
       # `synth` calls nothing in AWS.
-      - run: npx --yes aws-cdk@2.1142.0 synth --quiet --no-notices
-      - run: npx --yes aws-cdk@2.1142.0 synth --quiet --no-notices -c region=eu-central-1
+      - run: npx --yes aws-cdk@2.1146.0 synth --quiet --no-notices
+      - run: npx --yes aws-cdk@2.1146.0 synth --quiet --no-notices -c region=eu-central-1
