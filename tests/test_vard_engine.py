@@ -1,6 +1,7 @@
 """Vard's loop without AWS: a scripted model, and a second responsibility that is no receiving."""
 
 import json
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -271,3 +272,103 @@ def test_a_closing_tool_that_fails_closes_nothing() -> None:
     outcome = engine.run(model, "m", with_tool(broken(KeyError("T-1"), closes=True)), "T-1")
     assert outcome.closing == [] and len(outcome.failed) == 1
     assert (outcome.ended, outcome.steps) == (engine.ANSWERED, 2)
+
+
+class Strict(Scripted):
+    """A model that checks each request the way Bedrock does (ToolUseBlock, ToolName, ToolUseId
+    of the bedrock-runtime service model), and that every result answers a call before it."""
+
+    def converse(self, **request: Any) -> dict[str, Any]:
+        calls: set[str] = set()
+        for message in request["messages"]:
+            for block in message["content"]:
+                if "toolUse" in block:
+                    tool_use = block["toolUse"]
+                    assert set(tool_use) >= {"toolUseId", "name", "input"}
+                    assert re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", tool_use["name"])
+                    assert re.fullmatch(r"[a-zA-Z0-9_.:-]{1,64}", tool_use["toolUseId"])
+                    assert tool_use["toolUseId"] not in calls
+                    calls.add(tool_use["toolUseId"])
+                if "toolResult" in block:
+                    assert block["toolResult"]["toolUseId"] in calls
+        return super().converse(**request)
+
+
+@pytest.mark.parametrize(
+    "name", ["functions.get_ticket", "get ticket", "", "x" * 65, None, 7], ids=str
+)
+def test_a_name_bedrock_would_refuse_is_refused_and_the_loop_goes_on(name: Any) -> None:
+    model = Strict(
+        [
+            reply(use(name, {"ticket": "T-1"}, 3)),
+            reply(use("get_ticket", {"ticket": "T-1"}, 4)),
+            reply(use("close_ticket", {"ticket": "T-1"}, 5)),
+        ]
+    )
+    outcome = engine.run(model, "m", support_inbox({"T-1": "x"}, []), "T-1")
+    assert (outcome.ended, outcome.steps) == (engine.CLOSED, 3)
+    (invalid,) = outcome.invalid
+    assert invalid.name == str(name) and invalid.input == {"ticket": "T-1"}
+    stand_in = model.requests[1]["messages"][1]["content"][0]["toolUse"]
+    assert stand_in == {"toolUseId": "u3", "name": engine.STAND_IN, "input": {"ticket": "T-1"}}
+    told = model.requests[1]["messages"][2]["content"][0]["toolResult"]
+    assert (
+        told["toolUseId"] == "u3" and repr(name) in json.loads(told["content"][0]["text"])["error"]
+    )
+
+
+def test_a_missing_or_doubled_id_and_an_input_that_is_no_object_get_valid_ones() -> None:
+    double = use("get_ticket", {"ticket": "T-1"}, 1)
+    model = Strict(
+        [
+            reply(
+                {"toolUse": {"name": "get_ticket", "input": {"ticket": "T-1"}}},
+                double,
+                double,
+                use("get_ticket", "T-1", 2),
+            ),
+            reply(use("close_ticket", {"ticket": "T-1"})),
+        ]
+    )
+    outcome = engine.run(model, "m", support_inbox({"T-1": "x"}, []), "T-1")
+    assert outcome.ended == engine.CLOSED and [c.input for c in outcome.invalid] == ["T-1"]
+    history = [b["toolUse"] for b in model.requests[1]["messages"][1]["content"]]
+    assert [b["toolUseId"] for b in history] == ["vard-1-1", "u1", "vard-1-3", "u2"]
+    assert history[3]["input"] == {}
+    results = [b["toolResult"]["toolUseId"] for b in model.requests[1]["messages"][2]["content"]]
+    assert results == ["vard-1-1", "u1", "vard-1-3", "u2"]
+
+
+@pytest.mark.parametrize("name", ["get ticket", "invalid_tool_name", "x" * 65])
+def test_a_tool_whose_name_bedrock_would_refuse_cannot_be_offered(name: str) -> None:
+    with pytest.raises(ValueError, match="1 to 64 letters"):
+        Responsibility("task", (Tool(name, "", {}, Level.ALLOWED, dict, closes=True),), 3)
+
+
+def test_an_id_the_model_sends_again_in_a_later_step_gets_one_of_the_loops_own() -> None:
+    model = Strict(
+        [
+            reply(use("get_ticket", {"ticket": "T-1"}, 1)),
+            reply(use("get_ticket", {"ticket": "T-1"}, 1)),
+            reply(use("close_ticket", {"ticket": "T-1"}, 9)),
+        ]
+    )
+    outcome = engine.run(model, "m", support_inbox({"T-1": "x"}, []), "T-1")
+    assert (outcome.ended, outcome.steps, outcome.invalid) == (engine.CLOSED, 3, [])
+    conversation = model.requests[2]["messages"]
+    calls = [m["content"][0]["toolUse"]["toolUseId"] for m in conversation[1::2]]
+    results = [m["content"][0]["toolResult"]["toolUseId"] for m in conversation[2::2]]
+    assert calls == results == ["u1", "vard-2-1"]
+
+
+def test_a_result_the_loop_cannot_tell_fails_the_tool_and_the_loop_goes_on() -> None:
+    odd = Tool("get_ticket", "", {}, Level.ALLOWED, lambda given: {("a", "b"): 1})
+    model = Strict(
+        [
+            reply(use("get_ticket", {"ticket": "T-1"})),
+            reply(use("close_ticket", {"ticket": "T-1"}, 2)),
+        ]
+    )
+    outcome = engine.run(model, "m", with_tool(odd), "T-1")
+    (failed,) = outcome.failed
+    assert failed.failed.startswith("TypeError") and outcome.ended == engine.CLOSED
