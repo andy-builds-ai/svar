@@ -240,3 +240,34 @@ def test_the_reason_the_last_reply_stopped_is_kept() -> None:
     cut = {**reply({"text": "Ich prüfe gerade"}), "stopReason": "max_tokens"}
     outcome = engine.run(Scripted([cut]), "m", support_inbox({}, []), "x")
     assert (outcome.ended, outcome.stop_reason) == (engine.ANSWERED, "max_tokens")
+
+
+def broken(error: Exception, closes: bool = False) -> Tool:
+    def run(given: dict[str, Any]) -> Any:
+        raise error
+
+    return Tool("get_ticket" if not closes else "close_ticket", "", {}, Level.ALLOWED, run, closes)
+
+
+def with_tool(tool: Tool) -> Responsibility:
+    others = [t for t in support_inbox({}, []).tools if t.name != tool.name]
+    return Responsibility("You answer the support inbox.", (tool, *others), max_steps=5)
+
+
+def test_a_tool_that_fails_tells_the_model_and_the_loop_goes_on() -> None:
+    model = Scripted(
+        [reply(use("get_ticket", {"ticket": "T-1"})), reply(use("close_ticket", {"ticket": "T-1"}))]
+    )
+    outcome = engine.run(model, "m", with_tool(broken(TimeoutError("system down"))), "T-1")
+    (failed,) = outcome.failed
+    assert failed.failed == "TimeoutError: system down" and failed.result is None
+    assert outcome.invalid == [] and outcome.ended == engine.CLOSED
+    told = model.requests[1]["messages"][2]["content"][0]["toolResult"]["content"][0]["text"]
+    assert json.loads(told) == {"error": "get_ticket failed: TimeoutError: system down"}
+
+
+def test_a_closing_tool_that_fails_closes_nothing() -> None:
+    model = Scripted([reply(use("close_ticket", {"ticket": "T-1"})), reply({"text": "Gut."})])
+    outcome = engine.run(model, "m", with_tool(broken(KeyError("T-1"), closes=True)), "T-1")
+    assert outcome.closing == [] and len(outcome.failed) == 1
+    assert (outcome.ended, outcome.steps) == (engine.ANSWERED, 2)

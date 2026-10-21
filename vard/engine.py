@@ -4,7 +4,9 @@ The loop knows no task of its own. A `Responsibility` brings the task text, the 
 step limit; each tool carries a permission level, the way Claude Code's permissions do. A call
 the loop does not run (a tool that is not offered, one that is denied, one that waits for an
 approval nobody gives, an input without its required fields) goes back to the model as a
-refusal and counts as invalid. The client is anything with Bedrock's `converse`; the loop
+refusal and counts as invalid. A tool that fails while it runs does not stop the loop either:
+its error goes back to the model, marked as an error, and the call keeps it; the model did nothing
+wrong, so the call is not invalid. The client is anything with Bedrock's `converse`; the loop
 imports nothing of AWS.
 """
 
@@ -70,6 +72,8 @@ class Call:
     refused: str | None = None
     result: Any = None
     closes: bool = False
+    #: The error the tool raised while it ran; None when it did not.
+    failed: str | None = None
 
 
 #: How a run ended: a closing tool ran, the model answered without a tool, or the steps ran out.
@@ -89,11 +93,16 @@ class Outcome:
 
     @property
     def closing(self) -> list[Call]:
-        return [call for call in self.calls if call.closes and call.refused is None]
+        """The closing calls that ran through; one that raised closed nothing."""
+        return [c for c in self.calls if c.closes and c.refused is None and c.failed is None]
 
     @property
     def invalid(self) -> list[Call]:
         return [call for call in self.calls if call.refused is not None]
+
+    @property
+    def failed(self) -> list[Call]:
+        return [call for call in self.calls if call.failed is not None]
 
 
 #: Asked before a tool of level `ask` runs, with its name and input.
@@ -126,7 +135,20 @@ def handle(tools: Mapping[str, Tool], use: Mapping[str, Any], approve: Approve |
     if reason is not None:
         return Call(str(name), given, refused=reason)
     tool = tools[name]
-    return Call(tool.name, given, result=tool.run(given), closes=tool.closes)
+    try:
+        result = tool.run(given)
+    except Exception as exc:  # noqa: BLE001 - any error of the tool goes back to the model
+        return Call(tool.name, given, closes=tool.closes, failed=f"{type(exc).__name__}: {exc}")
+    return Call(tool.name, given, result=result, closes=tool.closes)
+
+
+def answer(call: Call) -> Any:
+    """What the model is told about a call: the refusal, the tool's error or its result."""
+    if call.refused is not None:
+        return {"error": call.refused}
+    if call.failed is not None:
+        return {"error": f"{call.name} failed: {call.failed}"}
+    return call.result
 
 
 def kept(content: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -176,12 +198,12 @@ def run(
         for use in uses:
             call = handle(tools, use, approve)
             outcome.calls.append(call)
-            answer = {"error": call.refused} if call.refused is not None else call.result
+            told = json.dumps(answer(call), ensure_ascii=False, default=str)
             results.append(
                 {
                     "toolResult": {
                         "toolUseId": use.get("toolUseId", ""),
-                        "content": [{"text": json.dumps(answer, ensure_ascii=False, default=str)}],
+                        "content": [{"text": told}],
                     }
                 }
             )
