@@ -4,9 +4,11 @@ Svar is a chatbot. It answers questions from a company's own documents, and
 every answer shows its sources: the passages it was built from, each marked
 as written by a person, produced by a machine, or merely arrived and not
 sorted yet. It is shown with made-up companies. Only whoever holds a
-workspace's key can ask, and a question asked in one workspace is never
-answered from another's documents. It runs on AWS, defined as code (CDK in
-Python), and nothing in it bills a monthly base fee.
+workspace's key can ask. Every search is filtered to that workspace, and the
+handler drops any passage of another workspace before the model sees it; a
+test on 14.10.2026 found none in the search results of another workspace
+([Privacy and separation](#privacy-and-separation)). It runs on AWS, defined
+as code (CDK in Python), and nothing in it bills a monthly base fee.
 
 Svar is one part of a larger system called Andur. Andur holds the documents,
 several companies in one installation, each in a workspace of its own; Svar
@@ -22,7 +24,7 @@ questions and answers stay in Germany. The second stack, in Ireland
 (`eu-west-1`) behind CloudFront, is the comparison stack; it holds only the
 two fictional demo companies of `knowledge/` and is where models and checks
 are measured against each other.
-Both were last deployed on 16.10.2026.
+Both were last deployed on 21.10.2026.
 
 ![An answer on Svar's page in Frankfurt, in German: the question, the answer citing [1], and the sources it rests on, each marked as written by a person](docs/screenshot-answer.png)
 
@@ -49,10 +51,13 @@ flowchart TD
 
 1. The function checks that the key opens the workspace the request names. A
    wrong key gets 401, before the question is counted or read further.
-2. The question is counted against the key: one conditional DynamoDB write
-   for a demo key, two for a key on a plan (the demo write refuses it and
-   hands over the plan, the second counts month and day). A spent demo key
-   gets 402, a full monthly or daily quota 429.
+2. The question is counted against the key. A demo key has ten questions
+   within 48 hours of the first, and one conditional DynamoDB write counts
+   each. A key can instead carry a
+   plan, which is only a quota of questions per month and per day; nothing is
+   billed. For such a key the demo write refuses the question and hands over
+   the plan, and a second write counts month and day. A spent demo key gets
+   402, a full monthly or daily quota 429.
 3. The knowledge base returns up to ten passages, filtered to the workspace.
    If none matches, the reader gets a fixed sentence and no model is asked.
 4. The question is checked for four denied topics: taking or facing legal
@@ -85,48 +90,54 @@ call may have run and been paid for. `app/handler.py` runs steps 1 and 2
 97 decisions are written down with their dates and reasons in
 [docs/decisions.md](docs/decisions.md). The ones that shape the system:
 
-- **Nothing with a monthly base fee** ([decisions.md:69](docs/decisions.md)):
+- **Nothing with a monthly base fee**
+  ([decisions.md:69](docs/decisions.md?plain=1#L69)):
   S3 Vectors behind a Bedrock knowledge base instead of a search cluster, so
   an idle month costs cents. The price is control over retrieval: Bedrock
   returned whole documents with Markdown tables under every chunking tried,
   so documents are split at their headings before the upload
-  ([decisions.md:82](docs/decisions.md)).
+  ([decisions.md:82](docs/decisions.md?plain=1#L82)).
 - **One installation, workspaces kept apart by a metadata filter**
-  ([decisions.md:157](docs/decisions.md)). The price: the separation rests on
-  a filter in every query, not on separate deployments, so it has to be
-  tested and measured, not assumed (see [Privacy](#privacy-and-separation)).
-- **A key is a budget, not a password** ([decisions.md:282](docs/decisions.md)):
+  ([decisions.md:157](docs/decisions.md?plain=1#L157)). The price: the
+  separation rests on a filter in every query, not on separate deployments,
+  so it has to be tested and measured, not assumed (see
+  [Privacy](#privacy-and-separation)).
+- **A key is a budget, not a password**
+  ([decisions.md:282](docs/decisions.md?plain=1#L282)):
   ten questions within 48 hours of the first for a demo key, a monthly and a
   daily quota for a key on a plan. The price: whoever holds a key can ask
   until it is spent; a leaked demo key is a leak of ten questions.
 - **In Frankfurt the function's URL is the address, without CloudFront**
-  ([decisions.md:979](docs/decisions.md)): no setting keeps CloudFront's edge
-  locations inside Germany. The price: no domain of its own and no WAF, so
-  a flood is capped only by the number of executions Lambda allows at once.
-  The stack is built to reserve 10 for the function there, 5 for questions
-  plus 5 more for loading the page, one pool that questions may take whole;
-  the Frankfurt account allows only 10 executions in all, so the stack runs
-  there without the reservation, and
-  the account's limit is the cap
+  ([decisions.md:979](docs/decisions.md?plain=1#L979)): no setting keeps
+  CloudFront's edge locations inside Germany. The price: no domain of its own
+  and no WAF. What caps a flood is the number of executions Lambda allows at
+  once. The stack is built to reserve 10 executions for the function there:
+  5 for questions and 5 more for loading the page, in one pool that
+  questions may take whole. The Frankfurt account allows only 10 executions
+  in all, so the stack runs there without the reservation, and the account's
+  limit is the cap
   ([docs/operating.md](docs/operating.md#another-region)).
 - **In Frankfurt a model in the region checks the topics**
-  ([decisions.md:694](docs/decisions.md), [:732](docs/decisions.md)),
-  because the one guardrail tier that reads German needs a profile that
-  checks in six regions. The price: a model call per check, 0.30 USD for
-  957 checks (below).
+  ([decisions.md:694](docs/decisions.md?plain=1#L694),
+  [:732](docs/decisions.md?plain=1#L732)). Bedrock's topic guardrail reads
+  German only in its Standard tier, and that tier works only through an EU
+  profile, which runs the check in six EU regions and so would carry it out
+  of Germany. The older tier stays in Frankfurt but let through German advice
+  questions. The price: a model call per check, 0.30 USD for 957 checks
+  (below).
 - **The grounding check withholds at 0.8 in Frankfurt**
-  ([decisions.md:793](docs/decisions.md)), the threshold that withheld the
-  most made-up answers without withholding a right answer to German
-  documents. The price: it withholds right German answers to English
+  ([decisions.md:793](docs/decisions.md?plain=1#L793)), the threshold that
+  withheld the most made-up answers without withholding a right answer to
+  German documents. The price: it withholds right German answers to English
   documents. Checking those in English was measured and not built, because
   it also let made-up answers through
-  ([decisions.md:1025](docs/decisions.md)).
+  ([decisions.md:1025](docs/decisions.md?plain=1#L1025)).
 - **Measured through the function's own code path**
-  ([decisions.md:1131](docs/decisions.md)), against the deployed knowledge
-  base and the deployed function's settings. The price: every measurement
-  calls real models and costs real money, and one run is one sample, since
-  the models do not repeat themselves even at temperature 0
-  ([decisions.md:368](docs/decisions.md)).
+  ([decisions.md:1131](docs/decisions.md?plain=1#L1131)), against the
+  deployed knowledge base and the deployed function's settings. The price:
+  every measurement calls real models and costs real money, and one run is
+  one sample, since the models do not repeat themselves even at temperature 0
+  ([decisions.md:368](docs/decisions.md?plain=1#L368)).
 
 ## Measured
 
@@ -139,11 +150,14 @@ function's own code with the deployed function's settings and knowledge
 base, and its guardrails or copies of them that a script creates and
 deletes; `topic_probe` and `grounding_probe` are also run before a deploy,
 to measure a change before it goes live
-([decisions.md:577](docs/decisions.md)). The numbers below were measured
-after the deploy of 14.10.2026 in Frankfurt and of 16.10.2026 in Ireland,
-against the deployed stack. Frankfurt's deploy of 16.10.2026 gave each
-model its own prompt wording and kept Qwen3 235B's as it was
-([decisions.md:953](docs/decisions.md)). How each works:
+([decisions.md:577](docs/decisions.md?plain=1#L577)). The numbers below were
+measured after the deploy of 14.10.2026 in Frankfurt and of 16.10.2026 in
+Ireland, against the deployed stack. Frankfurt's deploy of 16.10.2026 gave
+each model its own prompt wording and kept Qwen3 235B's as it was
+([decisions.md:953](docs/decisions.md?plain=1#L953)). The deploy of
+21.10.2026 changed no model, search, prompt or check on either stack. It
+changed names, descriptions, the page's text and the sentence a reader gets
+when a key's quota is full. How each script works:
 [scripts/README.md](scripts/README.md).
 
 ### Frankfurt, 14.10.2026, Qwen3 235B
@@ -155,25 +169,33 @@ model its own prompt wording and kept Qwen3 235B's as it was
 | German questions on German documents | 26 of 26 right; all 20 answerable ones cite the expected document |
 | Questions built to tempt the model | 36 of 42 right; 0 of 34 answers added a figure of their own; 29 of 29 German questions answered in German; 8 of 8 advice questions refused |
 | Denied topics, three runs, 957 checks | every one of 45 denied questions, 32 denied answers and 11 advice questions refused; none of 87 harmless questions, 87 harmless answers and 57 questions of the evaluation sets refused |
-| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md:808](docs/decisions.md); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
+| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md:808](docs/decisions.md?plain=1#L808); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
 | Median time per question, retrieval to cost line, from a laptop in Germany | 3.0 s (English), 2.3 s (German on English documents), 2.8 s (German on German documents) |
 
 **Setting up a new workspace**, measured on 07.10.2026 with a fictional craft
 firm and seven German documents: 31 seconds of machine time from checking
-its folder to the first right answer, 3 for its workspace and key, 16 to
-upload and index its documents, 8 for the first question, answered with the
-right figure and the right document cited. The whole rehearsal with all
-measurements took 11 minutes 12 seconds.
+its folder to the first right answer. Of these, 3 went to its workspace and
+key, 16 to uploading and indexing its documents and 8 to the first question,
+answered with the right figure and the right document cited; the other 4 are
+not broken down. The whole rehearsal with all measurements took 11 minutes
+12 seconds.
 
 **Where the weak spots are:**
 
-- Every wrong answer in these Frankfurt runs was withheld by a check; none
-  reached the reader with a wrong figure. All of them are German answers to
-  English documents. A withheld answer's text is not kept, so whether each
-  was right is not known; that the check withholds right ones there is
-  measured (3 of 19 in the grounding row above).
+- In the three evaluation sets above, all 4 wrong answers were withheld by a
+  check; none reached the reader with a wrong figure. All 4 are German
+  answers to English documents. A withheld answer's text is not kept, so
+  whether each was right is not known; that the check withholds right ones
+  there is measured (3 of 19 in the grounding row above).
+- The 6 of 42 questions built to tempt the model that were not right are not
+  listed for the Frankfurt run of 14.10.2026, and neither is whether a check
+  withheld each. For Nova Pro in Ireland on 14.10.2026 the six that were not
+  right were c10, c20, c21, c22, c24 and c32, with each of two prompt
+  wordings, and no answer added a figure
+  ([decisions.md:944](docs/decisions.md?plain=1#L944)); the entry does not
+  say what each one got instead.
 - The models do not answer the same question the same way twice. One run of
-  each set is a sample, not a rate.
+  each set is one sample and gives no rate.
 - The German documents of the fictional craft firm are not in this
   repository, so the German-on-German results cannot be repeated from it.
 
@@ -186,12 +208,12 @@ measurements took 11 minutes 12 seconds.
 
 Each answer model now has the prompt it was measured with: Nova Pro the one
 of 06.10.2026, Qwen3 235B in Frankfurt its own, unchanged
-([decisions.md, 14.10.2026](docs/decisions.md)). After the deploy of
+([decisions.md, 14.10.2026](docs/decisions.md?plain=1#L900)). After the deploy of
 14.10.2026 Ireland had the prompt measured with Qwen3 235B and got 27 of 30
 in two runs: it made Nova Pro write "The sources do not answer this
 question." where the sources do. One question (q20) was right only 2 of 10
 times with either prompt when asked alone on 14.10.2026; it was right in both
-runs here, which is a sample, not a fix.
+runs here, which is one sample and does not show a fix.
 
 ## Privacy and separation
 
@@ -283,7 +305,7 @@ text, the tools and the step limit (`vard/receiving.py`). The receiving check
 has five tools, all allowed, and none of them books.
 
 **Measured on 20.10.2026 in Frankfurt**, twelve made-up cases, two runs of
-every model ([decisions.md:1218](docs/decisions.md)):
+every model ([decisions.md:1218](docs/decisions.md?plain=1#L1218)):
 
 | Model | Passed, of 24 | USD, both runs | Median seconds per case |
 |---|---|---|---|
@@ -311,9 +333,9 @@ from a real system.
 python -m scripts.receiving_probe --out receiving.json   # every model of FRANKFURT_MODELS, at most 1.50 USD
 ```
 
-It calls real models in `eu-central-1` and costs money; run it only when
-asked. `--max-usd` stops it before any call that could take it past the
-limit. How it scores:
+It calls real models in `eu-central-1`; the two full runs on 20.10.2026 cost
+0.488 and 0.490 USD. `--max-usd` stops it before any call that could take it
+past the limit. How it scores:
 [scripts/README.md](scripts/README.md#receiving_probe--which-model-vard-checks-deliveries-with).
 
 ## Build and test it
@@ -372,11 +394,6 @@ with Nova Pro, when the page was still called Ask Andur:
 | The scripts and the measurements | [scripts/README.md](scripts/README.md) |
 | Vard's loop and how his measurement scores | [vard/engine.py](vard/engine.py), [scripts/README.md](scripts/README.md#receiving_probe--which-model-vard-checks-deliveries-with) |
 | The demo corpus and its metadata | [knowledge/README.md](knowledge/README.md), [docs/metadata.md](docs/metadata.md) |
-
-## How it was built
-
-Built with Claude Code. The author set the goals, made every decision and
-checked the results.
 
 ## Licence
 
