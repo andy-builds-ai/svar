@@ -941,9 +941,10 @@ blocks) back in the conversation as it came; without it the reasoning stays
 out, as on the runs of 20. and 21.10.2026. `--out` says for every model which
 it was.
 `--vendor-settings` calls each model of `VENDOR_SETTINGS` in the script as its
-maker recommends: temperature and top_p, its reasoning given back or not, and
-`maxTokens` 8,192. Each row names its source. A model without a row keeps the
-defaults (temperature 0, no top_p, `maxTokens` 4,096). The output and `--out`
+maker recommends: temperature and top_p, its reasoning given back or not,
+`maxTokens` 8,192 and a read timeout of 300 s instead of 40. Each row names its
+source. A model without a row keeps the defaults (temperature 0, no top_p,
+`maxTokens` 4,096, 40 s). The output and `--out`
 say for every model which settings it ran with. With a row, a request Bedrock
 refuses as sent fails the run with exit code 2, since the probe chose its values.
 

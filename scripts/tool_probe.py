@@ -75,8 +75,9 @@ REFUSED_AS_SENT = "ValidationException"
 CONNECT_SECONDS, READ_SECONDS = 3, 40
 
 
-def model_client(region: str) -> Any:
-    """A bedrock-runtime client with the function's timeouts and no retry."""
+def model_client(region: str, read_seconds: int = READ_SECONDS) -> Any:
+    """A bedrock-runtime client with the function's timeouts and no retry; a caller that lets
+    a model think longer gives its own read timeout."""
     with explained("Connecting to Bedrock"):
         import boto3
         from botocore.config import Config
@@ -86,7 +87,7 @@ def model_client(region: str) -> Any:
             region_name=region,
             config=Config(
                 connect_timeout=CONNECT_SECONDS,
-                read_timeout=READ_SECONDS,
+                read_timeout=read_seconds,
                 retries={"total_max_attempts": 1, "mode": "standard"},
             ),
         )

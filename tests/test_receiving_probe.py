@@ -175,7 +175,7 @@ def test_a_document_is_found_by_its_number_whatever_its_spacing(
 
 
 def run_main(monkeypatch: pytest.MonkeyPatch, model: Any, *argv: str) -> int:
-    monkeypatch.setattr(probe, "model_client", lambda region: model)
+    monkeypatch.setattr(probe, "model_client", lambda region, read_seconds: model)
     return probe.main(["--model", probe.MODELS[0].name, *argv])
 
 
@@ -316,7 +316,7 @@ def test_a_missing_permission_stops_the_run(
 def test_an_earlier_result_stays_when_a_run_fails_before_it_pays(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def expired(region: str) -> None:
+    def expired(region: str, read_seconds: int) -> None:
         raise probe.AwsProblem("Your AWS login has run out.")
 
     monkeypatch.setattr(probe, "model_client", expired)
@@ -352,7 +352,7 @@ def test_another_region_measures_its_own_models_at_its_own_prices(
 ) -> None:
     from infra.answer_models import ANSWER_MODELS
 
-    monkeypatch.setattr(probe, "model_client", lambda region: Clerk(loaded[1]))
+    monkeypatch.setattr(probe, "model_client", lambda region, read_seconds: Clerk(loaded[1]))
     nova = next(m for m in ANSWER_MODELS if m.name == "Nova Pro")
     assert probe.main(["--region", "eu-west-1", "--model", "Nova Pro"]) == 0
     case_cost = 3 * (1000 * Decimal(nova.input_per_1k) + 100 * Decimal(nova.output_per_1k)) / 1000
@@ -512,7 +512,7 @@ def test_the_table_and_out_list_the_models_in_their_rank(
             self.booking = request["modelId"] == first.model_id
             return super().converse(**request)
 
-    monkeypatch.setattr(probe, "model_client", lambda region: FirstBooks(loaded[1]))
+    monkeypatch.setattr(probe, "model_client", lambda region, read_seconds: FirstBooks(loaded[1]))
     out = tmp_path / "receiving.json"
     argv = ["--model", first.name, "--model", second.name, "--out", str(out)]
     assert probe.main(argv) == 0
@@ -676,7 +676,7 @@ def test_vendor_settings_call_each_model_as_its_maker_recommends(
     vendor: bool,
 ) -> None:
     clerk = Recording(loaded[1])
-    monkeypatch.setattr(probe, "model_client", lambda region: clerk)
+    monkeypatch.setattr(probe, "model_client", lambda region, read_seconds: clerk)
     out = tmp_path / "receiving.json"
     argv = [arg for name in VENDOR_RUN for arg in ("--model", name)] + ["--out", str(out)]
     assert probe.main([*argv, *(["--vendor-settings"] if vendor else [])]) == 0
@@ -731,7 +731,7 @@ def minimax_run(
     monkeypatch: pytest.MonkeyPatch, cases: list[dict[str, Any]], limit: str, vendor: bool
 ) -> Keeps:
     clerk = Keeps(cases)
-    monkeypatch.setattr(probe, "model_client", lambda region: clerk)
+    monkeypatch.setattr(probe, "model_client", lambda region, read_seconds: clerk)
     argv = ["--model", MINIMAX.name, "--max-usd", limit]
     probe.main([*argv, *(["--vendor-settings"] if vendor else [])])
     return clerk
@@ -774,8 +774,52 @@ def test_a_refused_request_with_a_vendor_row_is_the_probes_mistake(
     code: int,
 ) -> None:
     monkeypatch.setattr(
-        probe, "model_client", lambda region: runtime_raising(converse_error("ValidationException"))
+        probe,
+        "model_client",
+        lambda region, read_seconds: runtime_raising(converse_error("ValidationException")),
     )
     argv = ["--model", "MiniMax M2.5", *(["--vendor-settings"] if vendor else [])]
     assert probe.main(argv) == code
     assert ("error: failed calls, counted as failed" in capsys.readouterr().err) is vendor
+
+
+@pytest.mark.parametrize("vendor", [True, False])
+def test_vendor_settings_wait_300_seconds_and_a_model_without_a_row_40(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+    vendor: bool,
+) -> None:
+    made: list[int] = []
+    #: For each model id, the read timeouts of the clients its calls went through.
+    used: dict[str, set[int]] = {}
+
+    class Waits(Clerk):
+        def __init__(self, read_seconds: int) -> None:
+            super().__init__(loaded[1])
+            self.read_seconds = read_seconds
+
+        def converse(self, **request: Any) -> dict[str, Any]:
+            used.setdefault(request["modelId"], set()).add(self.read_seconds)
+            return super().converse(**request)
+
+    def client(region: str, read_seconds: int) -> Clerk:
+        made.append(read_seconds)
+        return Waits(read_seconds)
+
+    monkeypatch.setattr(probe, "model_client", client)
+    out = tmp_path / "receiving.json"
+    argv = [arg for name in VENDOR_RUN for arg in ("--model", name)] + ["--out", str(out)]
+    assert probe.main([*argv, *(["--vendor-settings"] if vendor else [])]) == 0
+    assert sorted(made) == ([40, 300] if vendor else [40])
+    waits = {
+        s["model"]: s["settings"]["read_seconds"]
+        for s in json.loads(out.read_text(encoding="utf-8"))["summaries"]
+    }
+    row = 300 if vendor else 40
+    expected = {"MiniMax M2.5": row, "Nemotron 3 Super": row, "gpt-oss-20b": row}
+    assert waits == {**expected, "gpt-oss-120b": 40}
+    model_id = ids(VENDOR_RUN)
+    assert {name: used[model_id[name]] for name in waits} == {n: {w} for n, w in waits.items()}
+    assert (", read timeout 300 s" in capsys.readouterr().out) is vendor

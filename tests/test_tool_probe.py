@@ -227,3 +227,12 @@ def test_a_call_that_fails_for_any_other_reason_fails_the_run(
     assert "error: failed calls, counted as failed" in captured.err
     (summary,) = json.loads(out.read_text(encoding="utf-8"))["summaries"]
     assert summary["failed_calls"] == ["t1", "t2", "t3", "t4", "t5", "t6"]
+
+
+@pytest.mark.parametrize("given, expected", [({}, 40), ({"read_seconds": 300}, 300)])
+def test_the_client_waits_as_long_as_it_is_told(given: dict[str, int], expected: int) -> None:
+    """Making a client calls nothing; its config holds the timeouts."""
+    client = tool_probe.model_client("eu-central-1", **given)
+    config = client.meta.config
+    assert (config.read_timeout, config.connect_timeout) == (expected, tool_probe.CONNECT_SECONDS)
+    assert config.retries == {"total_max_attempts": 1, "mode": "standard"}

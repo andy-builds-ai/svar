@@ -29,7 +29,7 @@ from infra.answer_models import FRANKFURT_MODELS, AnswerModel, region_models
 from scripts import utf8_output
 from scripts.aws import AwsProblem, error_code, explain, is_login_problem
 from scripts.evaluate import stays_in_the_eu
-from scripts.tool_probe import REFUSED_AS_SENT, model_client
+from scripts.tool_probe import READ_SECONDS, REFUSED_AS_SENT, model_client
 from vard import engine, receiving
 
 CASES_FILE = Path(__file__).with_name("receiving-cases.json")
@@ -52,6 +52,8 @@ class Settings:
     top_p: float | None = None
     keep_reasoning: bool = False
     max_tokens: int = MAX_TOKENS
+    #: How long a call may take before it fails as a timeout.
+    read_seconds: int = READ_SECONDS
     #: A row of VENDOR_SETTINGS: the probe chose these values, so a request Bedrock refuses as
     #: sent is the probe's mistake, not the model's.
     vendor: bool = False
@@ -64,19 +66,26 @@ AS_BEFORE = Settings()
 #: gpt-oss-20b 16K (the operator's research, 21.10.2026).
 VENDOR_MAX_TOKENS = 8192
 
+#: The read timeout with --vendor-settings: a model that thinks as long as its maker lets it is
+#: not cut off by the 40 s of the answer function. On 21.10.2026, at temperature 0, Nemotron 3
+#: Super and Devstral 2 123B ran into the 40 s once each; Devstral has no row and keeps them.
+VENDOR_READ_SECONDS = 300
+
 #: What each model's maker recommends, read at the source on 21.10.2026. top_k, which MiniMax
 #: also names (40), is no field of Converse's inferenceConfig and is not set.
 VENDOR_SETTINGS = {
     # huggingface.co/MiniMaxAI/MiniMax-M2.5; the reasoning goes back, which MiniMax calls
     # essential: platform.minimax.io/docs/guides/text-m2-function-call
-    "MiniMax M2.5": Settings(1.0, 0.95, True, VENDOR_MAX_TOKENS, vendor=True),
+    "MiniMax M2.5": Settings(1.0, 0.95, True, VENDOR_MAX_TOKENS, VENDOR_READ_SECONDS, vendor=True),
     # huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16, "reasoning, tool calling,
     # and general chat alike"; it names no rule for giving the reasoning back, so it stays out.
-    "Nemotron 3 Super": Settings(1.0, 0.95, False, VENDOR_MAX_TOKENS, vendor=True),
+    "Nemotron 3 Super": Settings(
+        1.0, 0.95, False, VENDOR_MAX_TOKENS, VENDOR_READ_SECONDS, vendor=True
+    ),
     # github.com/openai/gpt-oss (README); the reasoning of earlier turns stays while the last
     # assistant message is a tool call:
     # developers.openai.com/cookbook/articles/gpt-oss/handle-raw-cot
-    "gpt-oss-20b": Settings(1.0, 1.0, True, VENDOR_MAX_TOKENS, vendor=True),
+    "gpt-oss-20b": Settings(1.0, 1.0, True, VENDOR_MAX_TOKENS, VENDOR_READ_SECONDS, vendor=True),
 }
 
 
@@ -95,7 +104,7 @@ def settings_text(settings: Mapping[str, Any]) -> str:
     reasoning = "reasoning given back" if settings["keep_reasoning"] else "reasoning left out"
     return (
         f"{settings['from']}: temperature {settings['temperature']}, {top_p}, {reasoning}, "
-        f"maxTokens {settings['max_tokens']}"
+        f"maxTokens {settings['max_tokens']}, read timeout {settings['read_seconds']} s"
     )
 
 
@@ -535,7 +544,8 @@ def main(argv: list[str] | None = None) -> int:
         "--vendor-settings",
         action="store_true",
         help="call each model of VENDOR_SETTINGS as its maker recommends, with its reasoning "
-        f"as the table says and maxTokens {VENDOR_MAX_TOKENS}",
+        f"as the table says, maxTokens {VENDOR_MAX_TOKENS} and a read timeout of "
+        f"{VENDOR_READ_SECONDS} s",
     )
     args = parser.parse_args(argv)
     if not args.region.startswith("eu-"):
@@ -566,10 +576,16 @@ def main(argv: list[str] | None = None) -> int:
     summaries: list[dict[str, Any]] = []
     meter = Meter(None, args.max_usd)
     try:
-        meter.runtime = model_client(args.region)
+        # One client for each read timeout; a client keeps the one it was made with.
+        clients: dict[int, Any] = {}
         for model in models:
             settings, origin = settings_for(model, args.vendor_settings, args.keep_reasoning)
             print(f"{model.name}: {settings_text(called(settings, origin))}", file=sys.stderr)
+            if settings.read_seconds not in clients:
+                clients[settings.read_seconds] = model_client(
+                    args.region, read_seconds=settings.read_seconds
+                )
+            meter.runtime = clients[settings.read_seconds]
             rows, stopped = run_model(meter, model, companies, cases, args.repeat, settings)
             runs[model.name] = rows
             summary = summarise(model, rows, stopped is not None)
