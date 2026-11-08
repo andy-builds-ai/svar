@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from scripts import ask
+from svar.scripts import ask
 from taug.scripts.aws import AwsProblem
 
 KEY = "a-secret-workspace-key-that-must-never-be-printed"

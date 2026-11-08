@@ -31,7 +31,6 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from scripts.control_eval import QUESTIONS_FILE as CONTROL_QUESTIONS
 from scripts.rehearsal_checks import (
     check_address_region,
     check_deploy_time,
@@ -54,6 +53,7 @@ from scripts.rehearsal_runner import (
     select,
     summary_lines,
 )
+from svar.scripts.control_eval import QUESTIONS_FILE as CONTROL_QUESTIONS
 from taug.infra.answer_models import REGIONS, answer_model
 from taug.scripts import utf8_output
 from taug.scripts.aws import STACK_NAME, client
@@ -79,7 +79,7 @@ def german_questions(workspace: str) -> Path | None:
     `scripts/evaluation-questions-<workspace>.json`; None when there is no such file. A file of
     that name with a question of another workspace or in another language is refused, so that a
     workspace named like another set (`de`, `control`) never measures that set."""
-    path = REPOSITORY / "scripts" / f"evaluation-questions-{workspace}.json"
+    path = REPOSITORY / "svar" / "scripts" / f"evaluation-questions-{workspace}.json"
     if not path.is_file():
         return None
     questions = json.loads(path.read_text(encoding="utf-8"))
@@ -250,7 +250,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "setup",
             "The first question, through ask.py",
             command=python(
-                "scripts.ask", args.question, "--workspace", w, "--language", "de", *region
+                "svar.scripts.ask", args.question, "--workspace", w, "--language", "de", *region
             ),
             reads=answered,
         ),
@@ -282,7 +282,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "apart",
             "The new key is refused in another workspace",
             command=python(
-                "scripts.ask", args.question, "--workspace", args.other_workspace, *region
+                "svar.scripts.ask", args.question, "--workspace", args.other_workspace, *region
             ),
             reads=refused_with_401,
             exit_code=1,
@@ -295,7 +295,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "topics",
             "measure",
             "topic_probe --deployed",
-            command=python("scripts.topic_probe", "--deployed", *out("topics.json"), *region),
+            command=python("svar.scripts.topic_probe", "--deployed", *out("topics.json"), *region),
             group="topics and grounding",
             lane="topic model",
         ),
@@ -311,7 +311,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "grounding",
             "measure",
             "grounding_probe",
-            command=python("scripts.grounding_probe", *out("grounding.json"), *region),
+            command=python("svar.scripts.grounding_probe", *out("grounding.json"), *region),
             group="topics and grounding",
             lane="answer model",
         ),
@@ -319,17 +319,17 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "answers-en",
             "measure",
             "evaluate, English on English documents",
-            command=python("scripts.evaluate", *model, *out("answers-en.json"), *region),
+            command=python("svar.scripts.evaluate", *model, *out("answers-en.json"), *region),
         ),
         Step(
             "answers-de",
             "measure",
             "evaluate, German on English documents",
             command=python(
-                "scripts.evaluate",
+                "svar.scripts.evaluate",
                 *model,
                 "--questions",
-                "scripts/evaluation-questions-de.json",
+                "svar/scripts/evaluation-questions-de.json",
                 *out("answers-de.json"),
                 *region,
             ),
@@ -339,23 +339,23 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "measure",
             "evaluate, German on the workspace's German documents",
             command=python(
-                "scripts.evaluate",
+                "svar.scripts.evaluate",
                 *model,
                 "--questions",
-                f"scripts/{own_questions.name}",
+                f"svar/scripts/{own_questions.name}",
                 *out("answers-de-de.json"),
                 *region,
             )
             if own_questions
             else None,
-            skipped=None if own_questions else f"no scripts/evaluation-questions-{w}.json",
+            skipped=None if own_questions else f"no svar/scripts/evaluation-questions-{w}.json",
         ),
         Step(
             "sources",
             "measure",
             "control_eval on the workspace's questions, retrieval in the region",
             command=python(
-                "scripts.control_eval",
+                "svar.scripts.control_eval",
                 *model,
                 "--workspace",
                 w,

@@ -13,9 +13,9 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from app.page import ASK_PATH, SECURITY_HEADERS
-from scripts.ask import API_KEY_ENVIRONMENT_VARIABLE, read_key
 from scripts.rehearsal_runner import Context, StepFailed, format_seconds
+from svar.app.page import ASK_PATH, SECURITY_HEADERS
+from svar.scripts.ask import API_KEY_ENVIRONMENT_VARIABLE, read_key
 from taug.scripts.aws import explained
 
 #: The answer function and its log group, as the stack names them.

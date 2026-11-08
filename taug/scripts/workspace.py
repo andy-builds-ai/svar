@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.plans import DEMO, PLANS, plan_named
+from svar.app.plans import DEMO, PLANS, plan_named
 from taug.scripts import utf8_output
 from taug.scripts.aws import (
     REGION,
@@ -46,15 +46,15 @@ KEY_BYTES = 32
 KEY_DESCRIPTION = "Andur workspace key. Send it in the header X-Andur-Key."
 
 #: The partition key of the budget table: the SHA-256 of the key, in hex
-#: (``BUDGET_KEY_ATTRIBUTE`` and ``key_hash`` in app/budget.py).
+#: (``BUDGET_KEY_ATTRIBUTE`` and ``key_hash`` in svar/app/budget.py).
 BUDGET_KEY_ATTRIBUTE = "key_hash"
 
 #: The attribute that names a key's plan, and the one the table's TTL reads
-#: (``PLAN_ATTRIBUTE`` and ``BUDGET_TTL_ATTRIBUTE`` in app/budget.py).
+#: (``PLAN_ATTRIBUTE`` and ``BUDGET_TTL_ATTRIBUTE`` in svar/app/budget.py).
 PLAN_ATTRIBUTE = "plan"
 BUDGET_TTL_ATTRIBUTE = "delete_after"
 
-#: What ``--plan`` and ``plan`` accept: the demo budget, or a plan of app/plans.py.
+#: What ``--plan`` and ``plan`` accept: the demo budget, or a plan of svar/app/plans.py.
 PLAN_CHOICES = (DEMO, *(plan.name for plan in PLANS))
 
 ADD_OUTPUTS = ("ApiKeyParameterPath",)
@@ -226,7 +226,7 @@ def read_budget(dynamodb: Any, table: str, key: str) -> dict[str, Any] | None:
 
 
 #: The answer function writes the workspace into every budget item it creates
-#: (``BUDGET_UPDATE_EXPRESSION`` in app/budget.py).
+#: (``BUDGET_UPDATE_EXPRESSION`` in svar/app/budget.py).
 BUDGET_WORKSPACE_ATTRIBUTE = "workspace"
 
 
@@ -389,7 +389,7 @@ def carry_out(
     return removal.key is not None
 
 
-#: ``KEY_CACHE_SECONDS`` in app/keys.py, in minutes.
+#: ``KEY_CACHE_SECONDS`` in svar/app/keys.py, in minutes.
 KEY_CACHE_MINUTES = 5
 
 
@@ -412,7 +412,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--plan",
         choices=PLAN_CHOICES,
         default=DEMO,
-        help=f"the key's plan (app/plans.py); default: {DEMO}",
+        help=f"the key's plan (svar/app/plans.py); default: {DEMO}",
     )
     plan = commands.add_parser(
         "plan", help="put the workspace's key on another plan; the key stays as it is"

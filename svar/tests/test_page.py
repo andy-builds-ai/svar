@@ -1,4 +1,4 @@
-"""The function as its own address (app/page.py): the page, the way to /ask, the headers."""
+"""The function as its own address (svar/app/page.py): the page, the way to /ask, the headers."""
 
 import dataclasses
 import json
@@ -9,13 +9,13 @@ from typing import Any
 import clocks
 import config
 import errors
-import handler  # app/handler.py, imported by its Lambda name (conftest.py)
+import handler  # svar/app/handler.py, imported by its Lambda name (conftest.py)
 import llm
 import log
 import page
 import pytest
 
-from tests.test_handler import (  # noqa: F401 (aws and cold_start are fixtures)
+from svar.tests.test_handler import (  # noqa: F401 (aws and cold_start are fixtures)
     SETTINGS,
     FakeClock,
     SequencedBedrockRuntime,
@@ -166,7 +166,7 @@ def test_a_second_model_call_may_start_later_without_cloudfront(
     retried: bool,
 ) -> None:
     """At second 100 the second call still ends inside the function's 195 seconds, not before
-    CloudFront's 120 (app/aws.py)."""
+    CloudFront's 120 (svar/app/aws.py)."""
     monkeypatch.setattr(clocks, "pause", lambda seconds: None)
     settings = dataclasses.replace(SETTINGS, page_folder=page_folder)
     bedrock = SequencedBedrockRuntime([client_error("ThrottlingException")])

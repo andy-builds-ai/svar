@@ -36,7 +36,7 @@ dev = [
 packages = ["infra", "infra.stacks"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "taug/tests", "vard/tests"]
+testpaths = ["tests", "taug/tests", "svar/tests", "vard/tests"]
 
 [tool.ruff]
 line-length = 100

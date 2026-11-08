@@ -12,12 +12,12 @@ import pytest
 from aws_cdk.assertions import Template
 
 from infra.stacks.andur_stack import AndurStack
-from infra.stacks.answer_function import (
+from svar.infra.answer_function import (
     ANSWER_MAX_CONCURRENCY,
     PAGE_LAYER_FOLDER,
     PAGE_LOAD_CONCURRENCY,
 )
-from infra.stacks.guardrails import GUARDRAIL_PROFILE_REGIONS
+from svar.infra.guardrails import GUARDRAIL_PROFILE_REGIONS
 from taug.infra.answer_models import (
     ANSWER_MODELS,
     DEFAULT_PROMPT,
@@ -128,7 +128,7 @@ def test_the_grounding_probe_follows_the_stacks_rule_on_the_profile(
 ) -> None:
     """A region with a topic model and `answer_guardrail_profile` set: the stack keeps its
     answer guardrail in the region, so the probe does as well."""
-    from scripts import grounding_probe
+    from svar.scripts import grounding_probe
 
     frankfurt = REGIONS["eu-central-1"]
     monkeypatch.setitem(REGIONS, "eu-central-1", frankfurt._replace(answer_guardrail_profile=True))
@@ -238,7 +238,7 @@ def test_ireland_keeps_its_three_guardrails_through_the_profile() -> None:
 
 
 def test_the_grounding_probe_copies_the_answer_guardrail_of_each_region() -> None:
-    from scripts import grounding_probe
+    from svar.scripts import grounding_probe
 
     frankfurt = grounding_probe.probe_request("eu-central-1")
     assert "crossRegionConfig" not in frankfurt and "topicPolicyConfig" not in frankfurt
@@ -397,7 +397,7 @@ def test_frankfurt_keeps_room_for_a_page_load_beside_its_questions(
 
 
 def test_frankfurt_names_the_url_as_its_address(frankfurt: tuple[AndurStack, Template]) -> None:
-    """scripts/ask.py posts to <WebUrl>/ask, in either region."""
+    """svar/scripts/ask.py posts to <WebUrl>/ask, in either region."""
     stack, template = frankfurt
     outputs = template.to_json()["Outputs"]
     url = stack.function_url.node.default_child
@@ -500,7 +500,7 @@ def test_the_prompt_belongs_to_the_model_nova_pro_in_both_tables_qwen_in_frankfu
 def test_the_probes_copy_the_grounding_threshold_of_their_region(
     region: str, expected: float
 ) -> None:
-    from scripts import control_eval, grounding_probe
+    from svar.scripts import control_eval, grounding_probe
 
     probe = grounding_probe.probe_request(region)["contextualGroundingPolicyConfig"]
     assert grounding_filters(probe["filtersConfig"]) == {"GROUNDING": expected, "RELEVANCE": 0.7}

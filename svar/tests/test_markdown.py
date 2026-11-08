@@ -1,4 +1,4 @@
-"""Tests for the page's Markdown (web/markdown.js), run in Node.
+"""Tests for the page's Markdown (svar/web/markdown.js), run in Node.
 
 The page has no build step and no JavaScript test runner, and gets none for
 this: Node runs the file itself, which exports its two pure functions when

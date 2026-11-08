@@ -24,15 +24,15 @@ import aws_cdk as cdk
 import pytest
 from aws_cdk.assertions import Template
 
-from infra.deploy_drain import handler as drain_handler
-from infra.stacks import answer_function, guardrails as stack_guardrails
 from infra.stacks.andur_stack import AndurStack
-from infra.stacks.answer_function import (
+from svar.infra import answer_function, guardrails as stack_guardrails
+from svar.infra.answer_function import (
     ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
     DEPLOY_DRAIN_SECONDS,
     EU_PROFILE_PREFIX,
 )
+from svar.infra.deploy_drain import handler as drain_handler
 from tests.test_stack import REGIONAL_MODEL_ID, deploy_context
 
 ACCOUNT = "111122223333"

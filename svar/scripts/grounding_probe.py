@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from infra.stacks.guardrails import (
+from svar.infra.guardrails import (
     ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
@@ -41,8 +41,8 @@ from infra.stacks.guardrails import (
     RELEVANCE_THRESHOLD,
     grounding_threshold_for,
 )
-from scripts import topic_probe
-from scripts.evaluate import deployed_environment, import_app
+from svar.scripts import topic_probe
+from svar.scripts.evaluate import deployed_environment, import_app
 from taug.infra.answer_models import region_answer_guardrail_uses_profile
 from taug.scripts import utf8_output
 from taug.scripts.aws import REGION, AwsProblem, client, error_code
@@ -527,7 +527,7 @@ def report(summary: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> lis
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.grounding_probe",
+        prog="python -m svar.scripts.grounding_probe",
         description="Measure the grounding check on the answer set, and German answers in English.",
     )
     parser.add_argument("--answers", type=Path, default=ANSWERS_FILE)

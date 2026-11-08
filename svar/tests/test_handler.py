@@ -36,7 +36,7 @@ import clocks
 import config
 import errors
 import guardrails
-import handler  # app/handler.py
+import handler  # svar/app/handler.py
 import intake
 import keys
 import llm
@@ -62,7 +62,7 @@ from intake import KEY_HEADER, MAX_QUESTION_CHARACTERS
 from llm import ANSWER_TEMPERATURE, MAX_ANSWER_TOKENS
 from prompts import MAX_SOURCE_CHARACTERS
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 ENVIRONMENT = {
     "KNOWLEDGE_BASE_ID": "KB123",
@@ -692,7 +692,7 @@ def test_settings_come_from_the_environment() -> None:
 
 
 def test_the_prompt_wording_is_optional_and_each_part_without_it() -> None:
-    """A function deployed before ANSWER_PROMPT existed, and `scripts/evaluate.py` reading its
+    """A function deployed before ANSWER_PROMPT existed, and `svar/scripts/evaluate.py` reading its
     environment, still load."""
     assert "ANSWER_PROMPT" not in ENVIRONMENT
     assert SETTINGS.answer_prompt == "each-part"
@@ -1493,7 +1493,7 @@ def test_the_modules_import_and_read_requests_without_boto3() -> None:
     """boto3 is imported lazily: a missing SDK must not break the import."""
     code = (
         "import sys; sys.modules['boto3'] = None; sys.modules['botocore'] = None\n"
-        "sys.path.insert(0, 'app')\n"
+        "sys.path.insert(0, 'svar/app')\n"
         "import handler, intake\n"
         "print(intake.requested_workspace({'workspace': 'quillmoor'}))\n"
     )
@@ -3769,7 +3769,7 @@ def test_every_error_read_after_the_body_has_a_german_sentence() -> None:
     """The German sentence is the second argument. Only the two checks that run before the
     body is read, when the language is not known yet, have none. Read in every module of the
     function, where an error is raised by its name or as ``errors.<name>``."""
-    modules = sorted((REPOSITORY_ROOT / "app").glob("*.py"))
+    modules = sorted((REPOSITORY_ROOT / "svar" / "app").glob("*.py"))
     tree = ast.Module(
         body=[ast.parse(path.read_text(encoding="utf-8")) for path in modules], type_ignores=[]
     )

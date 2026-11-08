@@ -1,13 +1,14 @@
 """Where Andur runs, the models it may be given there, and what their tokens cost.
 
-The stack, `scripts/evaluate.py` and the probes read a region's table through `REGIONS`, so a
+The stack, `svar/scripts/evaluate.py` and the probes read a region's table through `REGIONS`, so a
 model never travels without its price, and never without the price of its region.
 """
 
 from typing import NamedTuple
 
-#: The names of the system prompt's wordings, which live in `app/prompts.py` (only app/ goes into
-#: the function, and a model id never goes into app/). A test holds both lists together.
+#: The names of the system prompt's wordings, which live in `svar/app/prompts.py` (only app/
+#: goes into the function, and a model id never goes into app/). A test holds both lists
+#: together.
 #: "each-part": the sentence for "not in the sources" only if the sources answer no part of the
 #: question (07.10.2026, measured with Qwen3 235B). "sentence-first": the sentence whenever the
 #: sources do not answer the question (06.10.2026, measured with Nova Pro).
@@ -78,7 +79,7 @@ class RegionModels(NamedTuple):
     answer_guardrail_profile: bool
     #: True: CloudFront is the one address of page and questions, at its edge locations
     #: worldwide. False: the answer function's URL in the region is that address and serves the
-    #: page itself (app/page.py); nothing of a request passes through another region.
+    #: page itself (svar/app/page.py); nothing of a request passes through another region.
     behind_cloudfront: bool = True
     #: The grounding threshold of the answer guardrail, measured for the region's answer
     #: model; None: `GROUNDING_THRESHOLD` of the stack (0.7).

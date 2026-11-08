@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 
-from scripts import evaluate, grounding_probe
-from tests.test_topic_probe import FakeBedrock
+from svar.scripts import evaluate, grounding_probe
+from svar.tests.test_topic_probe import FakeBedrock
 
 QUESTION_SETS = {
     "en": evaluate.QUESTIONS_FILE,

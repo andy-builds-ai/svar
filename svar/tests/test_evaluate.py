@@ -15,15 +15,15 @@ import log
 import pytest
 import sentences
 
-from infra.stacks.answer_function import ANSWER_FUNCTION_NAME
-from scripts import evaluate
+from svar.infra.answer_function import ANSWER_FUNCTION_NAME
+from svar.scripts import evaluate
+from svar.tests.test_handler import ENVIRONMENT
 from taug.infra.answer_models import ANSWER_MODELS, AnswerModel
-from tests.test_handler import ENVIRONMENT
 
 #: The answer function's modules, as the scripts take them (`evaluate.import_app`).
 app = evaluate.import_app()
 
-KNOWLEDGE = Path(__file__).resolve().parents[1] / "knowledge"
+KNOWLEDGE = Path(__file__).resolve().parents[2] / "knowledge"
 
 GERMAN_QUESTIONS_FILE = evaluate.QUESTIONS_FILE.with_name("evaluation-questions-de.json")
 
@@ -279,7 +279,7 @@ class FakeApp:
         self.outcomes = outcomes
         self.calls = 0
         self.languages: list[str] = []
-        #: In place of app/answering.py.
+        #: In place of svar/app/answering.py.
         self.answering = SimpleNamespace(answer_question=self.answer_question)
 
     def answer_question(self, settings: Any, workspace: str, question: str, record: Any) -> Any:

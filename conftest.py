@@ -13,7 +13,7 @@ import pytest
 
 from taug.infra import answer_models
 
-APP_FOLDER = Path(__file__).resolve().parent / "app"
+APP_FOLDER = Path(__file__).resolve().parent / "svar" / "app"
 
 if str(APP_FOLDER) not in sys.path:
     sys.path.insert(0, str(APP_FOLDER))

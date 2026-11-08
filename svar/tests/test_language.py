@@ -1,6 +1,6 @@
-"""Tests for the page's two languages (web/language.js), run in Node.
+"""Tests for the page's two languages (svar/web/language.js), run in Node.
 
-Like web/markdown.js, the file holds only pure functions and exports them when it
+Like svar/web/markdown.js, the file holds only pure functions and exports them when it
 finds ``module``, so Node can run it without a browser. What touches the page
 (app.js, index.html) is checked by reading the files: every text the page shows has
 a key in both languages, and no sentence is kept in two places.
@@ -286,7 +286,7 @@ def test_a_spent_key_gets_the_hint_to_ask_for_a_new_one_in_the_page_language(
 
 @pytest.mark.parametrize("language", ["en", "de"])
 def test_a_full_quota_is_the_functions_sentence_alone_without_the_hint(language: str) -> None:
-    """A key on a plan gets 429 with a sentence (app/budget.py, QuotaReached): its quota
+    """A key on a plan gets 429 with a sentence (svar/app/budget.py, QuotaReached): its quota
     comes back by itself, and a new key is not what helps. Lambda's own 429 has no
     sentence and keeps the page's (below)."""
     payload = {"error": "Das Kontingent von 600 Fragen für heute ist erreicht."}

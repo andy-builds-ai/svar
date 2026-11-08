@@ -32,7 +32,7 @@ WEB_URL_OUTPUT = "WebUrl"
 #: The path on that address that reaches the answer function.
 ASK_PATH = "/ask"
 
-#: The header the workspace key travels in — ``KEY_HEADER`` in app/intake.py.
+#: The header the workspace key travels in — ``KEY_HEADER`` in svar/app/intake.py.
 KEY_HEADER = "X-Andur-Key"
 
 BODY_HASH_HEADER = "x-amz-content-sha256"
@@ -62,7 +62,7 @@ _HEADER_VALUE = re.compile(r"[ -~\xa0-\xff]+")
 
 def header_value(key: str) -> str:
     """The key as it goes into the header: without the space and line end around it, which the
-    function drops too (`request_key` in app/intake.py). A key that still cannot be a header
+    function drops too (`request_key` in svar/app/intake.py). A key that still cannot be a header
     is an `AwsProblem` that does not repeat it; `http.client` would name the value."""
     key = key.strip()
     if not _HEADER_VALUE.fullmatch(key):
@@ -150,7 +150,7 @@ def format_answer(workspace: str, body: dict[str, Any]) -> list[str]:
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.ask",
+        prog="python -m svar.scripts.ask",
         description="Ask Svar's deployed answer function a question in one workspace.",
     )
     parser.add_argument("question")

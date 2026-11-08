@@ -11,9 +11,9 @@ from typing import Any
 
 import pytest
 
-from app.page import SECURITY_HEADERS
 from scripts import rehearsal, rehearsal_checks, rehearsal_runner
 from scripts.rehearsal_runner import Context, Result, Runner, Step, StepFailed
+from svar.app.page import SECURITY_HEADERS
 from taug.scripts import ingest, layout
 from taug.tests.test_ingest import sidecar_for
 
@@ -152,7 +152,10 @@ def test_the_measurements_ask_the_deployed_answer_model(plan: list[Step]) -> Non
 def test_the_german_measurements_follow_the_workspace(plan: list[Step]) -> None:
     steps = by_id(plan)
     de_de = steps["answers-de-de"].command or ()
-    assert de_de[de_de.index("--questions") + 1] == "scripts/evaluation-questions-kalvenstett.json"
+    assert (
+        de_de[de_de.index("--questions") + 1]
+        == "svar/scripts/evaluation-questions-kalvenstett.json"
+    )
     sources = steps["sources"].command or ()
     assert sources[sources.index("--workspace") + 1] == "kalvenstett"
     assert [step.id for step in plan if step.skipped] == []
@@ -177,7 +180,7 @@ def test_a_workspace_without_german_questions_skips_them_and_says_so(
 ) -> None:
     """Measuring another business's questions instead would pass for the new one."""
     steps = by_id(rehearsal.build_plan(rehearsal.parse_args(new_business(tmp_path, "neufirma"))))
-    assert steps["answers-de-de"].skipped == "no scripts/evaluation-questions-neufirma.json"
+    assert steps["answers-de-de"].skipped == "no svar/scripts/evaluation-questions-neufirma.json"
     assert steps["sources"].skipped == (
         "no German questions of neufirma in evaluation-questions-control.json"
     )
@@ -194,10 +197,10 @@ def test_a_workspace_without_german_questions_skips_them_and_says_so(
     lines = rehearsal_runner.summary_lines(results, 1.0)
     (row,) = [line for line in lines if line.startswith("| 2 | answers-de-de |")]
     assert row.startswith("| 2 | answers-de-de | command | skipped |")
-    assert row.endswith("| no scripts/evaluation-questions-neufirma.json |")
+    assert row.endswith("| no svar/scripts/evaluation-questions-neufirma.json |")
     assert lines[-1] == "Skipped, not measured: answers-de-de, sources."
     assert rehearsal.main(new_business(tmp_path, "neufirma", "--list")) == 0
-    assert "skipped: no scripts/evaluation-questions-neufirma.json" in capsys.readouterr().out
+    assert "skipped: no svar/scripts/evaluation-questions-neufirma.json" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("workspace", ["de", "control"])

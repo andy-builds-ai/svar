@@ -10,7 +10,7 @@ from aws_cdk import (
     aws_bedrock as bedrock,
 )
 
-from app.denied_topics import DENIED_TOPICS
+from svar.app.denied_topics import DENIED_TOPICS
 from taug.infra.answer_models import region_models
 
 if TYPE_CHECKING:
@@ -244,7 +244,7 @@ def create_topic_guardrail(
     """The guardrail that checks the question and the answer, without its citations, for
     the denied topics, and its numbered version. The function applies it as INPUT to the
     question and as OUTPUT to the answer, each after its frame; its topics are set on both
-    sides, exactly like the guardrail `python -m scripts.topic_probe` measures."""
+    sides, exactly like the guardrail `python -m svar.scripts.topic_probe` measures."""
     return guardrail_with_version(
         stack,
         "TopicGuardrail",

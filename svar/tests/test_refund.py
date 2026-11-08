@@ -1,5 +1,5 @@
 """A question that fails on AWS's side after it was counted is given back to the key's budget,
-unless a timeout caused it (app/refunds.py, `refund_question`)."""
+unless a timeout caused it (svar/app/refunds.py, `refund_question`)."""
 
 import logging
 from typing import Any
@@ -16,7 +16,7 @@ import pytest
 import refunds
 import topic_check
 
-from tests.test_handler import (  # noqa: F401 (aws, budget_clock and cold_start are fixtures)
+from svar.tests.test_handler import (  # noqa: F401 (aws, budget_clock and cold_start are fixtures)
     ENVIRONMENT,
     KEYS,
     FakeClock,

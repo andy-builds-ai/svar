@@ -12,16 +12,16 @@ import pytest
 import retrieval
 import sentences
 
-from app.denied_topics import DENIED_TOPICS
-from infra.stacks.guardrails import GUARDRAIL_PROFILE_ID
-from scripts import control_eval, control_marks, evaluate
+from svar.app.denied_topics import DENIED_TOPICS
+from svar.infra.guardrails import GUARDRAIL_PROFILE_ID
+from svar.scripts import control_eval, control_marks, evaluate
+from svar.tests.test_handler import ENVIRONMENT
 from taug.infra.answer_models import ANSWER_MODELS, FRANKFURT_MODELS
-from tests.test_handler import ENVIRONMENT
 
 #: The answer function's modules, as the scripts take them (`evaluate.import_app`).
 app = evaluate.import_app()
 
-KNOWLEDGE = Path(__file__).resolve().parents[1] / "knowledge"
+KNOWLEDGE = Path(__file__).resolve().parents[2] / "knowledge"
 
 OTHER_SETS = (
     "evaluation-questions.json",

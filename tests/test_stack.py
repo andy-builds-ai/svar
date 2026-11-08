@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import aws  # app/aws.py, imported by its Lambda name (conftest.py)
+import aws  # svar/app/aws.py, imported by its Lambda name (conftest.py)
 
 # Imported, not skipped past. `aws-cdk-lib` is a hard dependency in
 # pyproject.toml, and it has to stay one: with an `importorskip` here, an
@@ -28,10 +28,10 @@ import pytest
 import sentences
 from aws_cdk.assertions import Match, Template
 
-from app.denied_topics import DENIED_TOPICS
-from app.page import ASK_PATH, HSTS_MAX_AGE_DAYS
 from infra.stacks.andur_stack import AndurStack
-from infra.stacks.answer_function import (
+from svar.app.denied_topics import DENIED_TOPICS
+from svar.app.page import ASK_PATH, HSTS_MAX_AGE_DAYS
+from svar.infra.answer_function import (
     ANSWER_FUNCTION_NAME,
     ANSWER_MAX_CONCURRENCY,
     ANSWER_MEMORY_MB,
@@ -51,7 +51,7 @@ from infra.stacks.answer_function import (
     PRICE_PII_PER_1K_UNITS,
     PRICE_TOPIC_PER_1K_UNITS,
 )
-from infra.stacks.guardrails import (
+from svar.infra.guardrails import (
     ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
@@ -65,8 +65,8 @@ from infra.stacks.guardrails import (
     TOPIC_GUARDRAIL_NAME,
     TOPICS_TIER,
 )
-from infra.stacks.web import ORIGIN_RESPONSE_TIMEOUT_SECONDS, SITE_ROOT_DOCUMENT
-from scripts import ask, grounding_probe, topic_probe
+from svar.infra.web import ORIGIN_RESPONSE_TIMEOUT_SECONDS, SITE_ROOT_DOCUMENT, WEB_FOLDER
+from svar.scripts import ask, grounding_probe, topic_probe
 from taug.infra import answer_models
 from taug.infra.answer_models import PRICE_DATE, answer_model
 from taug.infra.knowledge_base import (
@@ -84,7 +84,7 @@ from taug.infra.knowledge_base import (
     WORKSPACE_PREFIX,
     replacement_safe_name,
 )
-from taug.infra.shared import REPOSITORY_ROOT, WEB_FOLDER
+from taug.infra.shared import REPOSITORY_ROOT
 
 #: The file `cdk deploy` reads its context from. The tests read the same file,
 #: so that what is synthesised here is what would be deployed.
@@ -614,10 +614,10 @@ def test_cloudfront_gives_up_before_the_function_does() -> None:
 
 
 def test_without_cloudfront_every_caller_outlasts_the_function() -> None:
-    """Where the function is its own address, the page and scripts/ask.py wait longer than
-    the function may run: the function's own timeout is the limit app/aws.py counts with,
+    """Where the function is its own address, the page and svar/scripts/ask.py wait longer than
+    the function may run: the function's own timeout is the limit svar/app/aws.py counts with,
     and the worst case still ends inside it, as a 502 with a reason."""
-    from scripts import ask
+    from svar.scripts import ask
 
     assert aws.PAGE_TIMEOUT_SECONDS * 1000 == page_number("REQUEST_TIMEOUT_MS")
     assert aws.FUNCTION_TIMEOUT_SECONDS == ANSWER_TIMEOUT_SECONDS
@@ -673,7 +673,7 @@ def test_answer_function_is_configured_only_through_its_environment(
 
 
 def test_the_model_id_is_configuration_not_handler_code() -> None:
-    for module in (REPOSITORY_ROOT / "app").glob("*.py"):
+    for module in (REPOSITORY_ROOT / "svar" / "app").glob("*.py"):
         assert ANSWER_MODEL_ID not in module.read_text(encoding="utf-8"), module.name
 
 
@@ -1286,7 +1286,7 @@ def test_the_second_deploy_took_the_topics_off_the_answer_guardrail_and_nothing_
     """Against the first deploy, with the flag on: then the answer guardrail read the four
     topics in the question only. The second deploy takes that policy off and changes nothing
     else of either guardrail but their descriptions, and both get a new version."""
-    from infra.stacks import guardrails as stack_guardrails
+    from svar.infra import guardrails as stack_guardrails
 
     def guardrails(of: AndurStack, resources: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         return {
@@ -1409,7 +1409,7 @@ def test_with_the_flag_on_the_grounding_probe_copies_the_question_topics_too(
     """The copy follows the flag: on, as in the first deploy of 06.10.2026, the probe reads the
     answer guardrail's topics on the same sides, in the same tier. CloudFormation calls the
     tier `TopicsTierConfig`."""
-    from infra.stacks import guardrails as stack_guardrails
+    from svar.infra import guardrails as stack_guardrails
 
     monkeypatch.setattr(stack_guardrails, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
     monkeypatch.setattr(grounding_probe, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
@@ -1561,7 +1561,7 @@ def test_a_changed_setting_makes_a_new_guardrail_version(monkeypatch: pytest.Mon
     Without that, a new threshold would reach the guardrail's draft and never
     the version the function uses.
     """
-    from infra.stacks import guardrails as stack_guardrails
+    from svar.infra import guardrails as stack_guardrails
 
     def version_description() -> str:
         other = AndurStack(cdk.App(context=deploy_context()), "VersionStack")
@@ -1588,7 +1588,7 @@ def test_a_changed_output_action_makes_new_versions_of_both_guardrails(
     """
     from aws_cdk import aws_bedrock as bedrock
 
-    from infra.stacks import guardrails as stack_guardrails
+    from svar.infra import guardrails as stack_guardrails
 
     def descriptions() -> tuple[str, str]:
         other = AndurStack(cdk.App(context=deploy_context()), "ActionStack")
@@ -1643,7 +1643,8 @@ def test_the_guardrail_version_is_an_output(stack: AndurStack, template: Templat
     assert excerpt_output["Value"] == {"Ref": stack.get_logical_id(stack.excerpt_guardrail_version)}
     (topic_output,) = template.find_outputs("TopicGuardrailRef").values()
     assert topic_output["Value"] == {"Ref": stack.get_logical_id(stack.topic_guardrail_version)}
-    # The function sends it the question as INPUT and the answer as OUTPUT (app/topic_check.py).
+    # The function sends it the question as INPUT and the answer as OUTPUT
+    # (svar/app/topic_check.py).
     assert topic_output["Description"].startswith(
         "The guardrail that checks the question, and the answer without its citations,"
     )
@@ -1655,7 +1656,7 @@ def test_a_changed_topic_makes_a_new_version_of_the_topic_guardrail_only(
     """The topic guardrail reads `DENIED_TOPICS` on both sides: a changed definition has to
     reach the version the function uses. The answer guardrail reads no topic, so its version
     stays."""
-    from infra.stacks import guardrails as stack_guardrails
+    from svar.infra import guardrails as stack_guardrails
 
     def descriptions() -> tuple[str, str]:
         other = AndurStack(cdk.App(context=deploy_context()), "TopicStack")

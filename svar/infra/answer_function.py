@@ -16,8 +16,9 @@ from aws_cdk import (
     custom_resources as cr,
 )
 
-from app.page import PAGE_FOLDER_VARIABLE
-from infra.stacks.guardrails import GUARDRAIL_PROFILE_REGIONS, guardrail_profile_arn
+from svar.app.page import PAGE_FOLDER_VARIABLE
+from svar.infra.guardrails import GUARDRAIL_PROFILE_REGIONS, guardrail_profile_arn
+from svar.infra.web import WEB_FOLDER
 from taug.infra.answer_models import (
     DEFAULT_REGION,
     answer_model,
@@ -27,7 +28,6 @@ from taug.infra.shared import (
     ASSET_EXCLUDES,
     LAMBDA_RUNTIME,
     REPOSITORY_ROOT,
-    WEB_FOLDER,
     create_log_group,
     write_logs_policy,
 )
@@ -75,7 +75,7 @@ DEFAULT_KEEP_DAYS = 365
 
 ANSWER_FUNCTION_NAME = "andur-answer"
 
-#: Longer than `worst_case_seconds` in app/aws.py, 189 since the topic check of the question
+#: Longer than `worst_case_seconds` in svar/app/aws.py, 189 since the topic check of the question
 #: (06.10.2026) and 190 without CloudFront (07.10.2026), so a hanging AWS call ends as the
 #: handler's 502, not as a Lambda timeout.
 ANSWER_TIMEOUT_SECONDS = 195
@@ -96,7 +96,7 @@ PAGE_LOAD_CONCURRENCY = 5
 
 #: How long a deploy that replaces a guardrail version waits after the answer function has
 #: changed, before CloudFormation deletes the old versions: longer than an answer may run, so
-#: no answer that started on an old version still needs it (infra/deploy_drain/handler.py).
+#: no answer that started on an old version still needs it (svar/infra/deploy_drain/handler.py).
 DEPLOY_DRAIN_SECONDS = ANSWER_TIMEOUT_SECONDS + 30
 
 #: Where Lambda unpacks a layer: the page's files, where the function serves them.
@@ -344,7 +344,7 @@ def create_answer_function(
         description="Andur: Svar answers a question from one workspace's documents.",
         runtime=LAMBDA_RUNTIME,
         architecture=lambda_.Architecture.ARM_64,
-        code=lambda_.Code.from_asset(str(REPOSITORY_ROOT / "app"), exclude=ASSET_EXCLUDES),
+        code=lambda_.Code.from_asset(str(REPOSITORY_ROOT / "svar" / "app"), exclude=ASSET_EXCLUDES),
         handler="handler.handler",
         timeout=Duration.seconds(ANSWER_TIMEOUT_SECONDS),
         memory_size=ANSWER_MEMORY_MB,
@@ -434,7 +434,7 @@ def create_deploy_drain(
         runtime=LAMBDA_RUNTIME,
         architecture=lambda_.Architecture.ARM_64,
         code=lambda_.Code.from_asset(
-            str(REPOSITORY_ROOT / "infra" / "deploy_drain"), exclude=ASSET_EXCLUDES
+            str(REPOSITORY_ROOT / "svar" / "infra" / "deploy_drain"), exclude=ASSET_EXCLUDES
         ),
         handler="handler.on_event",
         timeout=Duration.seconds(DEPLOY_DRAIN_SECONDS + 60),

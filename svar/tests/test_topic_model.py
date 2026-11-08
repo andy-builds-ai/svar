@@ -1,4 +1,5 @@
-"""The denied topics checked by a model (app/topic_model.py) and the handler's way through it."""
+"""The denied topics checked by a model (svar/app/topic_model.py) and the handler's way
+through it."""
 
 import logging
 import threading
@@ -15,7 +16,7 @@ import topic_check
 import topic_model
 from denied_topics import DENIED_TOPICS
 
-from tests.test_handler import (  # noqa: F401 (aws and cold_start are fixtures)
+from svar.tests.test_handler import (  # noqa: F401 (aws and cold_start are fixtures)
     ENVIRONMENT,
     aws,
     call,

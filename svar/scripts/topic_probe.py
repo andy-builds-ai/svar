@@ -1,7 +1,7 @@
 """Measure the denied topics against a fixed question set, before a deploy or after it.
 
 In a region whose stack checks the topics with a model (taug/infra/answer_models.py, eu-central-1)
-the run measures that model through the function's own check (scripts/topic_model_probe.py),
+the run measures that model through the function's own check (svar/scripts/topic_model_probe.py),
 on the evaluation sets' questions as well; it creates and deletes nothing. Elsewhere the topics
 of `DENIED_TOPICS` go into a guardrail of their own,
 `PROBE_NAME`, built the way the stack builds the topic guardrail: same order,
@@ -26,16 +26,16 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from app.denied_topics import DENIED_TOPICS
-from infra.stacks.answer_function import PRICE_TOPIC_PER_1K_UNITS
-from infra.stacks.guardrails import (
+from svar.app.denied_topics import DENIED_TOPICS
+from svar.infra.answer_function import PRICE_TOPIC_PER_1K_UNITS
+from svar.infra.guardrails import (
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
     GUARDRAIL_PROFILE_ID,
     GUARDRAIL_PROFILE_REGIONS,
     TOPICS_TIER,
 )
-from scripts.evaluate import deployed_environment, import_app
+from svar.scripts.evaluate import deployed_environment, import_app
 from taug.infra.answer_models import region_models
 from taug.scripts import utf8_output
 from taug.scripts.aws import REGION, AwsProblem, client, error_code, explained
@@ -515,7 +515,7 @@ def deployed_guardrails(environment: Mapping[str, str]) -> dict[str, tuple[str, 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.topic_probe",
+        prog="python -m svar.scripts.topic_probe",
         description="Measure DENIED_TOPICS against the topic question set.",
     )
     parser.add_argument(
@@ -583,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
         if not topic_model_id:
             print(f"error: {args.region} has no topic model", file=sys.stderr)
             return 2
-        from scripts import topic_model_probe
+        from svar.scripts import topic_model_probe
 
         return topic_model_probe.main(args, topic_model_id)
     if args.region not in GUARDRAIL_PROFILE_REGIONS:

@@ -1,6 +1,6 @@
 """Measure how well an answer model stays with its sources, the way the function answers.
 
-`scripts/evaluate.py` asks whether an answer is right. This asks more of a
+`svar/scripts/evaluate.py` asks whether an answer is right. This asks more of a
 model: whether it declines what the documents do not say even when an answer
 lies close (`unanswerable` questions, each a temptation), whether it answers
 the documented half of a question and leaves the other half alone (`partial`),
@@ -8,7 +8,7 @@ whether it adds a figure or a forbidden statement of its own, whether it
 cites the document the answer comes from, whether it answers German in
 German, and whether an advice question is refused.
 
-Every question goes through `answer_question` in app/answering.py, with the
+Every question goes through `answer_question` in svar/app/answering.py, with the
 prompt, the guardrails and the cost line of the function. Probe guardrails
 are created in ``--region`` for the run and deleted after it, copies of the
 stack's: the answer guardrail (masking, grounding check), the topic guardrail
@@ -48,7 +48,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from infra.stacks.guardrails import (
+from svar.infra.guardrails import (
     ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
     BLOCKED_OUTPUT_MESSAGE,
@@ -58,7 +58,7 @@ from infra.stacks.guardrails import (
     RELEVANCE_THRESHOLD,
     grounding_threshold_for,
 )
-from scripts.control_marks import (
+from svar.scripts.control_marks import (
     ModelTexts,
     Passages,
     grade,
@@ -66,14 +66,14 @@ from scripts.control_marks import (
     summarise,
     table,
 )
-from scripts.evaluate import (
+from svar.scripts.evaluate import (
     ask,
     deployed_environment,
     import_app,
     load_questions,
     stays_in_the_eu,
 )
-from scripts.topic_probe import create_probe, delete_reporting, topic_policy, wait_until_ready
+from svar.scripts.topic_probe import create_probe, delete_reporting, topic_policy, wait_until_ready
 from taug.infra.answer_models import (
     FRANKFURT_MODELS,
     REGIONS,
@@ -165,7 +165,7 @@ def probe_requests(
             topic["outputAction"] = "BLOCK" if on_answer else "NONE"
         return policy
 
-    note = "Andur: temporary, scripts/control_eval.py; deleted after the run."
+    note = "Andur: temporary, svar/scripts/control_eval.py; deleted after the run."
     requests = {
         "answer": {
             "name": PROBE_NAMES["answer"],
@@ -288,7 +288,7 @@ def run_model(
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.control_eval",
+        prog="python -m svar.scripts.control_eval",
         description="Measure how well answer models stay with their sources.",
     )
     parser.add_argument(

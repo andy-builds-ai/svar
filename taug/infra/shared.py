@@ -25,8 +25,6 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 ASSET_EXCLUDES = ["**/__pycache__", "*.pyc", "README.md"]
 
-WEB_FOLDER = REPOSITORY_ROOT / "web"
-
 
 def create_log_group(
     stack: "AndurStack", construct_id: str, name: str | None = None

@@ -15,13 +15,13 @@ import intake
 import plans
 import pytest
 
-from taug.scripts import workspace
-from tests.test_handler import (
+from svar.tests.test_handler import (
     apply_update,
     assert_every_placeholder_is_used,
     condition_holds,
     with_names,
 )
+from taug.scripts import workspace
 
 PATH = "/andur/api-keys"
 TABLE = "andur-key-budgets"

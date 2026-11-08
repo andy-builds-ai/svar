@@ -1,9 +1,9 @@
-"""Tests for the AWS plumbing of the answer function (app/aws.py), without AWS."""
+"""Tests for the AWS plumbing of the answer function (svar/app/aws.py), without AWS."""
 
 import builtins
 from typing import Any
 
-import aws  # app/aws.py, imported by its Lambda name (conftest.py)
+import aws  # svar/app/aws.py, imported by its Lambda name (conftest.py)
 import pytest
 
 
@@ -129,7 +129,7 @@ def test_a_second_model_call_ends_before_cloudfront_gives_up() -> None:
 
 
 def test_without_cloudfront_a_second_model_call_ends_inside_the_functions_time() -> None:
-    """Where the function is its own address, the page waits 200 seconds (web/app.js) and the
+    """Where the function is its own address, the page waits 200 seconds (svar/web/app.js) and the
     function may run 195: the function's own timeout is the limit. The second call may start
     until second 105, and the answer is back at 190, 5 seconds before it. The worst case of
     every timeout is then 190, still inside the 195."""

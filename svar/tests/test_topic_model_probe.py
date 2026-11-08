@@ -6,9 +6,9 @@ from typing import Any
 import clients
 import pytest
 
-from scripts import evaluate, topic_model_probe, topic_probe
-from tests.test_handler import client_error
-from tests.test_topic_model import verdict_response
+from svar.scripts import evaluate, topic_model_probe, topic_probe
+from svar.tests.test_handler import client_error
+from svar.tests.test_topic_model import verdict_response
 
 #: The answer function's modules, as the scripts take them (`evaluate.import_app`).
 app = evaluate.import_app()

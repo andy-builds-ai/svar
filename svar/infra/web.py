@@ -13,22 +13,26 @@ from aws_cdk import (
     aws_s3_deployment as s3_deployment,
 )
 
-from app.page import (
+from svar.app.page import (
     ASK_PATH,
     CONTENT_SECURITY_POLICY,
     HSTS_MAX_AGE_DAYS,
     ROOT_DOCUMENT,
 )
-from taug.infra.shared import ASSET_EXCLUDES, WEB_FOLDER, create_log_group
+from taug.infra.shared import ASSET_EXCLUDES, REPOSITORY_ROOT, create_log_group
 
 if TYPE_CHECKING:
     from infra.stacks.andur_stack import AndurStack
 
 
-#: The file CloudFront, or the function, serves for the bare address (app/page.py).
+#: The file CloudFront, or the function, serves for the bare address (svar/app/page.py).
 SITE_ROOT_DOCUMENT = ROOT_DOCUMENT
 
 ORIGIN_RESPONSE_TIMEOUT_SECONDS = 120
+
+#: The page's files: the site bucket's content behind CloudFront, the layer where the function
+#: serves them itself.
+WEB_FOLDER = REPOSITORY_ROOT / "svar" / "web"
 
 
 def create_site_bucket(stack: "AndurStack") -> s3.Bucket:

@@ -11,8 +11,8 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-from app.page import ASK_PATH
-from infra.stacks.answer_function import (
+from svar.app.page import ASK_PATH
+from svar.infra.answer_function import (
     ANSWER_FUNCTION_NAME,
     ANSWER_MAX_CONCURRENCY,
     ANSWER_MODEL_ID,
@@ -25,12 +25,12 @@ from infra.stacks.answer_function import (
     create_key_retirer,
     create_page_layer,
 )
-from infra.stacks.guardrails import (
+from svar.infra.guardrails import (
     create_answer_guardrail,
     create_excerpt_guardrail,
     create_topic_guardrail,
 )
-from infra.stacks.web import (
+from svar.infra.web import (
     allow_cloudfront_to_invoke,
     create_distribution,
     create_site_bucket,

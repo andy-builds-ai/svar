@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from scripts.ask import API_KEY_ENVIRONMENT_VARIABLE
+from svar.scripts.ask import API_KEY_ENVIRONMENT_VARIABLE
 from taug.scripts.aws import AwsProblem, read_stack_outputs
 
 REPOSITORY = Path(__file__).resolve().parents[1]

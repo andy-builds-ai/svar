@@ -25,7 +25,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from scripts.evaluate import stays_in_the_eu
+from svar.scripts.evaluate import stays_in_the_eu
 from taug.infra.answer_models import FRANKFURT_MODELS, AnswerModel, region_models
 from taug.scripts import utf8_output
 from taug.scripts.aws import AwsProblem, error_code, explain, is_login_problem

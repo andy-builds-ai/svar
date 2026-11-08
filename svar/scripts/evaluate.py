@@ -1,6 +1,6 @@
 """Ask every evaluation question of every model the way the deployed function does.
 
-The questions run through `answer_question` in app/answering.py — retrieval, the
+The questions run through `answer_question` in svar/app/answering.py — retrieval, the
 prompt, `converse` with the guardrail, the excerpt guardrail and the cost line
 — with the deployed function's own settings. Only the model, its token prices
 and the wording of its system prompt (the `prompt` of its table row) change per
@@ -38,7 +38,7 @@ FUNCTION_NAME = "andur-answer"
 
 KINDS = ("answer", "refuse", "unanswerable")
 
-#: The function's `LANGUAGES` (app/sentences.py). A question asks in one of them, English
+#: The function's `LANGUAGES` (svar/app/sentences.py). A question asks in one of them, English
 #: unless it says otherwise, the way the page sends its language with every question.
 LANGUAGES = ("en", "de")
 
@@ -307,7 +307,7 @@ def deployed_environment(region: str) -> dict[str, str]:
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.evaluate",
+        prog="python -m svar.scripts.evaluate",
         description="Compare answer models on the evaluation questions, the way Svar answers.",
     )
     parser.add_argument(

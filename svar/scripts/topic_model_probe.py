@@ -1,4 +1,4 @@
-"""Measure the topic model through the function's own check, for `python -m scripts.topic_probe`.
+"""Measure the topic model through the function's own check (`python -m svar.scripts.topic_probe`).
 
 Every text goes through `topic_check.check_topics` with the function's own client for the topic
 model, so prompt, timeouts and verdict rules are the ones a question meets: a check that fails
@@ -18,7 +18,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from scripts.topic_probe import (
+from svar.scripts.topic_probe import (
     TEXT_FIELDS,
     THROTTLE_ATTEMPTS,
     THROTTLE_MAX_WAIT_SECONDS,
@@ -216,12 +216,12 @@ def report_model(summary: Mapping[str, Any]) -> list[str]:
 
 
 def main(args: Any, topic_model_id: str) -> int:
-    """`python -m scripts.topic_probe` in a region whose stack checks the topics with a model:
+    """`python -m svar.scripts.topic_probe` in a region whose stack checks the topics with a model:
     the topic sets and the evaluation sets' questions, ``args.repeat`` times each."""
     from types import SimpleNamespace
 
-    from scripts.evaluate import deployed_environment, import_app
-    from scripts.topic_probe import load_probe_answers, load_probe_questions, report, summarise
+    from svar.scripts.evaluate import deployed_environment, import_app
+    from svar.scripts.topic_probe import load_probe_answers, load_probe_questions, report, summarise
     from taug.scripts.aws import AwsProblem
 
     app = import_app()

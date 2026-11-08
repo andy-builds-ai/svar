@@ -1,4 +1,4 @@
-"""The marks of the control measurement (scripts/control_eval.py): what the model read and
+"""The marks of the control measurement (svar/scripts/control_eval.py): what the model read and
 wrote, every mark of one answer, and the marks of a run counted. What counts as added is
 told in control_eval.py."""
 
@@ -8,8 +8,8 @@ import statistics
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
-from infra.stacks.guardrails import BLOCKED_INPUT_MESSAGE, BLOCKED_OUTPUT_MESSAGE
-from scripts.evaluate import contains, declined, import_app
+from svar.infra.guardrails import BLOCKED_INPUT_MESSAGE, BLOCKED_OUTPUT_MESSAGE
+from svar.scripts.evaluate import contains, declined, import_app
 from taug.infra.answer_models import AnswerModel
 from taug.scripts.layout import document_of
 
