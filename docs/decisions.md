@@ -1424,7 +1424,7 @@ Counted with `wc -l` on 07.10.2026.
 
 - `app/handler.py` (130 lines) is the entry of the function; each step of a
   request has a module of its own beside it (the table in
-  [app/README.md](../app/README.md)). The modules stay flat in `app/`,
+  [app/README.md](../svar/app/README.md)). The modules stay flat in `app/`,
   because Lambda packages that folder and imports them by their plain names.
   They call each other by module name (`keys.authorize`), as they already did
   `aws` and `page`, so a test that replaces `clients.client` or `clocks.clock`

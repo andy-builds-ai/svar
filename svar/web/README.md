@@ -11,7 +11,7 @@ This README stays behind: the deploy leaves it out, like every other
 ## One address for everything
 
 In eu-central-1 the answer function serves these files itself, at its own URL,
-with the security headers below set by the function (`app/page.py`); there is
+with the security headers below set by the function (`svar/app/page.py`); there is
 no CloudFront and no site bucket there, and the deploy puts the files into a
 layer of the function. The rest of this section describes eu-west-1.
 
@@ -64,7 +64,7 @@ the switch is used.
 What stays as it came: the answer and the `error` sentence of the function
 are in the language the question was asked in. The page sends its language
 in the request body (`"language": "de"` or `"en"`) with every question, and
-the function says its own sentences in it ([app/README.md](../app/README.md),
+the function says its own sentences in it ([svar/app/README.md](../app/README.md),
 *Language*). So after a switch the answer on screen keeps its language and
 the next one comes in the new one. The model's answer follows the language of
 the question, not the page.
@@ -95,7 +95,7 @@ The page stops waiting after 200 seconds, longer than the function may run
 (195). Behind CloudFront, CloudFront gives up at 120 and sends a 504, so that
 answer arrives first. Without CloudFront (eu-central-1) the function's own
 timeout ends a request, and it times a second model call so that its answer
-is back before it (`caller_deadline_seconds` in `app/aws.py`). Either way the
+is back before it (`caller_deadline_seconds` in `svar/app/aws.py`). Either way the
 page's limit is the floor, for a connection that neither answers nor fails. Without it
 the button stayed on *Asking…* until the browser was reloaded.
 
@@ -141,7 +141,7 @@ calculated does not match ..."}` when a request reaches the function URL
 unsigned or wrongly signed (measured 17.09.2026), and CloudFront's own error
 pages are HTML. Neither carries an `error` field, which is how the page tells
 them apart from a refusal it should quote. Status codes and their meanings
-are in [app/README.md](../app/README.md).
+are in [svar/app/README.md](../app/README.md).
 
 ## Editing it
 

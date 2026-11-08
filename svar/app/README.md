@@ -12,7 +12,7 @@ stack's distribution. Inside the account a role with
 `lambda:InvokeFunctionUrl` can sign a call itself; the key, the workspace and
 the budget are checked in the function either way.
 Everything arrives through the web address — see *One address for everything*
-in [architecture](../docs/architecture.md#one-address-for-everything).
+in [architecture](../../docs/architecture.md#one-address-for-everything).
 
 In eu-central-1 there is no CloudFront, and the Function URL is the way in:
 set to `NONE`, with the two permissions Lambda asks for since October 2025
@@ -53,18 +53,18 @@ page where no CloudFront stands in front (above); `topic_model.py` and
 `denied_topics.py` hold the topic model's prompt and the denied topics.
 Lambda packages this folder and imports the modules by their plain names,
 `handler`, `aws`, `keys` and the rest; the tests import them the same way
-([tests/conftest.py](../tests/conftest.py)). Nothing else is needed but the
+([conftest.py](../../conftest.py)). Nothing else is needed but the
 standard library and the boto3 the Lambda runtime brings.
 
 ## Asking
 
 ```bash
-python -m scripts.ask "How do I export project data?" --workspace quillmoor
+python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor
 ```
 
 That is the short way: the script reads the address from the stack outputs
 and the key from Parameter Store, and never prints the key
-([scripts/README.md](../scripts/README.md)). The request underneath is plain
+([svar/scripts/README.md](../scripts/README.md)). The request underneath is plain
 HTTP:
 
 ```bash
@@ -85,7 +85,7 @@ question is 1 to 1,000 characters. On macOS use `shasum -a 256` in place of
 The body may also carry `"language": "de"` or `"language": "en"`: the
 language of the sentences Svar says itself, see *Language* below. Leave it
 out and they are English; the page sends it with every question, and
-`python -m scripts.ask` with `--language`.
+`python -m svar.scripts.ask` with `--language`.
 
 Two headers are not the function's idea but the way in's:
 
@@ -102,9 +102,9 @@ Two headers are not the function's idea but the way in's:
 ## Getting a key
 
 Each workspace has one key, stored as a SecureString parameter
-`/andur/api-keys/<workspace>`. `python -m scripts.workspace add <workspace>`
+`/andur/api-keys/<workspace>`. `python -m taug.scripts.workspace add <workspace>`
 generates it, stores it and prints it once
-([scripts/README.md](../scripts/README.md#workspace--adding-and-removing-a-workspace)).
+([taug/scripts/README.md](../../taug/scripts/README.md#workspace--adding-and-removing-a-workspace)).
 It is not in the repository, the template or any log. To copy it to the
 clipboard later without it showing up on screen:
 
@@ -124,7 +124,7 @@ again; `add` refuses to overwrite a key that is there:
 
 ```bash
 MSYS_NO_PATHCONV=1 aws ssm delete-parameter --region eu-west-1 --name /andur/api-keys/quillmoor
-python -m scripts.workspace add quillmoor
+python -m taug.scripts.workspace add quillmoor
 ```
 
 The function reads only the key of the workspace a request names: one
@@ -194,7 +194,7 @@ instance holds no key for. Workspace names are therefore not a secret. Before
 02.10.2026 the function read every key and answered the key of another
 workspace with 403; it no longer knows the other keys. For the same reason it
 can no longer see that two workspaces were given the same key.
-`scripts.workspace add` draws every key from 32 random bytes, so that happens
+`taug.scripts.workspace add` draws every key from 32 random bytes, so that happens
 only if a key is written into a parameter by hand — and such a key would open
 both workspaces. Never do that.
 
@@ -364,7 +364,7 @@ passes it rewrites `expires_at` from `first_used_at + window_seconds` and
 The simplest way to give a used key a fresh start is to reset it with
 `delete-item` above; a changed budget for it is then a preset item as for a
 new key. On a key with a plan, `delete-item` deletes the plan too and leaves
-a demo key; use `python -m scripts.workspace plan` to change a plan.
+a demo key; use `python -m taug.scripts.workspace plan` to change a plan.
 
 **A replaced key has a fresh budget by itself.** Deleting the parameter and
 adding it again gives the workspace a new key, and a new key has a different
@@ -385,12 +385,12 @@ defined in one place, `plans.py`:
 | `firma` | 15,000 | 1,500 |
 
 Change a number there and deploy, and every key on that plan has the new
-number from its next question. `python -m scripts.workspace` puts a key on a
+number from its next question. `python -m taug.scripts.workspace` puts a key on a
 plan, when it adds the key or later, and takes it off again
-([scripts/README.md](../scripts/README.md#workspace--adding-and-removing-a-workspace)).
+([taug/scripts/README.md](../../taug/scripts/README.md#workspace--adding-and-removing-a-workspace)).
 The quota is there for a key in the wrong hands, not for the bill: at the
 measured mean of 0.0043 USD per answered question with Nova Pro at ten
-passages ([docs/costs.md](../docs/costs.md)), a month used to the last
+passages ([docs/costs.md](../../docs/costs.md)), a month used to the last
 question is about 26 USD on `betrieb` and 65 USD on `firma`.
 
 **German time.** A month and a day are German calendar months and days: they
@@ -407,7 +407,7 @@ wherever a database is installed, as in CI; on 01.10.2026 it agreed with
 
 | Attribute | Meaning |
 |---|---|
-| `plan` | The plan's name. Written by `python -m scripts.workspace`, never by the function. |
+| `plan` | The plan's name. Written by `python -m taug.scripts.workspace`, never by the function. |
 | `workspace` | As for a demo key. |
 | `month_<YYYY-MM>` | Questions counted in that German month, such as `month_2026-10`. |
 | `day_<YYYY-MM-DD>` | Questions counted on that German day, such as `day_2026-10-01`. |
@@ -462,7 +462,7 @@ request. It reads:
 When both are full, the month's sentence wins: tomorrow would not help. 429
 and not 402, because the quota comes back by itself and a 402 says it does
 not; the page shows the sentence alone, without the line about a new key it
-adds to a 402 ([web/README.md](../web/README.md#what-an-error-says)).
+adds to a 402 ([svar/web/README.md](../web/README.md#what-an-error-says)).
 
 **What fails closed.** No item gives a key on a plan a question that nothing
 counts:
@@ -537,10 +537,10 @@ German and English. The request names it in the body field `language`
 (`"de"` or `"en"`, case and surrounding spaces ignored). A missing field, a
 field that is not text and any other value mean English; there is no error
 for them. The page sends the language it is set to, which is the browser's
-until the visitor uses the DE/EN switch ([web/README.md](../web/README.md)).
+until the visitor uses the DE/EN switch ([svar/web/README.md](../web/README.md)).
 
 Every sentence the function says itself comes in both languages, from the
-tables in `app/sentences.py`:
+tables in `svar/app/sentences.py`:
 
 - the answer when no passage matched, and the sentence the prompt tells the
   model to give when the sources do not answer;
@@ -580,7 +580,7 @@ other guardrail is refused. Not the deployed version alone, so a deploy that
 makes a new version leaves the role as it is (`docs/decisions.md`,
 05.10.2026).
 
-Three policies, set in `infra/stacks/guardrails.py`:
+Three policies, set in `svar/infra/guardrails.py`:
 
 - **Refused topics:** legal, tax and medical advice, and questions about
   public figures or a person's private life. The topic guardrail checks all
@@ -607,8 +607,8 @@ Three policies, set in `infra/stacks/guardrails.py`:
   a customer's questions about the business's own prices, contracts,
   payment terms and warranty pass: under the names "Legal advice" and "Tax
   advice", 21 of 64 harmless questions were refused. Every change to them is
-  measured first with `python -m scripts.topic_probe`, on questions and on
-  answers (`scripts/README.md`).
+  measured first with `python -m svar.scripts.topic_probe`, on questions and on
+  answers (`svar/scripts/README.md`).
 - **Masked personal details:** names, e-mail addresses, phone numbers and
   addresses in the answer are replaced by their type, such as `{EMAIL}`. The
   question is not checked, and neither are the passages: the model reads the
@@ -624,7 +624,7 @@ Three policies, set in `infra/stacks/guardrails.py`:
   [1][4]." to English passages that say "5 years" scored 0.25 and was
   withheld; the short "Die Garantie gilt für 5 Jahre [4]." scored 0.85 and
   passed. On 142 fixed answers (06.10.2026, `python -m
-  scripts.grounding_probe`): of right German answers it withheld 3 of 19 on
+  svar.scripts.grounding_probe`): of right German answers it withheld 3 of 19 on
   English documents and none of 19 on German ones; of made-up answers it
   withheld about half, 18 of 34 in English, 20 of 34 in German on English
   documents, 23 of 36 on German documents. It is a filter, not a proof that
@@ -663,7 +663,7 @@ create-only, the deploy makes a new version and hands its number to the
 function. The role allows every numbered version, so it stays as it is, and
 the deploy waits before the old version is deleted until no answer that
 started on it is still running (`docs/decisions.md`, 05.10.2026; see
-[docs/operating.md](../docs/operating.md#deploy)). The topic guardrail's
+[docs/operating.md](../../docs/operating.md#deploy)). The topic guardrail's
 version is handled the same way: its `ApplyGuardrail` permission names the
 guardrail, whatever the version.
 
@@ -703,9 +703,9 @@ not stop is the model's own text: neither is guessed at.
 What is measured and what is read off the shape: on the deployed function a
 refused question came back with one topic unit and no tokens, and a withheld
 one with no model tokens and `grounding` and `relevance` in
-`guardrail_policies` ([docs/costs.md](../docs/costs.md); the log of
+`guardrail_policies` ([docs/costs.md](../../docs/costs.md); the log of
 30.09.2026). Nobody has read the raw trace of a *German* question, and the
-test traces in `tests/test_handler.py` are hand-built in Bedrock's shape. The
+test traces in `svar/tests/test_handler.py` are hand-built in Bedrock's shape. The
 condition does not look at the language of the question, only at the trace
 and the stop reason.
 
@@ -738,7 +738,7 @@ The frames say what the text is: a customer's question to the business, the
 business's answer. Their wording was chosen by measurement, among 23 for the
 question and 5 for the answer (`docs/decisions.md`, 06.10.2026), and it
 moves verdicts as a topic's definition does, so a change to them is measured
-with `python -m scripts.topic_probe` like a change to the topics.
+with `python -m svar.scripts.topic_probe` like a change to the topics.
 
 A question the topic guardrail refuses gets the handler's refusal sentence,
 no sources, no model, no `stop_reason` and no tokens; `guardrail.policies`
@@ -770,7 +770,7 @@ by then. A check of the question that fails is given back to the key, unless
 a timeout caused it or the verdict could not be read; a check of the answer
 that fails stays counted, the model has answered by then (*Keys are budgets*).
 
-Measured with `python -m scripts.topic_probe` on 06.10.2026, three runs, the
+Measured with `python -m svar.scripts.topic_probe` on 06.10.2026, three runs, the
 probe guardrail built like the topic guardrail: 45 of 45 questions to refuse
 refused in every run, 1 of 87 harmless questions refused — "How much early
 payment discount can I deduct, and by when must I pay?" (`Tax returns`) —,
@@ -941,8 +941,8 @@ from files.
 | Variable | Set to |
 |---|---|
 | `KNOWLEDGE_BASE_ID` | The stack's knowledge base. |
-| `MODEL_ID` | The region's answer model in `REGIONS` (`infra/answer_models.py`): `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile, in eu-west-1; `qwen.qwen3-235b-a22b-2507-v1:0`, Qwen3 235B in the region itself, in eu-central-1. |
-| `ANSWER_PROMPT` | Optional. The wording of the system prompt (`prompts.PROMPTS`) that the answer model's row in `infra/answer_models.py` names: `sentence-first` for Nova Pro in eu-west-1, `each-part` for Qwen3 235B in eu-central-1. Without it, `each-part`. An unknown name is refused. |
+| `MODEL_ID` | The region's answer model in `REGIONS` (`taug/infra/answer_models.py`): `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile, in eu-west-1; `qwen.qwen3-235b-a22b-2507-v1:0`, Qwen3 235B in the region itself, in eu-central-1. |
+| `ANSWER_PROMPT` | Optional. The wording of the system prompt (`prompts.PROMPTS`) that the answer model's row in `taug/infra/answer_models.py` names: `sentence-first` for Nova Pro in eu-west-1, `each-part` for Qwen3 235B in eu-central-1. Without it, `each-part`. An unknown name is refused. |
 | `REGION` | The stack's region, `eu-west-1` or `eu-central-1`. |
 | `NUMBER_OF_RESULTS` | Passages per question, `10`. Retrieve may return fewer. |
 | `API_KEY_PARAMETER_PATH` | `/andur/api-keys`. |
@@ -957,7 +957,7 @@ from files.
 | `TOPIC_GUARDRAIL_ID` | The stack's topic guardrail, which checks the question and the answer without its citations. Not set where a topic model checks. |
 | `TOPIC_GUARDRAIL_VERSION` | Its deployed version, a number. |
 | `PAGE_FOLDER` | Only where the function is the address itself, without CloudFront (eu-central-1): `/opt`, where Lambda unpacks the layer with the page's files. Then the function serves the page and sets the security headers itself, and times a second model call by its own 195 seconds instead of CloudFront's 120. |
-| `TOPIC_MODEL_ID` | Instead of the two above, in a region whose stack checks the topics with a model (`REGIONS` in `infra/answer_models.py`): `openai.gpt-oss-120b-1:0` in eu-central-1 since 07.10.2026. |
+| `TOPIC_MODEL_ID` | Instead of the two above, in a region whose stack checks the topics with a model (`REGIONS` in `taug/infra/answer_models.py`): `openai.gpt-oss-120b-1:0` in eu-central-1 since 07.10.2026. |
 | `PRICE_TOPIC_MODEL_INPUT_PER_1K_TOKENS` | With `TOPIC_MODEL_ID`: USD per 1,000 input tokens of the topic model. |
 | `PRICE_TOPIC_MODEL_OUTPUT_PER_1K_TOKENS` | With `TOPIC_MODEL_ID`: USD per 1,000 output tokens. |
 | `PRICE_INPUT_PER_1K_TOKENS` | USD per 1,000 input tokens of the answering model, `0.00092`. |
@@ -970,7 +970,7 @@ from files.
 The prices are the eu-west-1 standard-tier prices of Amazon Bedrock, read
 28.09.2026 from the AWS Price List API, the source of the pricing page; the
 source is in a comment next to them in the stack. The token prices come
-from `infra/answer_models.py`, looked up by the model id the stack deploys,
+from `taug/infra/answer_models.py`, looked up by the model id the stack deploys,
 so a model never goes out with another model's prices, and a model without
 a row there does not synthesise. The guardrail prices are the same as in
 us-east-1. A text unit is up to 1,000 characters of text one policy reads.
@@ -1038,7 +1038,7 @@ and 0.7 to 4.4 seconds inside the function with Nova Pro on the page in
 eu-west-1 (four questions, 28.09.2026), so this is a corner, not a case.
 
 Without CloudFront (eu-central-1) no layer cuts in at 120: the page waits 200
-seconds (`REQUEST_TIMEOUT_MS` in `web/app.js`), `scripts/ask.py` 200, and the
+seconds (`REQUEST_TIMEOUT_MS` in `svar/web/app.js`), `svar/scripts/ask.py` 200, and the
 function may run 195, so its own timeout is the limit. The second model call
 may start until second 105 there (`latest_model_retry_start(False)` in
 `aws.py`), its answer is back by 190, and the worst case is 190.
@@ -1051,7 +1051,7 @@ which questions may take all. An account that allows only 10 executions in
 all cannot hold that reservation; there `-c answer_max_concurrency=none`
 leaves it out, and the account's limit, shared with every function of the
 account in the region, is the cap
-([docs/operating.md](../docs/operating.md#another-region)).
+([docs/operating.md](../../docs/operating.md#another-region)).
 Five concurrent calls from a stranger (ten in Frankfurt) therefore hold the
 service up for everyone — taken on purpose:
 capping the bill matters more here than keeping a demo reachable, and a WAF in

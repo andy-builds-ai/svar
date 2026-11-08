@@ -32,7 +32,7 @@ knowledge/<workspace>/<layer>/<document>.md.metadata.json
 ```
 
 Every document has a sidecar with the four keys from
-[docs/metadata.md](../docs/metadata.md): `workspace` and `layer` equal to the
+[taug/docs/metadata.md](../taug/docs/metadata.md): `workspace` and `layer` equal to the
 folder names, `source` set to `fictional`, `license` set to `CC0-1.0`.
 
 ## What is in it
@@ -52,7 +52,7 @@ pellwick 17). With fixed-size chunking at 300 tokens the index holds 304
 vectors. A retrieve hit is either a whole section — always for sections with
 a Markdown table — or a chunk of one; in 185 measured hits that was 18 to
 440 words, never a whole document. Why the split is needed is in
-[retrieval findings](../docs/retrieval-findings.md).
+[retrieval findings](../taug/docs/retrieval-findings.md).
 
 The three layers in `quillmoor` show what each means:
 
@@ -71,8 +71,8 @@ The three layers in `quillmoor` show what each means:
 ## Checking and uploading
 
 ```bash
-python -m scripts.ingest --check   # validate layout and sidecars, no AWS
-python -m scripts.ingest           # upload and sync
+python -m taug.scripts.ingest --check   # validate layout and sidecars, no AWS
+python -m taug.scripts.ingest           # upload and sync
 ```
 
-See [scripts/README.md](../scripts/README.md).
+See [taug/scripts/README.md](../taug/scripts/README.md).

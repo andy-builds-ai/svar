@@ -8,7 +8,7 @@ Needs Python 3.11+ (tested on 3.14), Node.js 22, the AWS CDK CLI
 (`npm install -g aws-cdk@2.1146.0`) and AWS credentials for the target
 account. Everything goes to `eu-west-1` (Ireland), the comparison stack,
 unless `-c region=` names another region of `REGIONS` in
-`infra/answer_models.py`; the main stack is the one in `eu-central-1`
+`taug/infra/answer_models.py`; the main stack is the one in `eu-central-1`
 ([Another region](#another-region)).
 
 ```bash
@@ -22,13 +22,13 @@ cdk destroy                               # removes it again
 
 `cdk deploy` prints the knowledge base id, the data source id, the bucket
 names, the web address (`WebUrl`) and the Parameter Store path of the
-workspace keys. The scripts read them from there. It also uploads `web/` into
+workspace keys. The scripts read them from there. It also uploads `svar/web/` into
 the site bucket and clears the CloudFront caches, so the page is whatever is
-in `web/` at the moment of the deploy.
+in `svar/web/` at the moment of the deploy.
 
 ### Another region
 
-`REGIONS` in `infra/answer_models.py` says what a stack answers with in each
+`REGIONS` in `taug/infra/answer_models.py` says what a stack answers with in each
 region. In eu-central-1 (Frankfurt) that is Qwen3 235B in the region itself,
 and gpt-oss-120b in the region checks the denied topics instead of a topic
 guardrail: the Standard topic tier, which reads German, goes only with the EU
@@ -42,8 +42,8 @@ Frankfurt has no CloudFront, which answers at edge locations worldwide and
 cannot be kept to Germany: the answer function's URL in eu-central-1 is the
 one address. It is open (`AuthType NONE`); the workspace key in `X-Andur-Key`
 is the gate, as it is behind CloudFront. The function serves the page itself,
-from a layer with the files of `web/`, and sets the security headers
-CloudFront's policy sets in Ireland (`app/page.py`). `WebUrl` among the
+from a layer with the files of `svar/web/`, and sets the security headers
+CloudFront's policy sets in Ireland (`svar/app/page.py`). `WebUrl` among the
 outputs is that URL, `https://<id>.lambda-url.eu-central-1.on.aws/`; there is
 no own domain and no WAF in front of it. The region and the account come
 from outside: the region from `-c region=`, the account from the AWS profile.
@@ -81,7 +81,7 @@ deploy without a new version does not wait, unless the wait itself changes
 the function calls, such as the topic guardrail of 05.10.2026, adds nothing:
 CloudFormation creates it, and widens the role for it, before it updates the
 function, and the old code never calls it. After a deploy that touches the
-topics, `python -m scripts.topic_probe --deployed` measures the deployed
+topics, `python -m svar.scripts.topic_probe --deployed` measures the deployed
 versions.
 
 Two other changes still open a window, and need two deploys. A right taken
@@ -120,7 +120,7 @@ second sets it `False`: the answer guardrail and the topic guardrail get new
 versions (the topic guardrail's description changes with the flag), the
 deploy waits in `Custom::AndurDeployDrain`, and old and new code both check
 the question with the topic guardrail. After the second, measure with
-`python -m scripts.topic_probe --deployed`.
+`python -m svar.scripts.topic_probe --deployed`.
 
 The deploy creates no workspace key, and no workspace is named in the stack's
 code. A workspace exists only in AWS: its key under
@@ -130,11 +130,11 @@ without a deploy (see *Workspaces* below). After a first deploy, give the two
 demo workspaces their keys:
 
 ```bash
-python -m scripts.workspace add quillmoor > /dev/null
-python -m scripts.workspace add pellwick > /dev/null
+python -m taug.scripts.workspace add quillmoor > /dev/null
+python -m taug.scripts.workspace add pellwick > /dev/null
 ```
 
-`> /dev/null` keeps the key off the screen; `scripts.ask` reads it from
+`> /dev/null` keeps the key off the screen; `svar.scripts.ask` reads it from
 Parameter Store itself. Until a workspace has its key, every question to it
 is refused with 401.
 
@@ -179,7 +179,7 @@ ends in `DELETE_FAILED`.
 `cdk destroy` deletes the function logs and the budget table with the stack.
 The workspace keys are not part of the stack and stay; after a rebuild they
 work again, each with a fresh budget. To take a workspace away for good, use
-`python -m scripts.workspace remove` before the destroy.
+`python -m taug.scripts.workspace remove` before the destroy.
 
 The site bucket and the distribution go with the stack too. The bucket is
 emptied first — the file copier removes what it uploaded — so the deletion
@@ -193,7 +193,7 @@ base. It reads bucket and ids from the stack outputs and needs a valid AWS
 login (`aws login`):
 
 ```bash
-python -m scripts.ingest
+python -m taug.scripts.ingest
 ```
 
 The corpus in `knowledge/` belongs to two **fictional** companies invented
@@ -203,17 +203,17 @@ Neither company, nor anything in their documents, is real. Details in
 [knowledge/README.md](../knowledge/README.md).
 
 Every document carries a sidecar metadata file
-([metadata.md](metadata.md)); the script refuses to upload anything
+([metadata.md](../taug/docs/metadata.md)); the script refuses to upload anything
 while one is missing or wrong. Markdown documents are uploaded split into
-sections, for the reason in [retrieval findings](retrieval-findings.md). A
+sections, for the reason in [retrieval findings](../taug/docs/retrieval-findings.md). A
 rerun uploads only what changed. Options, output and exit codes:
-[scripts/README.md](../scripts/README.md).
+[taug/scripts/README.md](../taug/scripts/README.md#ingest).
 
 The proof that workspaces stay apart:
 
 ```bash
-python -m scripts.retrieve "How do I export project data?" --workspace quillmoor
-python -m scripts.retrieve "How do I export project data?" --workspace pellwick
+python -m taug.scripts.retrieve "How do I export project data?" --workspace quillmoor
+python -m taug.scripts.retrieve "How do I export project data?" --workspace pellwick
 ```
 
 The first returns Quillmoor sections only — every hit prints
@@ -225,11 +225,11 @@ documents.
 ## Workspaces
 
 ```bash
-python -m scripts.workspace add <name>             # create the key, print it once
-python -m scripts.workspace add <name> --plan firma   # the same, on a plan
-python -m scripts.workspace plan <name> betrieb    # change the plan; the key stays
-python -m scripts.workspace remove <name>          # show what belongs to it, delete nothing
-python -m scripts.workspace remove <name> --yes    # delete key, budget items and documents
+python -m taug.scripts.workspace add <name>             # create the key, print it once
+python -m taug.scripts.workspace add <name> --plan firma   # the same, on a plan
+python -m taug.scripts.workspace plan <name> betrieb    # change the plan; the key stays
+python -m taug.scripts.workspace remove <name>          # show what belongs to it, delete nothing
+python -m taug.scripts.workspace remove <name> --yes    # delete key, budget items and documents
 ```
 
 `add` refuses to overwrite an existing key. `remove` without `--yes` only
@@ -238,16 +238,16 @@ lists the key, the budget items and every document under
 ingestion job, which removes their vectors. Nothing outside that one name is
 touched: the documents prefix ends in a slash, so `kalv` never reaches
 `kalvenstett`. The documents of a new workspace go in with
-`python -m scripts.ingest --source <folder> --workspace <name>`; text files
+`python -m taug.scripts.ingest --source <folder> --workspace <name>`; text files
 stored in Windows-1252 or UTF-16 go up converted to UTF-8, and `--check`
-names each one ([Encodings](../scripts/README.md#encodings)). Details,
-output and exit codes: [scripts/README.md](../scripts/README.md#workspace--adding-and-removing-a-workspace).
+names each one ([Encodings](../taug/scripts/README.md#encodings)). Details,
+output and exit codes: [taug/scripts/README.md](../taug/scripts/README.md#workspace--adding-and-removing-a-workspace).
 
 ## Asking Svar
 
 ```bash
-python -m scripts.ask "How do I export project data?" --workspace quillmoor
-python -m scripts.ask "How do I export project data?" --workspace pellwick
+python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor
+python -m svar.scripts.ask "How do I export project data?" --workspace pellwick
 ```
 
 The first prints Quillmoor's answer, the layers it rests on, every source
@@ -256,7 +256,7 @@ second answers *The sources do not answer this question.* from Pellwick's
 documents; with `--language de` the sentence is *Die Quellen beantworten diese
 Frage nicht.* The script fetches the workspace key from Parameter Store itself;
 the key never appears on screen. Request format, answer fields, status codes
-and how to get a key for curl or the page: [app/README.md](../app/README.md).
+and how to get a key for curl or the page: [svar/app/README.md](../svar/app/README.md).
 
 ### In the browser
 
@@ -266,7 +266,7 @@ layers it rests on and what it cost. **Forget key** removes the key again.
 The key is never part of the address. The page is in German or English: the
 browser's language decides at first, the DE | EN switch in the corner after
 that. What the page does with each status,
-and why it has no configuration file: [web/README.md](../web/README.md).
+and why it has no configuration file: [svar/web/README.md](../svar/web/README.md).
 
 ### With curl
 
@@ -282,7 +282,7 @@ curl -s -X POST "$WEB_URL/ask" \
   -d "$BODY"
 ```
 
-`$KEY` is the workspace key ([app/README.md](../app/README.md#getting-a-key)).
+`$KEY` is the workspace key ([svar/app/README.md](../svar/app/README.md#getting-a-key)).
 `printf '%s'` and not `echo`: a trailing newline would go into the hash but
 not into the body, and the request would be refused. The stack output
 `FunctionUrl` is not an address to send this to — from outside the account
@@ -298,7 +298,7 @@ The stack tests render the stack to CloudFormation JSON and assert on it,
 including the way in: the function URL on `AWS_IAM`, both invoke permissions
 bound to this distribution alone, the private site bucket, and the `/ask`
 behaviour with its methods, its disabled cache and its response timeout. Some
-of them read `web/` itself, to keep the page from growing an address of its
+of them read `svar/web/` itself, to keep the page from growing an address of its
 own, a key, a `console.log` or a file from another server. The handler tests
 drive the answer function through every status code against fake Bedrock,
 Parameter Store and DynamoDB clients; the budget fake runs the handler's own

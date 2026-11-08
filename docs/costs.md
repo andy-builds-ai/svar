@@ -2,7 +2,7 @@
 
 Prices for `eu-west-1` (Ireland), read 28.09.2026 from the AWS Price List API,
 the machine-readable source of the pricing pages, unless dated otherwise;
-for `eu-central-1` (Frankfurt) read 06.10.2026 (`infra/answer_models.py`).
+for `eu-central-1` (Frankfurt) read 06.10.2026 (`taug/infra/answer_models.py`).
 Order of magnitude, not a quote; the cost per question below is measured.
 
 **Idle:** cents per month. S3 Vectors storage is 0.06 USD per GB, the
@@ -13,8 +13,8 @@ and its response: tokens and guardrail text units, each times its price
 (standard tier; the prices sit in the stack next to their source).
 
 In `eu-west-1` on 28.09.2026, at six passages per question, the 30 evaluation
-questions per model through the answer function's own path (`python -m scripts.evaluate`, see
-[scripts/README.md](../scripts/README.md)), each model at its own token
+questions per model through the answer function's own path (`python -m svar.scripts.evaluate`, see
+[svar/scripts/README.md](../svar/scripts/README.md)), each model at its own token
 price:
 
 | Model | Answered question, mean (lowest–highest) | Guardrail share | Refused question |
@@ -37,7 +37,7 @@ withheld, 07.10.2026). Since then such an answer carries `cost_usd: null`. Its e
 question on average (0.0019–0.0046, 20 answers).
 
 In `eu-central-1` on 07.10.2026, Qwen3 235B with the deployed function's
-settings, the three question sets of `python -m scripts.evaluate`: 0.0023 USD
+settings, the three question sets of `python -m svar.scripts.evaluate`: 0.0023 USD
 per question on average for the English set, 0.0013 for German questions on
 English documents and 0.0021 for German questions on German documents,
 counting the questions with a known cost; 14 of the 88 were withheld by the

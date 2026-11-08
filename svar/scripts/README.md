@@ -1,250 +1,28 @@
-# scripts — operating the knowledge base
+# Svar's scripts — asking and measuring
 
-Eleven commands, all run from the repository root:
+Five commands, all run from the repository root. What the scripts need (install, AWS login, the deployed stack): [taug/scripts/README.md](../../taug/scripts/README.md#what-they-need).
 
 | Command | Does |
 |---|---|
-| `python -m scripts.ingest` | Checks a local folder, uploads it to the documents bucket, syncs the knowledge base. |
-| `python -m scripts.retrieve` | Asks the knowledge base a question inside one workspace and prints the hits. |
-| `python -m scripts.ask` | Asks the deployed answer function a question and prints the answer with its sources. |
-| `python -m scripts.evaluate` | Asks 30 fixed questions of each answer model the way the function does and prints hit rate, citations and cost. |
-| `python -m scripts.workspace` | Adds a workspace's key, puts it on a plan, or removes a workspace: key, budget items, documents and vectors. |
-| `python -m scripts.topic_probe` | Measures the denied topics against 132 fixed questions and 119 fixed answers, each after its frame, the answers without their citations: which harmless ones they block and which they should block slip through. |
-| `python -m scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
-| `python -m scripts.control_eval` | Asks 42 fixed questions of every model of `FRANKFURT_MODELS` the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
-| `python -m scripts.tool_probe` | Gives every model of `FRANKFURT_MODELS` six orders to record with one tool: whether it fills the tool cleanly and asks back instead of guessing. |
-| `python -m scripts.receiving_probe` | Lets every model of `FRANKFURT_MODELS` check 24 delivery notes against their purchase orders through Vard's tool loop: whether it finds every discrepancy, makes none up and closes with the right tool; ranks the models by cases passed, then by discrepancies missed. |
-| `python -m scripts.rehearsal` | Sets up a new workspace on the deployed stack with the same commands as any other, runs the measurements against it, and times every step. |
-
-## What they need
-
-- `pip install -e ".[dev]" -c constraints.txt` — brings `boto3` with its `crt` extra. The extra
-  is not optional here: without it botocore cannot read the credentials that
-  `aws login` writes, and every AWS call fails with "Missing Dependency".
-- A valid AWS login for the account the stack is deployed in. When it has
-  run out, every script stops with a message that says so; sign in with
-  `aws login` and rerun.
-- The deployed stack. Bucket, knowledge base id, data source id, web address,
-  key path and budget table are read from the outputs of `AndurStack` in `eu-west-1`,
-  `DEFAULT_REGION` of `infra/answer_models.py`, whatever region a shell profile names;
-  `--region eu-central-1` reads the stack in Frankfurt. Each value can be passed by hand
-  instead:
-  `--bucket`, `--knowledge-base-id`, `--data-source-id`, `--url`, and
-  `--stack-name` / `--region` for another stack. `--url` takes the web
-  address, not the function URL — `ask` appends `/ask` to it itself.
-
-## ingest
-
-```bash
-python -m scripts.ingest                        # everything under knowledge/
-python -m scripts.ingest --workspace pellwick   # one workspace
-python -m scripts.ingest --check                # check only, no AWS at all
-python -m scripts.ingest --source path/to/folder
-```
-
-It runs four steps and stops at the first that fails.
-
-1. **Check.** The folder must be laid out as
-   `<workspace>/<layer>/<document>` with a sidecar
-   `<document>.metadata.json` next to every document. Workspace names are
-   lowercase letters, digits and single hyphens. Layers are `human`,
-   `agent`, `inbox`. Each sidecar must carry exactly the four keys from
-   [docs/metadata.md](../docs/metadata.md), as STRING values with
-   `includeForEmbedding: false`, and its `workspace` and `layer` must match
-   the folders. File types the knowledge base cannot read are rejected. Text
-   files (`.md`, `.txt`, `.html`, `.csv`) are read to recognise their
-   encoding (below); a file it cannot tell for sure is a problem. All
-   problems are listed at once, and **nothing is uploaded** while there is
-   one.
-2. **Upload.** Markdown documents go up split into sections (below); other
-   file types go up whole. Everything lands in
-   `s3://<bucket>/workspaces/<workspace>/<layer>/`, each file with its
-   sidecar. Objects whose content is already in the bucket are skipped, so a
-   rerun writes nothing new: no duplicates and no extra object versions in
-   the versioned bucket. A changed section replaces the old one under the
-   same key.
-3. **Prune.** Lists the objects in the bucket that the folder no longer
-   produces, and deletes them only with `--delete` (below).
-4. **Sync.** Starts an ingestion job and waits until it is `COMPLETE`,
-   `FAILED` or `STOPPED` (polling every 5 seconds, giving up after 30
-   minutes — the job itself keeps running in AWS).
-
-Output, in order: documents and sections per workspace and layer (also with
-`--check`), files uploaded and skipped, the objects no longer in the folder
-(or an all-clear naming the workspaces compared), then the job's statistics —
-documents scanned, metadata files scanned, new and modified documents
-indexed, documents deleted, documents failed, and any failure reasons. The
-job counts section files as documents.
-
-```
-37 documents checked in knowledge:
-  pellwick: 4 documents -> 17 sections (human 4 -> 17, agent 0 -> 0, inbox 0 -> 0)
-  quillmoor: 33 documents -> 130 sections (human 25 -> 102, agent 5 -> 23, inbox 3 -> 5)
-```
-
-### Encodings
-
-Every text file goes up as UTF-8, whatever it was stored in, because the
-upload declares `charset=utf-8`. Files from older Windows programs are often
-stored in Windows-1252, which UTF-8 would read with broken umlauts. Step 1
-recognises each text file's encoding in this order:
-
-1. **UTF-8**, with or without a byte order mark. The mark is dropped.
-2. **UTF-16** with a byte order mark.
-3. **Windows-1252**, if the file has none of the five bytes Windows-1252
-   leaves undefined (`0x81`, `0x8d`, `0x8f`, `0x90`, `0x9d`).
-
-A file that fits none of them is a problem naming the byte and its line:
-
-```
-problem: knowledge/kalvenstett/human/old.txt: neither UTF-8 nor Windows-1252: byte 0x81 in line 3 is undefined in Windows-1252
-```
-
-So is a file that holds UTF-8 characters and still is not UTF-8, say a UTF-8
-file with one stray byte from another program, or with its last character
-cut off. Read as Windows-1252, every `ä` in it would turn into `Ã¤`, so it is
-refused, naming the first byte that is not UTF-8:
-
-```
-problem: knowledge/kalvenstett/human/notes.md: mixed: holds UTF-8 characters, but byte 0xe4 in line 2 is not UTF-8
-```
-
-So is a file with a zero character in it: it is no text, or it is UTF-16
-without a byte order mark, which cannot be told for sure. Re-save such a file
-as UTF-8 and rerun. A file that cannot be opened at all, for lack of
-permission or as a broken link, is a problem too, whatever its format. So is
-a text file with nothing in it but space: no answer can come from it, and an
-emptied Markdown file would otherwise leave its earlier sections to `--delete`.
-
-A file that was not plain UTF-8 is named with its encoding, also with
-`--check`, so no conversion goes unnoticed:
-
-```
-2 file(s) not stored as UTF-8 go up converted to UTF-8:
-  knowledge/kalvenstett/human/prices.md: Windows-1252
-  knowledge/kalvenstett/human/services.html: Windows-1252, its <meta> charset set to utf-8
-```
-
-In a converted HTML file a `<meta>` charset declaration is set to `utf-8`, so
-the file does not contradict its bytes. An HTML file in UTF-8 without a byte
-order mark goes up unchanged whatever it declares: the bytes decide the
-encoding, not the tag. A `.txt`, `.html` or `.csv` file in UTF-8 without a
-byte order mark goes up byte for byte as it is stored; Markdown is split into
-sections in any case. Binary formats (`.pdf`, `.doc`, `.docx`, `.xls`,
-`.xlsx`) always go up as they are. The files in the folder are never changed.
-
-Windows-1252 is the last guess, not a proof. A file in another single-byte
-encoding, such as Mac Roman, passes as Windows-1252 with wrong special
-characters; the line naming its encoding is where to notice. A Windows-1252
-file that happens to hold a valid UTF-8 sequence, such as `Ã¤` written on
-purpose, is refused as mixed; in real Windows-1252 text that practically
-never occurs.
-
-### Sections
-
-Bedrock returned whole documents from retrieve for every demo document with
-a Markdown table, whatever the chunking (see
-[retrieval findings](../docs/retrieval-findings.md)). Splitting before the upload keeps
-a hit at most a section long, whatever the reason:
-
-1. Cut at every `## ` heading; headings inside code fences do not count.
-2. A section under 80 words is joined to the one before it; a short intro,
-   which has none before it, to the one after.
-3. A section over 450 words is cut again at its `### ` headings, with the
-   same joining rule. Without `### ` headings it stays as it is.
-4. Every section starts with the document's `# ` title, and pieces from step
-   3 also with their `## ` heading.
-
-A document without `## ` headings becomes one section. Section files are
-named `<document>--<nn>-<heading>.md`, for example
-`faq--03-projects-and-exports.md`, and each gets an exact copy of the
-document's sidecar. The files in `knowledge/` stay whole.
-
-The heading part is lowercase ASCII of at most 40 characters. The page shows
-the file name as the source's name, so letters are kept readable: `ä`, `ö`,
-`ü` and `ß` are spelled `ae`, `oe`, `ue` and `ss`, capitals too, `ø`, `æ`,
-`œ`, `ł` and `đ` are `oe`, `ae`, `oe`, `l` and `d`, and other letters lose
-their accent (`é` is `e`); every other run of characters is one hyphen. So
-`## Bürozeiten` becomes `erreichbarkeit--01-buerozeiten.md`, and a heading
-with no a–z or digit left is `section`. Until 02.10.2026 umlauts became
-hyphens (`b-rozeiten`); sections uploaded before then keep that name in the
-bucket until their workspace is uploaded again and pruned with `--delete`
-(below).
-
-The part before `--` is the document's own file name, and any file uploaded
-whole keeps its name too. Both go up composed (Unicode NFC): a Mac often
-stores `ü` in a file name as `u` and two dots, Windows as one character, and without
-that the same document saved on both would be two keys and two copies in the
-index.
-
-| Exit code | Meaning |
-|---|---|
-| 0 | Done, no document failed. |
-| 1 | The local folder has problems; nothing was uploaded. |
-| 2 | An AWS step failed: login, stack, permissions, network. |
-| 3 | The ingestion job failed, stopped, or could not index every document. |
-
-**Deleting is opt-in.** A file removed locally stays in the bucket and in
-the index. The same happens to sections: renaming, adding or removing a
-`## ` heading can change section names, and the sections under the old names
-stay. After the upload the script lists every such object; with `--delete`
-it removes them, and the sync then drops their vectors. It compares only the
-workspaces with at least one document in the folder (or the one
-`--workspace` names), and the all-clear lists them: a folder with one
-company in it never lists or deletes another company's documents. A
-workspace whose documents were all removed locally is not compared, even if
-its folder is still there; remove it from the bucket by hand. Within a
-compared workspace, every layer counts: a folder holding only `human/` for a
-workspace takes that workspace's `agent/` and `inbox/` objects for stale. A
-deleted object stays recoverable for 30 days as a noncurrent version.
-
-It does not **sync one workspace only.** `--workspace` limits the upload. The
-ingestion job always covers the whole data source.
-
-## retrieve — the proof that workspaces stay apart
-
-```bash
-python -m scripts.retrieve "How do I export project data?" --workspace quillmoor
-python -m scripts.retrieve "How do I export project data?" --workspace pellwick
-python -m scripts.retrieve "What changed in the recent releases?" --workspace quillmoor --layer agent
-```
-
-`--workspace` is required: there is no way to search across companies from
-here. `--layer` narrows further; `--results` sets the number of hits
-(default 5).
-
-Each hit prints as two lines — score, `workspace`, `layer`, section file,
-then the start of the hit's text. A hit is a whole section or a chunk of one;
-measured on the demo corpus, 18 to 440 words. For example (17.09.2026):
-
-```
-2. score 0.815  workspace=quillmoor  layer=human  faq--03-projects-and-exports.md
-   # Haldrum — Frequently Asked Questions ## Projects and exports **How do I export project data?** Open the project ...
-```
-
-What to expect from the three commands above:
-
-1. Hits only with `workspace=quillmoor`.
-2. The same question in `pellwick`: hits only with `workspace=pellwick`, or
-   none. A joinery workshop's price list may come back as a weak match — a
-   Quillmoor document never does.
-3. Hits only with `layer=agent`, all from `quillmoor`.
-
-This is retrieval only; no model writes an answer. For an answer, use `ask`.
+| `python -m svar.scripts.ask` | Asks the deployed answer function a question and prints the answer with its sources. |
+| `python -m svar.scripts.evaluate` | Asks 30 fixed questions of each answer model the way the function does and prints hit rate, citations and cost. |
+| `python -m svar.scripts.topic_probe` | Measures the denied topics against 132 fixed questions and 119 fixed answers, each after its frame, the answers without their citations: which harmless ones they block and which they should block slip through. |
+| `python -m svar.scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
+| `python -m svar.scripts.control_eval` | Asks 42 fixed questions of every model of `FRANKFURT_MODELS` the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
 
 ## ask — the proof that answering works
 
 ```bash
-python -m scripts.ask "How do I export project data?" --workspace quillmoor
-python -m scripts.ask "How do I export project data?" --workspace pellwick
-python -m scripts.ask "How will the bulk export of all projects work?" --workspace quillmoor --json
+python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor
+python -m svar.scripts.ask "How do I export project data?" --workspace pellwick
+python -m svar.scripts.ask "How will the bulk export of all projects work?" --workspace quillmoor --json
 ```
 
 It sends what any client sends, the page included: a `POST` to
 `<WebUrl>/ask` with the workspace key in `X-Andur-Key` and the SHA-256 of the
 body in `x-amz-content-sha256`. Both headers are what the way in demands, not
 the function — see *One address for everything* in
-[architecture](../docs/architecture.md#one-address-for-everything). The stack output
+[architecture](../../docs/architecture.md#one-address-for-everything). The stack output
 `FunctionUrl` is not an address to send to: from outside the account it
 answers 403 to everyone but CloudFront.
 
@@ -279,7 +57,7 @@ nvidia.nemotron-super-3-120b · 1850 tokens in, 93 out · 2732 ms
 confirmed.
 
 `--json` prints the function's response unchanged; its fields are described
-in [app/README.md](../app/README.md).
+in [svar/app/README.md](../app/README.md).
 
 `--language de` (or `en`) puts `"language"` into the request, as the page
 does, so the function's own sentences — "not in the sources", a refusal by the
@@ -292,115 +70,23 @@ language and they are English.
 | 1 | The function refused or failed; the status and its reason are printed (401 wrong key, key of another workspace or a workspace without a key, 402 demo budget used up, 429 with a sentence: the plan's quota for the month or the day reached, 400 bad question, 502 Bedrock failed, 503 too many unknown workspaces checked at once, try again in a few seconds). A 403 or 504 without an `error` sentence never reached the function: it was refused on the way in, or CloudFront gave up waiting. |
 | 2 | An AWS step or the connection failed: login, stack, missing key parameter, network. |
 
-## workspace — adding and removing a workspace
-
-```bash
-python -m scripts.workspace add kalvenstett                # create the key, print it once
-python -m scripts.workspace add kalvenstett --plan firma   # the same, on the plan firma
-python -m scripts.workspace plan kalvenstett betrieb       # put the key on another plan
-python -m scripts.workspace remove kalvenstett             # show what belongs to it
-python -m scripts.workspace remove kalvenstett --yes       # delete it
-```
-
-No workspace is named in the stack's code, and a new one needs no deploy. A
-workspace is what AWS holds under its name: the key `/andur/api-keys/<name>`, the budget
-item of that key with its plan, if it has one, and the documents under
-`workspaces/<name>/`. The name
-follows the answer function's rule — lowercase letters, digits and single
-hyphens, at most 64 characters — and a name outside it is refused before any
-AWS call.
-
-**add** generates a key as strong as the stack's used to be (32 random bytes,
-43 URL-safe characters), stores it as a SecureString and prints it once. The
-key alone goes to stdout and every other line to stderr, so
-`> /dev/null` keeps it off the screen and `> key.txt` keeps nothing but the
-key. A key that exists is never replaced: `add` stops with exit code 2 and
-changes nothing. The one exception is its own key: when the answer to the
-store got lost and botocore sent it again, the second try finds the key the
-first one stored; `add` reads it, and if it is the key it generated, that is
-success. The new key works at once with the default budget; to set
-another before its first question, see
-[app/README.md](../app/README.md#setting-a-budget-for-one-key). Its documents
-go in with `python -m scripts.ingest --source <folder> --workspace <name>`.
-
-**add --plan** `betrieb` or `firma` puts the new key on that plan in the
-same run: it writes the key's budget item with the plan and the workspace,
-and nothing else (*Plans* in
-[app/README.md](../app/README.md#plans)). The plans and their numbers are the
-ones in `app/plans.py`, the table the answer function counts by; `demo`, the
-default, writes no item. Nobody has the key yet, so no question can come
-before its plan. Should the plan not get through, the key is still printed —
-it is its only showing — and `add` ends with exit code 2 and the `plan`
-command to run before the key is handed out.
-
-**plan** `<name> <plan>` puts the workspace's existing key on another plan,
-or with `demo` takes it off its plan. The key stays as it is; the function
-reads the plan with the next question. It prints the plan before and after,
-never the key. The month's and the day's counts stay, so a new plan is no
-way to a fresh month. Putting a key on a plan also removes the item's
-`delete_after`, which the table's TTL would one day act on: a plan item lives
-until `remove`. An item that names another workspace is left alone (exit
-code 2).
-
-**remove** first finds everything that belongs to the name and prints it: the
-key (never its value), every budget item with the questions used — for a key
-on a plan the plan and its latest month's and day's counts — and every
-document object. The budget items are the one of the current key's hash and
-every item whose `workspace` is the name — the function writes it into each
-item it creates — so items of earlier keys are found too, and so are all of
-them when the key is gone already. Without `--yes` that is all; nothing is
-deleted. With `--yes` it deletes, in this order:
-
-1. **The budget items.** They go first because an item preset by hand has no
-   workspace until its first question and is found only by the key's hash: a
-   run that stops halfway can simply be repeated.
-2. **The key.** Warm instances of the function keep it for up to 5 minutes
-   ([app/README.md](../app/README.md#getting-a-key)).
-3. **The documents** under `workspaces/<name>/`, in batches of 1000. The
-   bucket is versioned: a deleted object leaves a delete marker, and its old
-   versions expire after 30 days.
-4. **The budget items written meanwhile**: a question with the deleted key,
-   still accepted from the function's memory, writes a new one.
-5. **An ingestion job** over the data source, which removes the vectors of
-   the deleted documents. It runs on every `--yes`, also when nothing else was
-   found, so a repeated run cleans up after one whose job failed.
-
-When it has deleted a key, it ends with "Not quite finished": for up to 5
-minutes a question can still write a new item. Run `remove <name> --yes`
-again after that to delete it. The command it prints for that carries
-`--region` and `--stack-name` when the run had them, so it reaches the same
-stack.
-
-It never touches anything outside that one name. The prefix ends in a slash,
-so `kalv` never reaches `kalvenstett`; the listing is checked against it again
-before anything is deleted, and so is every budget item the scan returns; the
-parameter and the budget items are deleted by their exact name and hash. Bucket, table, key path and ids come from the stack
-outputs.
-
-| Exit code | Meaning |
-|---|---|
-| 0 | Done: the key was added, or its plan changed; or `remove` listed, or deleted and the job completed. |
-| 1 | The name breaks the naming rule. Nothing was called. |
-| 2 | An AWS step failed, `add` found a key there already, `add --plan` stored the key but not its plan, or `plan` found no key or an item of another workspace. A plan nobody defined is refused by the command line with 2 too, before any call. What was deleted before the failure is gone; rerun to finish. |
-| 3 | Everything was deleted, but the ingestion job failed; the vectors may still be there. Rerun `remove <name> --yes`. |
-
 ## evaluate — which model answers best
 
 ```bash
-python -m scripts.evaluate                              # all five models
-python -m scripts.evaluate --model "Nova 2 Lite" --out results.json
-python -m scripts.evaluate --model "Nova Pro" --questions scripts/evaluation-questions-de.json
+python -m svar.scripts.evaluate                              # all five models
+python -m svar.scripts.evaluate --model "Nova 2 Lite" --out results.json
+python -m svar.scripts.evaluate --model "Nova Pro" --questions svar/scripts/evaluation-questions-de.json
 ```
 
 It asks the 30 questions in `evaluation-questions.json` — 22 that the
 documents answer, 4 that the guardrail must refuse, 4 that no document
 answers — of every model in `MODELS`, through `answer_question` in
-`app/answering.py` with the deployed function's own settings. Only the model,
+`svar/app/answering.py` with the deployed function's own settings. Only the model,
 its token prices and the wording of its system prompt (the `prompt` of its row
-in `infra/answer_models.py`, the function's `ANSWER_PROMPT`) change, so a run
+in `taug/infra/answer_models.py`, the function's `ANSWER_PROMPT`) change, so a run
 before the deploy that brings `ANSWER_PROMPT` still asks each model with its
 own wording; see *Evaluation* in
-[docs/decisions.md](../docs/decisions.md). No key and no budget are used.
+[docs/decisions.md](../../docs/decisions.md). No key and no budget are used.
 Only models that run in the region or behind an EU profile are allowed; the
 script refuses any other.
 
@@ -481,12 +167,12 @@ all five:
   invitation link is valid. The passage that says 14 days was the seventh
   hit and the function took six, so every model answered that the sources
   do not say — correctly, from what it was given. Since the function takes
-  ten (*Ten passages per question* in [docs/decisions.md](../docs/decisions.md)),
+  ten (*Ten passages per question* in [docs/decisions.md](../../docs/decisions.md)),
   Nova Pro answers it: 14 days, citing `admin-users-and-roles`.
 - Nova 2 Lite's miss among the unanswerable questions began with the
   required sentence and then went on to describe the documents.
 - **USD per question** is the mean over all 30, refusals (0.00015 each)
-  included; per answered question see [docs/costs.md](../docs/costs.md).
+  included; per answered question see [docs/costs.md](../../docs/costs.md).
 
 A question that ends in an error is counted as wrong and in the column
 *Errors*, and it fails the run after the table: exit code 2, as for a failed
@@ -496,22 +182,22 @@ paid for, and written after every model.
 ## topic_probe — what the denied topics refuse, before a deploy
 
 ```bash
-python -m scripts.topic_probe --out probe.json             # DENIED_TOPICS as they are in the repository
-python -m scripts.topic_probe --deployed --out probe.json  # the deployed topic guardrail
+python -m svar.scripts.topic_probe --out probe.json             # DENIED_TOPICS as they are in the repository
+python -m svar.scripts.topic_probe --deployed --out probe.json  # the deployed topic guardrail
 ```
 
 In a region whose stack checks the topics with a model, eu-central-1 with
 gpt-oss-120b since 07.10.2026 (*Guardrails and cost* in
-[docs/decisions.md](../docs/decisions.md)), the same command measures that
-model instead (`scripts/topic_model_probe.py`). `--topic-model` measures
+[docs/decisions.md](../../docs/decisions.md)), the same command measures that
+model instead (`svar/scripts/topic_model_probe.py`). `--topic-model` measures
 another model of the region's table with the same prompt and rules, also in a
 region whose stack checks with a guardrail, as long as the model has a price
 there; it does not go with `--topic-check guardrail`:
 
 ```bash
-python -m scripts.topic_probe --region eu-central-1 --out run.json             # three runs
-python -m scripts.topic_probe --region eu-central-1 --repeat 1 --topic-model qwen.qwen3-235b-a22b-2507-v1:0
-python -m scripts.topic_probe --region eu-central-1 --deployed --out run.json  # the deployed function's
+python -m svar.scripts.topic_probe --region eu-central-1 --out run.json             # three runs
+python -m svar.scripts.topic_probe --region eu-central-1 --repeat 1 --topic-model qwen.qwen3-235b-a22b-2507-v1:0
+python -m svar.scripts.topic_probe --region eu-central-1 --deployed --out run.json  # the deployed function's
 ```
 
 Every text goes through `check_topics` of the function, with its client and
@@ -523,11 +209,11 @@ questions of `evaluation-questions-control.json` and
 refused. It creates and deletes nothing; three runs of 319 checks with
 gpt-oss-120b cost 0.30 USD on 07.10.2026.
 
-Every change to `DENIED_TOPICS` in `app/denied_topics.py`, to the topic
-model's prompt in `app/topic_model.py`, and to the frames `QUESTION_FRAME`
-and `ANSWER_FRAME` in `app/topic_check.py`, is measured with this before it is
+Every change to `DENIED_TOPICS` in `svar/app/denied_topics.py`, to the topic
+model's prompt in `svar/app/topic_model.py`, and to the frames `QUESTION_FRAME`
+and `ANSWER_FRAME` in `svar/app/topic_check.py`, is measured with this before it is
 deployed (*Guardrails and cost* in
-[docs/decisions.md](../docs/decisions.md)). Without `--deployed` the script
+[docs/decisions.md](../../docs/decisions.md)). Without `--deployed` the script
 creates a guardrail of its own, `andur-topic-probe`, with the topics the
 stack would deploy in the topic guardrail — same order, same tier, same EU
 guardrail profile, same messages, no other policy — sends every question of
@@ -673,7 +359,7 @@ in both languages — were refused in all of six runs after the frame.
 ## grounding_probe — what the grounding check withholds, in German too
 
 ```bash
-python -m scripts.grounding_probe --out grounding.json
+python -m svar.scripts.grounding_probe --out grounding.json
 ```
 
 The grounding check reads English, French and Spanish only, the user guide
@@ -701,7 +387,7 @@ A German answer the check withholds is checked once more in English:
 translated, with its question, by the answer model through the probe
 (`TRANSLATION_PROMPT`), and the translation checked on the same sources. The
 function does not do this. It is the way measured and not built on
-06.10.2026 (*Guardrails and cost* in [docs/decisions.md](../docs/decisions.md)),
+06.10.2026 (*Guardrails and cost* in [docs/decisions.md](../../docs/decisions.md)),
 and the probe keeps measuring it, so the numbers can be taken again when AWS
 or the prompt changes. A translation that is not in the form asked for counts
 as withheld, and the report counts such translations per group, so a made-up
@@ -777,7 +463,7 @@ c09 the way Qwen3 235B wrote them (both sentences), and for every question
 but c24 the right part with an invented rest, as an `added-claim`. It
 measures which form of a partial answer the check passes, the form the prompt
 asks for since 07.10.2026 (*Guardrails and cost* in
-[docs/decisions.md](../docs/decisions.md)), and that an invented rest is still
+[docs/decisions.md](../../docs/decisions.md)), and that an invented rest is still
 withheld. The report has no group for right English answers, so c32's right
 ones are only in the progress lines and in `--out`; its made-up one counts in
 "made up, en on en sources".
@@ -795,11 +481,11 @@ as English added claims did on 06.10.2026.
 ## control_eval — which model stays with its sources, in Frankfurt
 
 ```bash
-python -m scripts.control_eval --out results.json                  # every model in FRANKFURT_MODELS
-python -m scripts.control_eval --model "Nova Pro" --only c12       # one model, one question
-python -m scripts.control_eval --workspace kalvenstett             # only one workspace's questions
-python -m scripts.control_eval --topics-tier standard              # the tier deployed in eu-west-1, with the EU profile
-python -m scripts.control_eval --regrade results.json              # mark a saved run again, no AWS call
+python -m svar.scripts.control_eval --out results.json                  # every model in FRANKFURT_MODELS
+python -m svar.scripts.control_eval --model "Nova Pro" --only c12       # one model, one question
+python -m svar.scripts.control_eval --workspace kalvenstett             # only one workspace's questions
+python -m svar.scripts.control_eval --topics-tier standard              # the tier deployed in eu-west-1, with the EU profile
+python -m svar.scripts.control_eval --regrade results.json              # mark a saved run again, no AWS call
 ```
 
 `evaluate` asks whether an answer is right. `control_eval` asks how well a
@@ -824,7 +510,7 @@ Standard tier needs a profile (AWS refused it without one on 06.10.2026:
 Retrieval stays with the deployed knowledge base in `--retrieve-region`,
 once per question, and every model gets the same passages; they are saved
 with the run. Prices, their date and the wording of the system prompt (the
-row's `prompt`) come from the table of `--region` in `infra/answer_models.py`
+row's `prompt`) come from the table of `--region` in `taug/infra/answer_models.py`
 (`REGIONS`): a run of Nova Pro with `--region eu-west-1` counts Ireland's token
 prices, one with `--region eu-central-1` Frankfurt's.
 
@@ -856,203 +542,3 @@ A question that ends in an error is named, counted as wrong, and fails the
 run after the table (exit code 2), like a probe guardrail left behind. A run
 that fails before its first model has finished leaves an earlier `--out` file
 as it is.
-
-## tool_probe — whether a model can work a tool
-
-```bash
-python -m scripts.tool_probe --model "Nova Pro" --out tools.json
-```
-
-It measures whether each model of `FRANKFURT_MODELS` fills in one tool
-cleanly and asks back instead of guessing. `tool-cases.json` holds six
-conversations for one tool, `record_order` (material, quantity, unit, site,
-delivery date, all required), sent through `converse` without guardrail or
-knowledge base. Three give everything and expect exactly one call with the
-right values ("morgen" is 2026-10-07: the system prompt names the day); three
-leave something out or vague ("ein paar Paletten") and expect no call and a
-question or a request back for what is missing.
-
-Every request Bedrock refuses as sent (`ValidationException`) fails its case
-and counts as a result, whatever it was refused for, and the run ends with 0.
-The probe does not tell a model that takes no tools from a wrong model id or
-a tool definition Bedrock does not accept: the row stands in the table with
-the error's text, under *Failed*, and that text says which it was. A call
-that fails any other way — throttled, a service error, a timeout — says
-nothing about the model, is named under the table and fails the run with
-exit code 2. A missing login or permission stops it at once.
-
-## receiving_probe — which model Vard checks deliveries with
-
-```bash
-python -m scripts.receiving_probe --model "Qwen3 235B A22B 2507" --out receiving.json
-python -m scripts.receiving_probe --max-usd 1.00     # every model of FRANKFURT_MODELS, at most 1 USD
-python -m scripts.receiving_probe --model gpt-oss-20b --repeat 3   # every case three times
-```
-
-Vard takes on one responsibility after another, and a person decides; his
-first is the receiving check. A model works in his loop (`vard/engine.py`)
-with the receiving responsibility (`vard/receiving.py`) and six tools, all
-allowed: `get_delivery_note`, `get_purchase_order`, `get_earlier_deliveries`
-(the notes that came in before for an order), and the three that close the
-check, `report_discrepancies`, `report_match` and `hand_off`. There is no
-tool to book with; a call to a tool that is not offered, like one to book, is
-refused, told to the model and counted as invalid, and so is a call without
-its required fields. A tool that fails while it runs is no refusal: its error
-goes back to the model as the tool's result, and the call is not invalid. The
-loop ends when a closing tool has run, when the model answers without a tool,
-or after 8 model calls.
-
-`receiving-cases.json` holds 24 German cases, twelve for Pellwick Joinery and
-twelve for Kalvenstett Haustechnik; the documents are made up, the businesses'
-trades are taken from their documents. Each case starts with "Lieferschein …
-ist eingegangen." and says which tool should close it and which discrepancies,
-by article number and kind, should be reported. The first twelve have notes of
-two or three positions: everything agrees (also with German numbers like
-"1.250,00" against "1.250", and with boxes of 200 against pieces), a quantity
-short or over, a position missing or extra, a similar but wrong article, a
-wrong unit, a partial delivery whose open rest is reported, a note without a
-purchase order to hand off, and three discrepancies at once. The other twelve
-are harder, three of each kind: long notes of 23 to 40 positions with one to
-three discrepancies among them; the rest of a partial delivery, compared with
-what is still open after the earlier deliveries, which brings exactly the
-rest, too little or too much; orders that list the supplier's article number
-beside the business's own while the note gives only the supplier's, once with
-a successor article in place of the ordered one, which is a wrong article; and
-a note addressed to the other business, for an order of that business, which
-the business that has the note does not have: it goes to a person.
-
-A case passes when exactly one closing tool ran and it is the right one, every
-expected discrepancy is reported with its kind, none is made up, and no call
-was invalid. A wrong article counts as reported too when the ordered one is
-reported missing and the delivered one extra: a person sees both all the same.
-One of the two alone does not, and counts as made up, and so do both with their
-kinds swapped. The business's own number and the supplier's both name an
-ordered article. With `--repeat N` every case runs N rounds, all cases once
-before the next round, and the marks count over all of them. The first table
-ranks the models: most cases passed first; at a tie, fewest expected
-discrepancies missed (the column Missed), since a missed shortfall costs money
-and nobody notices it; then the lower cost. A case that got no answer, or
-stopped, misses all of its discrepancies. It gives each model's marks,
-invalid calls, mean steps, cost and wall time; under it each model's cases with
-their round, steps, cost and seconds. `--out` holds the same, every call with
-its input and result, and the tokens of every model call (`usage`).
-`--keep-reasoning` gives a model's reasoning (Bedrock's `reasoningContent`
-blocks) back in the conversation as it came; without it the reasoning stays
-out, as on the runs of 20.10.2026 and the first two of 21.10.2026. `--out` says
-for every model which it was.
-`--vendor-settings` calls each model of `VENDOR_SETTINGS` in the script as its
-maker recommends: temperature and top_p, its reasoning given back or not,
-`maxTokens` 8,192 and a read timeout of 300 s instead of 40. Each row names its
-source. A model without a row keeps the defaults (temperature 0, no top_p,
-`maxTokens` 4,096, 40 s). The output and `--out`
-say for every model which settings it ran with. With a row, a request Bedrock
-refuses as sent fails the run with exit code 2, since the probe chose its values.
-
-`--max-usd` (2.25 by default) is a hard limit. Before every model call the
-probe works out the most the call can cost: the request's size in UTF-8 bytes
-plus 500, as input tokens, and the request's `maxTokens` (4,096, or 8,192 with
-`--vendor-settings`) as output tokens, at the
-model's price in `infra/answer_models.py`. If what the run has spent plus that
-would pass the limit, the call is not made: the tables and `--out` are written
-and the run ends with exit code 2. A call that fails keeps its most counted,
-since AWS may have billed it. Claude Sonnet 4.6 is last in `FRANKFURT_MODELS`,
-so the cheaper models are measured first. A missing login or permission stops
-the run the same way, with the cases measured so far kept. A request Bedrock
-refuses as sent fails its case and is a result; any other failed call fails the
-run with exit code 2, as in `tool_probe`, and so does a tool of the case file
-that fails, since neither says anything about the model. `--region` takes the
-models and prices
-`infra/answer_models.py` gives that region: Frankfurt by default, Ireland with
-`--region eu-west-1`; a region without a table there is refused.
-
-## rehearsal — a new workspace, set up and measured, step by step
-
-```bash
-python -m scripts.rehearsal --workspace kalvenstett --source ../companies \
-  --question "Was kostet eine Stunde für einen Gesellen?" --fact "68 Euro" --plan betrieb \
-  --out-dir ../rehearsal --list
-```
-
-One command for what a new workspace needs once the stack is deployed, in
-this order, each step timed on its own:
-
-1. **check** — the signed-in identity (with `--expect-role`, the run stops
-   under any other role), the stack deployed and finished, how long the
-   bootstrap and the last deploy took by their CloudFormation events, every
-   address of `WebUrl` in the region and in no other by AWS's
-   `ip-ranges.json`, and that plain HTTP serves nothing while HTTPS serves the
-   page and answers a question without a key with 401, both with the security
-   headers of `app/page.py`. On port 80 an address that refuses the
-   connection, or lets it time out before taking it, is closed, a timeout
-   named apart, since a block on this computer's side looks the same; one
-   that takes the connection and then breaks it off, closes it or stays silent
-   without an answer fails the step, since the request, and a caller's key
-   with it, had already arrived unencrypted;
-2. **setup** — `ingest --check`, `workspace add` (its stdout, the key, is
-   thrown away; the key stays in Parameter Store), `ingest`, `retrieve` (every
-   hit from the new workspace), the first question through `ask --language
-   de` (with `--fact`, its answer must contain that text); handing the key over
-   and asking on the page in a browser are steps by hand;
-3. **apart** — the demo workspaces' documents, which the measurements need; a
-   search in `--other-workspace` that must find hits there and none from a
-   document of the new workspace, by file name as well as by its metadata, so a
-   document filed under the wrong workspace shows (a name with spaces is read
-   as it is and with `%20`); and the new key asked there
-   and refused with HTTP 401, which is what keeps a business to its own
-   documents;
-4. **measure** — `topic_probe --deployed` at the same time as `tool_probe` and
-   `grounding_probe` (the first calls only the topic model, the other two never
-   do, so they share no model quota), then `evaluate` on the English and the
-   German questions and on the new workspace's own German ones,
-   `evaluation-questions-<workspace>.json`, and `control_eval --workspace` on
-   its questions in `evaluation-questions-control.json`, with retrieval in the
-   region, all with `--model`, by default the answer model `REGIONS` gives the
-   region. A workspace without such German questions has those two steps
-   skipped, named as skipped in the summary, never as passed, so a run for a
-   new workspace never measures another one in their place; a file of that name
-   with questions of another workspace or language is refused before anything
-   runs. A measurement that ends with a failed call (exit code 2) fails its
-   step, since nothing was measured; wrong answers are a result and pass;
-5. **after** — where the deployed stack keeps and processes data as AWS reports
-   it (bucket, embedding model, vector index, function, the two models, the two
-   guardrails, budget table, log group, and whether Bedrock logs the model
-   calls), written to `residency.md`; and the events of the answer function's
-   log since this run began, written to `function-log.json`, Lambda's own
-   timeouts and runtime errors counted too. Either fails on anything outside
-   the region, an inference profile, a missing model, a log of the model calls,
-   a crash or a timeout. Run alone with `--only`, the log step sees only its
-   own seconds.
-
-`--region` takes only a region whose function is its own address, today
-`eu-central-1`: behind CloudFront the address checks could never pass. The
-deploy time names when the deploy finished, since a deploy that changed nothing
-leaves no event and the last one may be older.
-
-A step by hand stands in the plan as such. With `--manual skip`, the default,
-it is recorded as open and the run goes on; `--manual wait` stops there until
-Enter and times it. `--list` prints the plan and calls nothing; `--from <step>`
-goes on from a step, `--only <step>` runs single steps, the identity always
-first. The run stops at the first step that fails (in a group of steps run at
-once, the other lanes finish first); any error in a step, a network break too,
-fails that step. A second full run for the same workspace
-stops at `key`, since `workspace add` never replaces a key: go on with
-`--from documents`. `ANDUR_API_KEY` from the shell is not handed to the
-commands, so `ask` uses the new workspace's own key.
-
-Everything goes to `--out-dir`, which must lie outside the repository: one log
-per command that ran, the measurements' `--out` files, and `run-<time>.json` and `.md`
-with every step's start, seconds, exit code, status and result, the seconds
-per phase, and the wall clock. At the end, also after Ctrl+C, the summary is
-written and the account id is replaced by `<account>` in every file there; on
-the screen it never shows. It deploys nothing and deletes nothing; the
-measurements create and delete their probe guardrails as they do alone, and
-cost what they cost alone. On 07.10.2026 the whole run in eu-central-1, 22
-steps, took 11 minutes 12 seconds and cost 0.70 USD (at most 0.75) with the
-Frankfurt answer model, when `sources` still asked all 42 questions,
-Pellwick's too.
-
-| Exit code | Meaning |
-|---|---|
-| 0 | Every step passed, was left open by hand, or was skipped for want of the workspace's own German questions. |
-| 1 | A step failed; the summary names it and its log. |
-| 2 | Unknown step, `--out-dir` inside the repository, or `evaluation-questions-<workspace>.json` holding questions of another workspace or language. Nothing was called. |
