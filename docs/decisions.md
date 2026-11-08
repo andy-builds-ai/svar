@@ -21,6 +21,22 @@ and a company's documents stay in Germany; the stack in Ireland is the
 comparison stack. Until 02.10.2026 the chatbot was called Ask Andur, which is
 why older entries let Andur answer where Svar answers today; they stay as written.
 
+**2026-11-08 — The code moves into one folder per part; the stack stays one.**
+The operator decided. Taug (`taug/`), Svar (`svar/`) and Vard (`vard/`) each
+have a folder of their own, and `README.md` shows how they hang together. AWS
+gets byte for byte what it got before: the four code packages (`svar/app/`,
+`svar/web/`, `taug/infra/api_keys/`, `svar/infra/deploy_drain/`) moved whole,
+every construct keeps its id, and both templates, synthesized without an AWS
+login, are the same as before the move. The names AWS and users see stay
+(`AndurStack`, `X-Andur-Key`, `andur-*`); only where the code meant the
+chatbot with Andur does it now say Svar. Three pieces were split along the
+parts: the key path and the key retirer went to Taug (`taug/infra/keys.py`),
+the prompt wording of each model to Svar (`svar/infra/answer_prompts.py`),
+and the step that puts a key on a plan to Svar (`svar/scripts/plan.py`), which
+Taug's workspace script calls. What of Taug runs in Svar's function, the key
+check among it (`svar/app/keys.py`), stays there until the stack is split,
+which is a step of its own.
+
 ## Region
 
 **2026-09-28 — eu-west-1 (Ireland), not us-east-1.** A company asks where

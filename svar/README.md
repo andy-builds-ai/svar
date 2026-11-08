@@ -89,24 +89,24 @@ call may have run and been paid for. `svar/app/handler.py` runs steps 1 and 2
 [docs/decisions.md](../docs/decisions.md). The ones that shape the system:
 
 - **Nothing with a monthly base fee**
-  ([decisions.md:69](../docs/decisions.md?plain=1#L69)):
+  ([decisions.md:85](../docs/decisions.md?plain=1#L85)):
   S3 Vectors behind a Bedrock knowledge base instead of a search cluster, so
   an idle month costs cents. The price is control over retrieval: Bedrock
   returned whole documents with Markdown tables under every chunking tried,
   so documents are split at their headings before the upload
-  ([decisions.md:82](../docs/decisions.md?plain=1#L82)).
+  ([decisions.md:98](../docs/decisions.md?plain=1#L98)).
 - **One installation, workspaces kept apart by a metadata filter**
-  ([decisions.md:157](../docs/decisions.md?plain=1#L157)). The price: the
+  ([decisions.md:173](../docs/decisions.md?plain=1#L173)). The price: the
   separation rests on a filter in every query, not on separate deployments,
   so it has to be tested and measured, not assumed (see
   [Privacy](#privacy-and-separation)).
 - **A key is a budget, not a password**
-  ([decisions.md:282](../docs/decisions.md?plain=1#L282)):
+  ([decisions.md:298](../docs/decisions.md?plain=1#L298)):
   ten questions within 48 hours of the first for a demo key, a monthly and a
   daily quota for a key on a plan. The price: whoever holds a key can ask
   until it is spent; a leaked demo key is a leak of ten questions.
 - **In Frankfurt the function's URL is the address, without CloudFront**
-  ([decisions.md:979](../docs/decisions.md?plain=1#L979)): no setting keeps
+  ([decisions.md:995](../docs/decisions.md?plain=1#L995)): no setting keeps
   CloudFront's edge locations inside Germany. The price: no domain of its own
   and no WAF. What caps a flood is the number of executions Lambda allows at
   once. The stack reserves 10 executions for the function there: 5 for
@@ -114,26 +114,26 @@ call may have run and been paid for. `svar/app/handler.py` runs steps 1 and 2
   take whole, and that reservation is the cap
   ([docs/operating.md](../docs/operating.md#another-region)).
 - **In Frankfurt a model in the region checks the topics**
-  ([decisions.md:694](../docs/decisions.md?plain=1#L694),
-  [:732](../docs/decisions.md?plain=1#L732)). Bedrock's topic guardrail reads
+  ([decisions.md:710](../docs/decisions.md?plain=1#L710),
+  [:732](../docs/decisions.md?plain=1#L748)). Bedrock's topic guardrail reads
   German only in its Standard tier, and that tier works only through an EU
   profile, which runs the check in six EU regions and so would carry it out
   of Germany. The older tier stays in Frankfurt but let through German advice
   questions. The price: a model call per check, 0.30 USD for 957 checks
   (below).
 - **The grounding check withholds at 0.8 in Frankfurt**
-  ([decisions.md:793](../docs/decisions.md?plain=1#L793)), the threshold that
+  ([decisions.md:809](../docs/decisions.md?plain=1#L809)), the threshold that
   withheld the most made-up answers without withholding a right answer to
   German documents. The price: it withholds right German answers to English
   documents. Checking those in English was measured and not built, because
   it also let made-up answers through
-  ([decisions.md:1025](../docs/decisions.md?plain=1#L1025)).
+  ([decisions.md:1041](../docs/decisions.md?plain=1#L1041)).
 - **Measured through the function's own code path**
-  ([decisions.md:1131](../docs/decisions.md?plain=1#L1131)), against the
+  ([decisions.md:1147](../docs/decisions.md?plain=1#L1147)), against the
   deployed knowledge base and the deployed function's settings. The price:
   every measurement calls real models and costs real money, and one run is
   one sample, since the models do not repeat themselves even at temperature 0
-  ([decisions.md:368](../docs/decisions.md?plain=1#L368)).
+  ([decisions.md:384](../docs/decisions.md?plain=1#L384)).
 
 ## Measured
 
@@ -146,11 +146,11 @@ function's own code with the deployed function's settings and knowledge
 base, and its guardrails or copies of them that a script creates and
 deletes; `topic_probe` and `grounding_probe` are also run before a deploy,
 to measure a change before it goes live
-([decisions.md:577](../docs/decisions.md?plain=1#L577)). The numbers below were
+([decisions.md:593](../docs/decisions.md?plain=1#L593)). The numbers below were
 measured after the deploy of 14.10.2026 in Frankfurt and of 16.10.2026 in
 Ireland, against the deployed stack. Frankfurt's deploy of 16.10.2026 gave
 each model its own prompt wording and kept Qwen3 235B's as it was
-([decisions.md:953](../docs/decisions.md?plain=1#L953)). The deploy of
+([decisions.md:969](../docs/decisions.md?plain=1#L969)). The deploy of
 21.10.2026 changed no model, search, prompt or check on either stack. It
 changed names, descriptions, the page's text and the sentence a reader gets
 when a key's quota is full. How each script works:
@@ -165,7 +165,7 @@ when a key's quota is full. How each script works:
 | German questions on German documents | 26 of 26 right; all 20 answerable ones cite the expected document |
 | Questions built to tempt the model | 36 of 42 right; 0 of 34 answers added a figure of their own; 29 of 29 German questions answered in German; 8 of 8 advice questions refused |
 | Denied topics, three runs, 957 checks | every one of 45 denied questions, 32 denied answers and 11 advice questions refused; none of 87 harmless questions, 87 harmless answers and 57 questions of the evaluation sets refused |
-| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md:808](../docs/decisions.md?plain=1#L808); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
+| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md:824](../docs/decisions.md?plain=1#L824); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
 | Median time per question, retrieval to cost line, from a laptop in Germany | 3.0 s (English), 2.3 s (German on English documents), 2.8 s (German on German documents) |
 
 **Setting up a new workspace**, measured on 07.10.2026 with a fictional craft
@@ -200,7 +200,7 @@ not broken down. The whole rehearsal with all measurements took 11 minutes
 
 Each answer model now has the prompt it was measured with: Nova Pro the one
 of 06.10.2026, Qwen3 235B in Frankfurt its own, unchanged
-([decisions.md, 14.10.2026](../docs/decisions.md?plain=1#L900)). After the deploy of
+([decisions.md, 14.10.2026](../docs/decisions.md?plain=1#L916)). After the deploy of
 14.10.2026 Ireland had the prompt measured with Qwen3 235B and got 27 of 30
 in two runs: it made Nova Pro write "The sources do not answer this
 question." where the sources do. One question (q20) was right only 2 of 10
