@@ -3,7 +3,7 @@
 import builtins
 from typing import Any
 
-import aws  # app/aws.py, imported by its Lambda name (tests/conftest.py)
+import aws  # app/aws.py, imported by its Lambda name (conftest.py)
 import pytest
 
 

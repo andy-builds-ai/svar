@@ -9,7 +9,7 @@ from typing import Any
 import clocks
 import config
 import errors
-import handler  # app/handler.py, imported by its Lambda name (tests/conftest.py)
+import handler  # app/handler.py, imported by its Lambda name (conftest.py)
 import llm
 import log
 import page

@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import aws  # app/aws.py, imported by its Lambda name (tests/conftest.py)
+import aws  # app/aws.py, imported by its Lambda name (conftest.py)
 
 # Imported, not skipped past. `aws-cdk-lib` is a hard dependency in
 # pyproject.toml, and it has to stay one: with an `importorskip` here, an

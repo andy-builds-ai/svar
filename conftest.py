@@ -13,7 +13,7 @@ import pytest
 
 from infra import answer_models
 
-APP_FOLDER = Path(__file__).resolve().parents[1] / "app"
+APP_FOLDER = Path(__file__).resolve().parent / "app"
 
 if str(APP_FOLDER) not in sys.path:
     sys.path.insert(0, str(APP_FOLDER))

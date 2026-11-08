@@ -4,7 +4,7 @@ Every AWS client is a small fake, and every Bedrock response a hand-built
 dict in the shape Bedrock returns — the pattern of the learning chatbot's
 tests. Error paths use botocore's real exception classes and are skipped
 when botocore is not installed; one test proves the module imports without
-boto3 at all. The module is imported by its Lambda name (tests/conftest.py).
+boto3 at all. The module is imported by its Lambda name (conftest.py).
 
 The budget fake goes one step further and runs the handler's own update and
 condition strings, so a wrong attribute name or a wrong placeholder fails
