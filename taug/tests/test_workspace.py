@@ -15,6 +15,7 @@ import intake
 import plans
 import pytest
 
+from svar.scripts import plan as plan_step
 from svar.tests.test_handler import (
     apply_update,
     assert_every_placeholder_is_used,
@@ -405,13 +406,13 @@ def test_add_reads_only_the_key_path_from_the_stack() -> None:
 
 
 def test_the_plans_and_names_are_the_answer_functions() -> None:
-    assert workspace.PLAN_CHOICES == (
+    assert plan_step.PLAN_CHOICES == (
         "demo",
         *(plan.name for plan in plans.PLANS),
     )
-    assert workspace.PLAN_ATTRIBUTE == budget.PLAN_ATTRIBUTE
-    assert workspace.BUDGET_TTL_ATTRIBUTE == budget.BUDGET_TTL_ATTRIBUTE
-    assert workspace.BUDGET_WORKSPACE_ATTRIBUTE == "workspace"
+    assert plan_step.PLAN_ATTRIBUTE == budget.PLAN_ATTRIBUTE
+    assert plan_step.BUDGET_TTL_ATTRIBUTE == budget.BUDGET_TTL_ATTRIBUTE
+    assert plan_step.BUDGET_WORKSPACE_ATTRIBUTE == "workspace"
     assert "workspace = if_not_exists(workspace, :workspace)" in budget.BUDGET_UPDATE_EXPRESSION
 
 

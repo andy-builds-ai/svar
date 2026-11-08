@@ -8,7 +8,6 @@ script adds the key and the plan, changes the plan, and removes all of it again.
 """
 
 import argparse
-import hashlib
 import re
 import secrets
 import sys
@@ -16,7 +15,17 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from svar.app.plans import DEMO, PLANS, plan_named
+from svar.app.plans import DEMO
+from svar.scripts.plan import (
+    BUDGET_KEY_ATTRIBUTE,
+    BUDGET_WORKSPACE_ATTRIBUTE,
+    PLAN_ATTRIBUTE,
+    PLAN_CHOICES,
+    budget_key,
+    describe_plan,
+    key_hash,
+    set_plan,
+)
 from taug.scripts import utf8_output
 from taug.scripts.aws import (
     REGION,
@@ -44,18 +53,6 @@ KEY_BYTES = 32
 #: What the SSM console shows next to the key. It names the header the function
 #: reads, ``X-Andur-Key``; CloudFront replaces ``Authorization`` on the way.
 KEY_DESCRIPTION = "Andur workspace key. Send it in the header X-Andur-Key."
-
-#: The partition key of the budget table: the SHA-256 of the key, in hex
-#: (``BUDGET_KEY_ATTRIBUTE`` and ``key_hash`` in svar/app/budget.py).
-BUDGET_KEY_ATTRIBUTE = "key_hash"
-
-#: The attribute that names a key's plan, and the one the table's TTL reads
-#: (``PLAN_ATTRIBUTE`` and ``BUDGET_TTL_ATTRIBUTE`` in svar/app/budget.py).
-PLAN_ATTRIBUTE = "plan"
-BUDGET_TTL_ATTRIBUTE = "delete_after"
-
-#: What ``--plan`` and ``plan`` accept: the demo budget, or a plan of svar/app/plans.py.
-PLAN_CHOICES = (DEMO, *(plan.name for plan in PLANS))
 
 ADD_OUTPUTS = ("ApiKeyParameterPath",)
 ADD_WITH_PLAN_OUTPUTS = ("ApiKeyParameterPath", "BudgetTableName")
@@ -88,11 +85,6 @@ def key_parameter(path: str, workspace: str) -> str:
 def documents_prefix(workspace: str) -> str:
     """``workspaces/<workspace>/`` — with the slash, so ``kalv`` never reaches ``kalvenstett``."""
     return f"{BUCKET_PREFIX}{workspace}/"
-
-
-def key_hash(key: str) -> str:
-    """The budget table's key for ``key``, computed as the answer function computes it."""
-    return hashlib.sha256(key.strip().encode("utf-8")).hexdigest()
 
 
 # --- add -----------------------------------------------------------------
@@ -128,64 +120,6 @@ def add_key(ssm: Any, name: str) -> str:
     return key
 
 
-# --- plan ----------------------------------------------------------------
-
-
-def describe_plan(name: str) -> str:
-    """What a key on this plan may ask, in one line."""
-    plan = plan_named(name)
-    if plan is None:
-        return "demo: the stack's demo budget (app/README.md, 'Keys are budgets, not passwords')"
-    return (
-        f"{plan.name}: {plan.questions_per_month:,} questions a calendar month, at most "
-        f"{plan.questions_per_day:,} a day, German time"
-    )
-
-
-def set_plan(dynamodb: Any, table: str, key: str, workspace: str, name: str) -> str:
-    """Put the key's budget item on the plan ``name``, or back on the demo budget; return
-    the plan it was on.
-
-    A plan item has no ``delete_after``: the table's TTL would otherwise delete it one day,
-    and the key would fall back to the demo budget. Back on the demo, the next question
-    that passes writes it again; on a key whose demo budget is spent none passes, and the
-    item stays until `remove`. The counts stay either way, so changing the plan is no
-    way to a fresh month. An item of another workspace is left alone.
-    """
-    request: dict[str, Any] = {
-        "TableName": table,
-        "Key": budget_key(key),
-        "ConditionExpression": "attribute_not_exists(#workspace) OR #workspace = :workspace",
-        "ExpressionAttributeNames": {
-            "#workspace": BUDGET_WORKSPACE_ATTRIBUTE,
-            "#plan": PLAN_ATTRIBUTE,
-        },
-        "ExpressionAttributeValues": {":workspace": {"S": workspace}},
-        "ReturnValues": "ALL_OLD",
-    }
-    if name == DEMO:
-        request["UpdateExpression"] = (
-            "SET #workspace = if_not_exists(#workspace, :workspace) REMOVE #plan"
-        )
-    else:
-        request["UpdateExpression"] = (
-            "SET #plan = :plan, #workspace = if_not_exists(#workspace, :workspace)"
-            f" REMOVE {BUDGET_TTL_ATTRIBUTE}"
-        )
-        request["ExpressionAttributeValues"][":plan"] = {"S": name}
-    try:
-        with explained(f"Setting the plan of the key in {table}"):
-            response = dynamodb.update_item(**request)
-    except AwsProblem as problem:
-        if error_code(problem.__cause__) != "ConditionalCheckFailedException":
-            raise
-        raise AwsProblem(
-            "The budget item of this key names another workspace. Nothing was changed."
-        ) from problem.__cause__
-    before = response.get("Attributes", {}).get(PLAN_ATTRIBUTE, {})
-    return before.get("S", "unknown") if before else DEMO
-
-
 # --- remove --------------------------------------------------------------
 
 
@@ -214,20 +148,11 @@ def read_key(ssm: Any, name: str) -> str | None:
     return response["Parameter"]["Value"]
 
 
-def budget_key(key: str) -> dict[str, dict[str, str]]:
-    return {BUDGET_KEY_ATTRIBUTE: {"S": key_hash(key)}}
-
-
 def read_budget(dynamodb: Any, table: str, key: str) -> dict[str, Any] | None:
     """The budget item of ``key``, or None if the key has not asked yet."""
     with explained(f"Reading the budget of the key in {table}"):
         response = dynamodb.get_item(TableName=table, Key=budget_key(key), ConsistentRead=True)
     return response.get("Item")
-
-
-#: The answer function writes the workspace into every budget item it creates
-#: (``BUDGET_UPDATE_EXPRESSION`` in svar/app/budget.py).
-BUDGET_WORKSPACE_ATTRIBUTE = "workspace"
 
 
 def workspace_budgets(dynamodb: Any, table: str, workspace: str) -> dict[str, dict[str, Any]]:
