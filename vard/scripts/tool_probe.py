@@ -19,10 +19,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from infra.answer_models import FRANKFURT_MODELS, AnswerModel
-from scripts import utf8_output
-from scripts.aws import AwsProblem, error_code, explain, explained, is_login_problem
 from scripts.evaluate import stays_in_the_eu
+from taug.infra.answer_models import FRANKFURT_MODELS, AnswerModel
+from taug.scripts import utf8_output
+from taug.scripts.aws import AwsProblem, error_code, explain, explained, is_login_problem
 
 CASES_FILE = Path(__file__).with_name("tool-cases.json")
 

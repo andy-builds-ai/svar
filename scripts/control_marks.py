@@ -8,10 +8,10 @@ import statistics
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
-from infra.answer_models import AnswerModel
 from infra.stacks.guardrails import BLOCKED_INPUT_MESSAGE, BLOCKED_OUTPUT_MESSAGE
 from scripts.evaluate import contains, declined, import_app
-from scripts.layout import document_of
+from taug.infra.answer_models import AnswerModel
+from taug.scripts.layout import document_of
 
 #: Number words the passages may spell a figure with, English and German. Not "may" and not
 #: "march": in English text they are mostly verbs, and would make 5 and 3 known.

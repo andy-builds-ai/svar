@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from scripts import aws, retrieve
-from scripts.aws import AwsProblem, explain, explained, read_stack_outputs, resolve
-from scripts.retrieve import build_filter, format_hit
+from taug.scripts import aws, retrieve
+from taug.scripts.aws import AwsProblem, explain, explained, read_stack_outputs, resolve
+from taug.scripts.retrieve import build_filter, format_hit
 
 
 class FakeClientError(Exception):

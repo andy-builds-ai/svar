@@ -350,7 +350,7 @@ def test_another_region_measures_its_own_models_at_its_own_prices(
     capsys: pytest.CaptureFixture[str],
     loaded: tuple[dict[str, str], list[dict[str, Any]]],
 ) -> None:
-    from infra.answer_models import ANSWER_MODELS
+    from taug.infra.answer_models import ANSWER_MODELS
 
     monkeypatch.setattr(probe, "model_client", lambda region, read_seconds: Clerk(loaded[1]))
     nova = next(m for m in ANSWER_MODELS if m.name == "Nova Pro")
@@ -629,7 +629,7 @@ def test_the_output_prints_a_lone_surrogate_as_its_escape(monkeypatch: pytest.Mo
     import io
     import sys
 
-    from scripts import utf8_output
+    from taug.scripts import utf8_output
 
     raw = io.BytesIO()
     stream = io.TextIOWrapper(raw, encoding="cp1252", newline="\n")

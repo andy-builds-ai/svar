@@ -1,5 +1,5 @@
-"""The stack in each region of infra/answer_models.py: Ireland as it runs, Frankfurt with its own
-answer model and gpt-oss-120b checking the topics, nothing through the EU profile; and the
+"""The stack in each region of taug/infra/answer_models.py: Ireland as it runs, Frankfurt with its
+own answer model and gpt-oss-120b checking the topics, nothing through the EU profile; and the
 fallback in Frankfurt, the topic guardrail through the EU profile, as the code still allows."""
 
 import json
@@ -11,7 +11,14 @@ import prompts
 import pytest
 from aws_cdk.assertions import Template
 
-from infra.answer_models import (
+from infra.stacks.andur_stack import AndurStack
+from infra.stacks.answer_function import (
+    ANSWER_MAX_CONCURRENCY,
+    PAGE_LAYER_FOLDER,
+    PAGE_LOAD_CONCURRENCY,
+)
+from infra.stacks.guardrails import GUARDRAIL_PROFILE_REGIONS
+from taug.infra.answer_models import (
     ANSWER_MODELS,
     DEFAULT_PROMPT,
     DEFAULT_REGION,
@@ -25,13 +32,6 @@ from infra.answer_models import (
     region_answer_guardrail_uses_profile,
     region_models,
 )
-from infra.stacks.andur_stack import AndurStack
-from infra.stacks.answer_function import (
-    ANSWER_MAX_CONCURRENCY,
-    PAGE_LAYER_FOLDER,
-    PAGE_LOAD_CONCURRENCY,
-)
-from infra.stacks.guardrails import GUARDRAIL_PROFILE_REGIONS
 from tests.test_stack import (
     deploy_context,
     get_att,

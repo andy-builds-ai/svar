@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from scripts import ask
-from scripts.aws import AwsProblem
+from taug.scripts.aws import AwsProblem
 
 KEY = "a-secret-workspace-key-that-must-never-be-printed"
 
@@ -129,7 +129,7 @@ def test_key_is_read_decrypted_from_the_workspace_parameter() -> None:
 
 
 def test_missing_key_parameter_says_what_to_check() -> None:
-    with pytest.raises(AwsProblem, match="scripts.workspace add nobody"):
+    with pytest.raises(AwsProblem, match="taug.scripts.workspace add nobody"):
         ask.read_key(FakeSSM(FakeClientError("ParameterNotFound")), "/andur/api-keys", "nobody")
 
 

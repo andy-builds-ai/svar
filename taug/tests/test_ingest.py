@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from scripts import ingest, layout
-from scripts.aws import AwsProblem
-from scripts.ingest import (
+from taug.scripts import ingest, layout
+from taug.scripts.aws import AwsProblem
+from taug.scripts.ingest import (
     check_sidecar,
     count_documents,
     delete_keys,
@@ -28,7 +28,7 @@ from scripts.ingest import (
     stale_keys,
     upload,
 )
-from scripts.layout import (
+from taug.scripts.layout import (
     MAX_SECTION_WORDS,
     MIN_SECTION_WORDS,
     Document,
@@ -41,7 +41,7 @@ from scripts.layout import (
     upload_items,
 )
 
-REPOSITORY = Path(__file__).resolve().parents[1]
+REPOSITORY = Path(__file__).resolve().parents[2]
 
 
 def sidecar_for(workspace: str, layer: str, **changes: Any) -> dict[str, Any]:
@@ -105,7 +105,7 @@ def test_section_filename_keeps_the_original_stem() -> None:
 
 
 def test_bucket_prefix_matches_the_prefix_the_data_source_crawls() -> None:
-    from infra.stacks.knowledge_base import WORKSPACE_PREFIX
+    from taug.infra.knowledge_base import WORKSPACE_PREFIX
 
     assert layout.BUCKET_PREFIX == WORKSPACE_PREFIX
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from infra import answer_models
+from taug.infra import answer_models
 
 APP_FOLDER = Path(__file__).resolve().parent / "app"
 

@@ -13,9 +13,9 @@ import retrieval
 import sentences
 
 from app.denied_topics import DENIED_TOPICS
-from infra.answer_models import ANSWER_MODELS, FRANKFURT_MODELS
 from infra.stacks.guardrails import GUARDRAIL_PROFILE_ID
 from scripts import control_eval, control_marks, evaluate
+from taug.infra.answer_models import ANSWER_MODELS, FRANKFURT_MODELS
 from tests.test_handler import ENVIRONMENT
 
 #: The answer function's modules, as the scripts take them (`evaluate.import_app`).

@@ -31,7 +31,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from infra.answer_models import region_answer_guardrail_uses_profile
 from infra.stacks.guardrails import (
     ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
@@ -42,9 +41,11 @@ from infra.stacks.guardrails import (
     RELEVANCE_THRESHOLD,
     grounding_threshold_for,
 )
-from scripts import topic_probe, utf8_output
-from scripts.aws import REGION, AwsProblem, client, error_code
+from scripts import topic_probe
 from scripts.evaluate import deployed_environment, import_app
+from taug.infra.answer_models import region_answer_guardrail_uses_profile
+from taug.scripts import utf8_output
+from taug.scripts.aws import REGION, AwsProblem, client, error_code
 
 ANSWERS_FILE = Path(__file__).with_name("grounding-answers.json")
 

@@ -12,12 +12,6 @@ from aws_cdk import (
 from constructs import Construct
 
 from app.page import ASK_PATH
-from infra.answer_models import (
-    DEFAULT_REGION,
-    answer_guardrail_uses_profile,
-    answer_model,
-    region_models,
-)
 from infra.stacks.answer_function import (
     ANSWER_FUNCTION_NAME,
     ANSWER_MAX_CONCURRENCY,
@@ -36,7 +30,19 @@ from infra.stacks.guardrails import (
     create_excerpt_guardrail,
     create_topic_guardrail,
 )
-from infra.stacks.knowledge_base import (
+from infra.stacks.web import (
+    allow_cloudfront_to_invoke,
+    create_distribution,
+    create_site_bucket,
+    upload_the_page,
+)
+from taug.infra.answer_models import (
+    DEFAULT_REGION,
+    answer_guardrail_uses_profile,
+    answer_model,
+    region_models,
+)
+from taug.infra.knowledge_base import (
     WORKSPACE_PREFIX,
     create_data_source,
     create_documents_bucket,
@@ -44,13 +50,7 @@ from infra.stacks.knowledge_base import (
     create_knowledge_base_role,
     create_vector_store,
 )
-from infra.stacks.shared import create_log_group
-from infra.stacks.web import (
-    allow_cloudfront_to_invoke,
-    create_distribution,
-    create_site_bucket,
-    upload_the_page,
-)
+from taug.infra.shared import create_log_group
 
 
 class AndurStack(Stack):

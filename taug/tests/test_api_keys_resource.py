@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from infra.api_keys import handler
+from taug.infra.api_keys import handler
 
 PATH = "/andur/api-keys"
 PROPERTIES = {"ParameterName": f"{PATH}/quillmoor", "ParameterPath": PATH}
@@ -42,5 +42,6 @@ def test_the_function_cannot_reach_parameter_store_at_all() -> None:
 @pytest.mark.parametrize("request_type", ["Create", "Update"])
 def test_create_and_update_are_refused(request_type: str) -> None:
     """The stack has no key resource left; a template that still sends one is a mistake."""
+    # The handler is a code package whose bytes stay as deployed; it names the old command.
     with pytest.raises(ValueError, match="scripts.workspace add"):
         handler.on_event(lifecycle(request_type, f"{PATH}/quillmoor"), None)

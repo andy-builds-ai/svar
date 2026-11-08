@@ -1,4 +1,4 @@
-"""Tests for scripts/workspace.py against fakes of every AWS service it touches.
+"""Tests for taug/scripts/workspace.py against fakes of every AWS service it touches.
 
 Most of them are about one thing: `remove` takes away one workspace and never touches
 anything outside it. The fake account holds neighbours chosen to catch a careless prefix:
@@ -15,7 +15,7 @@ import intake
 import plans
 import pytest
 
-from scripts import workspace
+from taug.scripts import workspace
 from tests.test_handler import (
     apply_update,
     assert_every_placeholder_is_used,
@@ -453,7 +453,7 @@ def test_a_plan_that_does_not_get_through_still_prints_the_key_and_says_what_to_
 
     assert out == account.ssm.parameters[f"{PATH}/new-firm"]["Value"] + "\n"
     assert "the key is stored, its plan is not" in err
-    assert "python -m scripts.workspace plan new-firm firma" in err
+    assert "python -m taug.scripts.workspace plan new-firm firma" in err
     assert "default budget" in err
 
 
@@ -764,14 +764,14 @@ def test_the_window_is_named_also_when_the_ingestion_job_cannot_start(
 @pytest.mark.parametrize(
     ("options", "printed"),
     [
-        ((), f"python -m scripts.workspace remove {TARGET} --yes"),
+        ((), f"python -m taug.scripts.workspace remove {TARGET} --yes"),
         (
             ("--region", "eu-central-1"),
-            f"python -m scripts.workspace --region eu-central-1 remove {TARGET} --yes",
+            f"python -m taug.scripts.workspace --region eu-central-1 remove {TARGET} --yes",
         ),
         (
             ("--stack-name", "OtherStack", "--region", "eu-central-1"),
-            "python -m scripts.workspace --region eu-central-1 --stack-name OtherStack "
+            "python -m taug.scripts.workspace --region eu-central-1 --stack-name OtherStack "
             f"remove {TARGET} --yes",
         ),
     ],
@@ -797,7 +797,7 @@ def test_the_other_commands_a_message_names_carry_the_stack_too(
     del account.ssm.parameters[f"{PATH}/{TARGET}"]
     assert run(account, "--region", "eu-central-1", "plan", TARGET, "firma") == 2
     assert (
-        f"`python -m scripts.workspace --region eu-central-1 add {TARGET} --plan firma`"
+        f"`python -m taug.scripts.workspace --region eu-central-1 add {TARGET} --plan firma`"
         in capsys.readouterr().err
     )
 

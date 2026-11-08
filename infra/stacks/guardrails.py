@@ -11,7 +11,7 @@ from aws_cdk import (
 )
 
 from app.denied_topics import DENIED_TOPICS
-from infra.answer_models import region_models
+from taug.infra.answer_models import region_models
 
 if TYPE_CHECKING:
     from infra.stacks.andur_stack import AndurStack

@@ -30,8 +30,6 @@ from aws_cdk.assertions import Match, Template
 
 from app.denied_topics import DENIED_TOPICS
 from app.page import ASK_PATH, HSTS_MAX_AGE_DAYS
-from infra import answer_models
-from infra.answer_models import PRICE_DATE, answer_model
 from infra.stacks.andur_stack import AndurStack
 from infra.stacks.answer_function import (
     ANSWER_FUNCTION_NAME,
@@ -67,7 +65,11 @@ from infra.stacks.guardrails import (
     TOPIC_GUARDRAIL_NAME,
     TOPICS_TIER,
 )
-from infra.stacks.knowledge_base import (
+from infra.stacks.web import ORIGIN_RESPONSE_TIMEOUT_SECONDS, SITE_ROOT_DOCUMENT
+from scripts import ask, grounding_probe, topic_probe
+from taug.infra import answer_models
+from taug.infra.answer_models import PRICE_DATE, answer_model
+from taug.infra.knowledge_base import (
     CHUNK_MAX_TOKENS,
     CHUNK_OVERLAP_PERCENT,
     DATA_SOURCE_NAME,
@@ -82,9 +84,7 @@ from infra.stacks.knowledge_base import (
     WORKSPACE_PREFIX,
     replacement_safe_name,
 )
-from infra.stacks.shared import REPOSITORY_ROOT, WEB_FOLDER
-from infra.stacks.web import ORIGIN_RESPONSE_TIMEOUT_SECONDS, SITE_ROOT_DOCUMENT
-from scripts import ask, grounding_probe, topic_probe
+from taug.infra.shared import REPOSITORY_ROOT, WEB_FOLDER
 
 #: The file `cdk deploy` reads its context from. The tests read the same file,
 #: so that what is synthesised here is what would be deployed.
@@ -1698,7 +1698,7 @@ DEPLOYED_KEY_FUNCTION_IDS = {
 
 
 def test_the_stack_creates_no_workspace_key(template: Template) -> None:
-    """Keys come from `python -m scripts.workspace add`; no workspace is named in the code.
+    """Keys come from `python -m taug.scripts.workspace add`; no workspace is named in the code.
     The custom resources left are the deploy drain, which waits and touches nothing, and
     the copier that puts web/ into the site bucket."""
     custom = sorted(

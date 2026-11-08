@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from scripts import utf8_output
-from scripts.aws import (
+from taug.scripts import utf8_output
+from taug.scripts.aws import (
     REGION,
     STACK_NAME,
     AwsProblem,
@@ -22,7 +22,7 @@ from scripts.aws import (
     read_stack_outputs,
     resolve,
 )
-from scripts.layout import (
+from taug.scripts.layout import (
     BUCKET_PREFIX,
     CONTENT_TYPES,
     IGNORED_TOP_LEVEL_FILES,
@@ -412,7 +412,7 @@ def format_job(job: dict[str, Any]) -> list[str]:
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.ingest",
+        prog="python -m taug.scripts.ingest",
         description="Upload a local knowledge folder to Andur and sync the knowledge base.",
     )
     parser.add_argument(

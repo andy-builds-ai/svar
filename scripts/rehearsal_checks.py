@@ -15,8 +15,8 @@ from typing import Any
 
 from app.page import ASK_PATH, SECURITY_HEADERS
 from scripts.ask import API_KEY_ENVIRONMENT_VARIABLE, read_key
-from scripts.aws import explained
 from scripts.rehearsal_runner import Context, StepFailed, format_seconds
+from taug.scripts.aws import explained
 
 #: The answer function and its log group, as the stack names them.
 FUNCTION_NAME = "andur-answer"

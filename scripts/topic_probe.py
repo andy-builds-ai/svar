@@ -1,6 +1,6 @@
 """Measure the denied topics against a fixed question set, before a deploy or after it.
 
-In a region whose stack checks the topics with a model (infra/answer_models.py, eu-central-1)
+In a region whose stack checks the topics with a model (taug/infra/answer_models.py, eu-central-1)
 the run measures that model through the function's own check (scripts/topic_model_probe.py),
 on the evaluation sets' questions as well; it creates and deletes nothing. Elsewhere the topics
 of `DENIED_TOPICS` go into a guardrail of their own,
@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Any
 
 from app.denied_topics import DENIED_TOPICS
-from infra.answer_models import region_models
 from infra.stacks.answer_function import PRICE_TOPIC_PER_1K_UNITS
 from infra.stacks.guardrails import (
     BLOCKED_INPUT_MESSAGE,
@@ -36,9 +35,10 @@ from infra.stacks.guardrails import (
     GUARDRAIL_PROFILE_REGIONS,
     TOPICS_TIER,
 )
-from scripts import utf8_output
-from scripts.aws import REGION, AwsProblem, client, error_code, explained
 from scripts.evaluate import deployed_environment, import_app
+from taug.infra.answer_models import region_models
+from taug.scripts import utf8_output
+from taug.scripts.aws import REGION, AwsProblem, client, error_code, explained
 
 QUESTIONS_FILE = Path(__file__).with_name("topic-questions.json")
 ANSWERS_FILE = Path(__file__).with_name("topic-answers.json")

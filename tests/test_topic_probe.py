@@ -14,7 +14,7 @@ from app.denied_topics import DENIED_TOPICS
 from infra.stacks.answer_function import PRICE_TOPIC_PER_1K_UNITS
 from infra.stacks.guardrails import GUARDRAIL_NAME, TOPICS_TIER
 from scripts import evaluate, topic_probe
-from scripts.aws import AwsProblem
+from taug.scripts.aws import AwsProblem
 
 GERMAN_EVALUATION = evaluate.QUESTIONS_FILE.with_name("evaluation-questions-de.json")
 

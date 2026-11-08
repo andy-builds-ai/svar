@@ -15,9 +15,9 @@ import log
 import pytest
 import sentences
 
-from infra.answer_models import ANSWER_MODELS, AnswerModel
 from infra.stacks.answer_function import ANSWER_FUNCTION_NAME
 from scripts import evaluate
+from taug.infra.answer_models import ANSWER_MODELS, AnswerModel
 from tests.test_handler import ENVIRONMENT
 
 #: The answer function's modules, as the scripts take them (`evaluate.import_app`).
@@ -42,7 +42,7 @@ def test_the_question_set_covers_every_demo_workspace_and_every_kind(
     questions: list[dict[str, Any]],
 ) -> None:
     """The demo workspaces are the folders in knowledge/. Any other workspace exists only
-    in AWS (scripts/workspace.py); its documents stay out of the repository."""
+    in AWS (taug/scripts/workspace.py); its documents stay out of the repository."""
     demo_workspaces = {path.name for path in KNOWLEDGE.iterdir() if path.is_dir()}
     assert len(questions) == 30
     assert len({q["id"] for q in questions}) == len(questions)

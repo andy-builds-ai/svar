@@ -48,14 +48,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from infra.answer_models import (
-    FRANKFURT_MODELS,
-    REGIONS,
-    AnswerModel,
-    answer_model,
-    region_answer_guardrail_uses_profile,
-    region_models,
-)
 from infra.stacks.guardrails import (
     ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
@@ -66,8 +58,6 @@ from infra.stacks.guardrails import (
     RELEVANCE_THRESHOLD,
     grounding_threshold_for,
 )
-from scripts import utf8_output
-from scripts.aws import REGION, AwsProblem, client
 from scripts.control_marks import (
     ModelTexts,
     Passages,
@@ -84,6 +74,16 @@ from scripts.evaluate import (
     stays_in_the_eu,
 )
 from scripts.topic_probe import create_probe, delete_reporting, topic_policy, wait_until_ready
+from taug.infra.answer_models import (
+    FRANKFURT_MODELS,
+    REGIONS,
+    AnswerModel,
+    answer_model,
+    region_answer_guardrail_uses_profile,
+    region_models,
+)
+from taug.scripts import utf8_output
+from taug.scripts.aws import REGION, AwsProblem, client
 
 QUESTIONS_FILE = Path(__file__).with_name("evaluation-questions-control.json")
 
@@ -100,7 +100,7 @@ PROBE_NAMES = {
 }
 
 #: How the topics are checked: a probe guardrail in the Classic tier without a profile, one in
-#: the Standard tier with the EU profile, or the region's topic model (infra/answer_models.py),
+#: the Standard tier with the EU profile, or the region's topic model (taug/infra/answer_models.py),
 #: as the stack in that region checks them, with no topic probe guardrail at all.
 TIERS = ("classic", "standard", "model")
 
@@ -324,7 +324,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     if args.topics_tier == "model" and not (
         REGIONS.get(args.region) and REGIONS[args.region].topic_model_id
     ):
-        parser.error(f"{args.region} has no topic model in infra/answer_models.py")
+        parser.error(f"{args.region} has no topic model in taug/infra/answer_models.py")
     return args
 
 
@@ -370,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {outside_regions} are not EU regions", file=sys.stderr)
         return 2
     if args.region not in REGIONS:
-        print(f"error: {args.region} has no models in infra/answer_models.py", file=sys.stderr)
+        print(f"error: {args.region} has no models in taug/infra/answer_models.py", file=sys.stderr)
         return 2
     known = region_models(args.region).models
     models = [m for m in known if not args.model or m.name in args.model]

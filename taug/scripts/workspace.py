@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.plans import DEMO, PLANS, plan_named
-from scripts import utf8_output
-from scripts.aws import (
+from taug.scripts import utf8_output
+from taug.scripts.aws import (
     REGION,
     STACK_NAME,
     AwsProblem,
@@ -28,8 +28,14 @@ from scripts.aws import (
     read_stack_outputs,
     resolve,
 )
-from scripts.ingest import delete_keys, format_job, job_succeeded, remote_keys, run_ingestion_job
-from scripts.layout import BUCKET_PREFIX, MAX_WORKSPACE_CHARACTERS, WORKSPACE_NAME
+from taug.scripts.ingest import (
+    delete_keys,
+    format_job,
+    job_succeeded,
+    remote_keys,
+    run_ingestion_job,
+)
+from taug.scripts.layout import BUCKET_PREFIX, MAX_WORKSPACE_CHARACTERS, WORKSPACE_NAME
 
 #: 32 random bytes, written as 43 URL-safe characters: as strong as the keys the
 #: stack generated until 2026-10-01.
@@ -392,7 +398,7 @@ KEY_CACHE_MINUTES = 5
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.workspace",
+        prog="python -m taug.scripts.workspace",
         description="Add a workspace's key, change its plan, or remove a workspace from Andur.",
     )
     parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
@@ -474,7 +480,7 @@ def command(args: argparse.Namespace, *words: str) -> str:
         options += ["--region", args.region]
     if args.stack_name != STACK_NAME:
         options += ["--stack-name", args.stack_name]
-    return " ".join(["python -m scripts.workspace", *options, *words])
+    return " ".join(["python -m taug.scripts.workspace", *options, *words])
 
 
 def run_plan(args: argparse.Namespace, settings: Mapping[str, str], connect: Any) -> int:

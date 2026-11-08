@@ -1,4 +1,4 @@
-"""The layout contract of a documents folder (docs/metadata.md), and what each document
+"""The layout contract of a documents folder (taug/docs/metadata.md), and what each document
 becomes in the documents bucket: its keys, its sections, its text as UTF-8."""
 
 import codecs

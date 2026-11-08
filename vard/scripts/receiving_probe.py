@@ -9,8 +9,8 @@ tool, the invalid tool calls, the steps, the cost and the time; with ``--repeat`
 that many times. The models are ranked by the cases passed, then by the discrepancies missed, then
 by the cost. No guardrail, no knowledge base:
 only the model, in ``--region`` or behind an EU profile, with the models and prices
-`infra/answer_models.py` gives that region. ``--max-usd`` is a hard limit: a call that could take
-the run past it is not made.
+`taug/infra/answer_models.py` gives that region. ``--max-usd`` is a hard limit: a call that could
+take the run past it is not made.
 """
 
 import argparse
@@ -25,10 +25,10 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from infra.answer_models import FRANKFURT_MODELS, AnswerModel, region_models
-from scripts import utf8_output
-from scripts.aws import AwsProblem, error_code, explain, is_login_problem
 from scripts.evaluate import stays_in_the_eu
+from taug.infra.answer_models import FRANKFURT_MODELS, AnswerModel, region_models
+from taug.scripts import utf8_output
+from taug.scripts.aws import AwsProblem, error_code, explain, is_login_problem
 from vard import engine, receiving
 from vard.scripts.tool_probe import READ_SECONDS, REFUSED_AS_SENT, model_client
 

@@ -11,8 +11,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from scripts import utf8_output
-from scripts.aws import (
+from taug.scripts import utf8_output
+from taug.scripts.aws import (
     REGION,
     STACK_NAME,
     AwsProblem,
@@ -50,7 +50,7 @@ def read_key(ssm: Any, key_path: str, workspace: str) -> str:
         if error_code(problem.__cause__) == "ParameterNotFound":
             raise AwsProblem(
                 f"There is no key {name}. Is {workspace!r} spelled right? A new workspace "
-                f"gets its key with `python -m scripts.workspace add {workspace}`."
+                f"gets its key with `python -m taug.scripts.workspace add {workspace}`."
             ) from problem.__cause__
         raise
     return response["Parameter"]["Value"]

@@ -16,9 +16,9 @@ import aws_cdk as cdk
 # the same name, `infra.stacks.andur_stack`.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from infra.answer_models import DEFAULT_REGION, region_models  # noqa: E402
 from infra.stacks.andur_stack import AndurStack  # noqa: E402
 from infra.stacks.answer_function import ANSWER_MAX_CONCURRENCY  # noqa: E402
+from taug.infra.answer_models import DEFAULT_REGION, region_models  # noqa: E402
 
 app = cdk.App()
 

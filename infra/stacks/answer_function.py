@@ -17,13 +17,13 @@ from aws_cdk import (
 )
 
 from app.page import PAGE_FOLDER_VARIABLE
-from infra.answer_models import (
+from infra.stacks.guardrails import GUARDRAIL_PROFILE_REGIONS, guardrail_profile_arn
+from taug.infra.answer_models import (
     DEFAULT_REGION,
     answer_model,
     region_models,
 )
-from infra.stacks.guardrails import GUARDRAIL_PROFILE_REGIONS, guardrail_profile_arn
-from infra.stacks.shared import (
+from taug.infra.shared import (
     ASSET_EXCLUDES,
     LAMBDA_RUNTIME,
     REPOSITORY_ROOT,
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 #: A model id runs in the stack's region; an ``eu.`` inference profile id runs
 #: in the EU regions that profile routes to, and nowhere else. Its token prices
-#: come from infra/answer_models.py, like the model of each region.
+#: come from taug/infra/answer_models.py, like the model of each region.
 ANSWER_MODEL_ID = region_models(DEFAULT_REGION).answer_model_id
 
 EU_PROFILE_PREFIX = "eu."
@@ -48,7 +48,7 @@ NUMBER_OF_RESULTS = 10
 
 #: USD per 1,000 tokens or guardrail text units, standard tier: the AWS Price
 #: List API behind aws.amazon.com/bedrock/pricing, read on the region's price
-#: date in infra/answer_models.py. The token prices here are the default
+#: date in taug/infra/answer_models.py. The token prices here are the default
 #: model's; a stack takes its own model's from its region's table. The three
 #: guardrail prices are the same in eu-west-1 and eu-central-1 (price lists of
 #: 28.09.2026 and 06.10.2026).
@@ -59,7 +59,7 @@ PRICE_PII_PER_1K_UNITS = "0.10"
 PRICE_GROUNDING_PER_1K_UNITS = "0.10"
 
 #: Where the workspace keys live: ``<path>/<workspace>``, one SecureString each.
-#: The stack creates none; `python -m scripts.workspace` adds and removes them.
+#: The stack creates none; `python -m taug.scripts.workspace` adds and removes them.
 API_KEY_PARAMETER_PATH = "/andur/api-keys"
 
 BUDGET_TABLE_NAME = "andur-key-budgets"
@@ -106,7 +106,7 @@ PAGE_LAYER_FOLDER = "/opt"
 def create_key_retirer(stack: "AndurStack") -> cr.Provider:
     """The function that answers the Delete of the key resources this stack used to have.
 
-    It deletes nothing (infra/api_keys/handler.py), and it has no permission on Parameter
+    It deletes nothing (taug/infra/api_keys/handler.py), and it has no permission on Parameter
     Store either: the removed resources go in the deploy's cleanup phase, after this role
     and this function are updated, so the Delete finds neither code nor a right to
     delete a key. The construct ids are the old ones, so the deploy updates these
@@ -132,7 +132,7 @@ def create_key_retirer(stack: "AndurStack") -> cr.Provider:
         runtime=LAMBDA_RUNTIME,
         architecture=lambda_.Architecture.ARM_64,
         code=lambda_.Code.from_asset(
-            str(REPOSITORY_ROOT / "infra" / "api_keys"), exclude=ASSET_EXCLUDES
+            str(REPOSITORY_ROOT / "taug" / "infra" / "api_keys"), exclude=ASSET_EXCLUDES
         ),
         handler="handler.on_event",
         timeout=Duration.minutes(1),

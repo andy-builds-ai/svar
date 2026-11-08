@@ -31,12 +31,7 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from infra.answer_models import REGIONS, answer_model
-from scripts import utf8_output
-from scripts.aws import STACK_NAME, client
 from scripts.control_eval import QUESTIONS_FILE as CONTROL_QUESTIONS
-from scripts.ingest import discover
-from scripts.layout import SIDECAR_SUFFIX, document_of, upload_items
 from scripts.rehearsal_checks import (
     check_address_region,
     check_deploy_time,
@@ -59,13 +54,18 @@ from scripts.rehearsal_runner import (
     select,
     summary_lines,
 )
+from taug.infra.answer_models import REGIONS, answer_model
+from taug.scripts import utf8_output
+from taug.scripts.aws import STACK_NAME, client
+from taug.scripts.ingest import discover
+from taug.scripts.layout import SIDECAR_SUFFIX, document_of, upload_items
 
 #: The regions whose function is its own address. Behind CloudFront the address checks
 #: cannot pass: its addresses are edge locations worldwide.
 RUN_REGIONS = tuple(region for region, models in REGIONS.items() if not models.behind_cloudfront)
 DEFAULT_REGION = "eu-central-1"
 
-#: The folder `python -m scripts.ingest` uploads without ``--source``: the demo workspaces.
+#: The folder `python -m taug.scripts.ingest` uploads without ``--source``: the demo workspaces.
 DEMO_SOURCE = REPOSITORY / "knowledge"
 
 
@@ -216,13 +216,13 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "documents-check",
             "setup",
             "The documents checked, no AWS",
-            command=python("scripts.ingest", "--check", "--source", source, "--workspace", w),
+            command=python("taug.scripts.ingest", "--check", "--source", source, "--workspace", w),
         ),
         Step(
             "key",
             "setup",
             "Workspace and its key",
-            command=python("scripts.workspace", *region, "add", w, *plan),
+            command=python("taug.scripts.workspace", *region, "add", w, *plan),
             secret_stdout=True,
         ),
         Step(
@@ -236,13 +236,13 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "documents",
             "setup",
             "The documents uploaded and indexed",
-            command=python("scripts.ingest", "--source", source, "--workspace", w, *region),
+            command=python("taug.scripts.ingest", "--source", source, "--workspace", w, *region),
         ),
         Step(
             "search",
             "setup",
             "A search in the new workspace",
-            command=python("scripts.retrieve", args.question, "--workspace", w, *region),
+            command=python("taug.scripts.retrieve", args.question, "--workspace", w, *region),
             reads=hits_only_in_workspace,
         ),
         Step(
@@ -266,14 +266,14 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "demo-documents",
             "apart",
             "The demo workspaces' documents (the measurements need them)",
-            command=python("scripts.ingest", *region),
+            command=python("taug.scripts.ingest", *region),
         ),
         Step(
             "search-apart",
             "apart",
             "A search in another workspace finds nothing of the new one",
             command=python(
-                "scripts.retrieve", args.question, "--workspace", args.other_workspace, *region
+                "taug.scripts.retrieve", args.question, "--workspace", args.other_workspace, *region
             ),
             reads=no_hits_of_workspace,
         ),

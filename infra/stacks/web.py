@@ -19,7 +19,7 @@ from app.page import (
     HSTS_MAX_AGE_DAYS,
     ROOT_DOCUMENT,
 )
-from infra.stacks.shared import ASSET_EXCLUDES, WEB_FOLDER, create_log_group
+from taug.infra.shared import ASSET_EXCLUDES, WEB_FOLDER, create_log_group
 
 if TYPE_CHECKING:
     from infra.stacks.andur_stack import AndurStack

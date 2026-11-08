@@ -4,8 +4,8 @@ import argparse
 import sys
 from typing import Any
 
-from scripts import utf8_output
-from scripts.aws import (
+from taug.scripts import utf8_output
+from taug.scripts.aws import (
     REGION,
     STACK_NAME,
     AwsProblem,
@@ -14,7 +14,7 @@ from scripts.aws import (
     read_stack_outputs,
     resolve,
 )
-from scripts.layout import LAYERS
+from taug.scripts.layout import LAYERS
 
 EXCERPT_CHARACTERS = 160
 
@@ -63,7 +63,7 @@ def retrieve(
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.retrieve",
+        prog="python -m taug.scripts.retrieve",
         description="Retrieve chunks for a question from one Andur workspace.",
     )
     parser.add_argument("question")

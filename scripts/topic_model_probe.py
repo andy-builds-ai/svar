@@ -18,8 +18,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from infra.answer_models import answer_model
-from scripts.aws import error_code
 from scripts.topic_probe import (
     TEXT_FIELDS,
     THROTTLE_ATTEMPTS,
@@ -27,6 +25,8 @@ from scripts.topic_probe import (
     THROTTLE_WAIT_SECONDS,
     judged_text,
 )
+from taug.infra.answer_models import answer_model
+from taug.scripts.aws import error_code
 
 #: The evaluation sets whose questions the topic model is measured on as well: an advice
 #: question is to be refused, every other kind answered.
@@ -220,9 +220,9 @@ def main(args: Any, topic_model_id: str) -> int:
     the topic sets and the evaluation sets' questions, ``args.repeat`` times each."""
     from types import SimpleNamespace
 
-    from scripts.aws import AwsProblem
     from scripts.evaluate import deployed_environment, import_app
     from scripts.topic_probe import load_probe_answers, load_probe_questions, report, summarise
+    from taug.scripts.aws import AwsProblem
 
     app = import_app()
     sets = {

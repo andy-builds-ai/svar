@@ -23,10 +23,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from infra.answer_models import ANSWER_MODELS, PRICE_DATE, AnswerModel, region_models
-from scripts import utf8_output
-from scripts.aws import REGION, AwsProblem, client, explained
-from scripts.layout import document_of
+from taug.infra.answer_models import ANSWER_MODELS, PRICE_DATE, AnswerModel, region_models
+from taug.scripts import utf8_output
+from taug.scripts.aws import REGION, AwsProblem, client, explained
+from taug.scripts.layout import document_of
 
 #: app/ holds the handler under the plain names Lambda imports, `handler` and `aws`.
 APP_FOLDER = Path(__file__).resolve().parents[1] / "app"

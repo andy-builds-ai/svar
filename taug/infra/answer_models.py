@@ -129,7 +129,8 @@ def region_models(region: str) -> RegionModels:
     """The table of a region; a region without one is refused."""
     if region not in REGIONS:
         raise KeyError(
-            f"{region} has no models in infra/answer_models.py; Andur runs in {', '.join(REGIONS)}."
+            f"{region} has no models in taug/infra/answer_models.py; "
+            f"Andur runs in {', '.join(REGIONS)}."
         )
     return REGIONS[region]
 
@@ -140,5 +141,5 @@ def answer_model(model_id: str, region: str = DEFAULT_REGION) -> AnswerModel:
         if model.model_id == model_id:
             return model
     raise KeyError(
-        f"{model_id} has no price for {region} in infra/answer_models.py; add it there first."
+        f"{model_id} has no price for {region} in taug/infra/answer_models.py; add it there first."
     )

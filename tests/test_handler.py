@@ -460,7 +460,7 @@ class ConditionReader:
     through. Read from the text, the same change turns tests red.
 
     Enough of the grammar for the conditions this handler and
-    scripts/workspace.py send: ``AND``, ``OR``, brackets, ``attribute_exists``
+    taug/scripts/workspace.py send: ``AND``, ``OR``, brackets, ``attribute_exists``
     and ``attribute_not_exists``, and a comparison between two operands, each
     an attribute name or a ``:`` placeholder. DynamoDB's rule for a missing
     attribute, or one of another type, is kept: it does not raise, it makes the
@@ -820,7 +820,7 @@ def test_key_path_has_a_leading_slash_and_no_trailing_one(path: str) -> None:
 
 def test_workspace_rule_and_layers_match_the_fill_script() -> None:
     """The handler cannot import scripts/ (Lambda gets app/ only), so a test keeps them equal."""
-    layout = pytest.importorskip("scripts.layout")
+    layout = pytest.importorskip("taug.scripts.layout")
 
     assert intake.WORKSPACE_NAME.pattern == layout.WORKSPACE_NAME.pattern
     assert citations.LAYERS == layout.LAYERS
@@ -1975,7 +1975,7 @@ def german(moment: str) -> int:
 def key_on_plan(
     aws: dict[str, Any], plan: str = "betrieb", key: str = KEYS["quillmoor"], **counts: int
 ) -> dict[str, Any]:
-    """Preset the key's item the way `python -m scripts.workspace plan` writes it, with
+    """Preset the key's item the way `python -m taug.scripts.workspace plan` writes it, with
     counts already spent, such as ``day_2026_10_01=599`` for ``day_2026-10-01``."""
     item: dict[str, Any] = {
         budget.BUDGET_KEY_ATTRIBUTE: {"S": budget.key_hash(key)},

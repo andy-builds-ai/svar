@@ -12,9 +12,10 @@ from typing import Any
 import pytest
 
 from app.page import SECURITY_HEADERS
-from scripts import ingest, layout, rehearsal, rehearsal_checks, rehearsal_runner
+from scripts import rehearsal, rehearsal_checks, rehearsal_runner
 from scripts.rehearsal_runner import Context, Result, Runner, Step, StepFailed
-from tests.test_ingest import sidecar_for
+from taug.scripts import ingest, layout
+from taug.tests.test_ingest import sidecar_for
 
 REGION = "eu-central-1"
 
