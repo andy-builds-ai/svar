@@ -1,8 +1,8 @@
 {
   "app": "python infra/app.py",
   "watch": {
-    "include": ["infra/**"],
-    "exclude": ["README.md", "cdk*.json", ".venv/**", "**/__pycache__", "tests/**"]
+    "include": ["infra/**", "taug/**", "svar/**"],
+    "exclude": ["README.md", "cdk*.json", ".venv/**", "**/__pycache__", "tests/**", "taug/tests/**", "svar/tests/**"]
   },
   "context": {
     "@aws-cdk/aws-iam:minimizePolicies": true,
