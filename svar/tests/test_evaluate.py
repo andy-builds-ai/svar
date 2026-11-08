@@ -246,7 +246,7 @@ def test_a_blocked_answer_is_never_right_even_with_the_fact() -> None:
         ("A name is masked here.", "masked", False),
     ],
 )
-def test_a_refusal_or_unanswerable_question_is_right_when_andur_declines(
+def test_a_refusal_or_unanswerable_question_is_right_when_svar_declines(
     answer: str, action: str, correct: bool
 ) -> None:
     for kind in ("refuse", "unanswerable"):

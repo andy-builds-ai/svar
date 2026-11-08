@@ -129,7 +129,7 @@ def guardrail_profile_arn(stack: "AndurStack", region: str) -> str:
     if not Token.is_unresolved(stack.region) and stack.region not in GUARDRAIL_PROFILE_REGIONS:
         raise ValueError(
             f"{stack.region} is not a source region of {GUARDRAIL_PROFILE_ID}; "
-            f"Andur's guardrail stays in {', '.join(GUARDRAIL_PROFILE_REGIONS)}."
+            f"Svar's guardrails stay in {', '.join(GUARDRAIL_PROFILE_REGIONS)}."
         )
     return stack.format_arn(
         service="bedrock",
