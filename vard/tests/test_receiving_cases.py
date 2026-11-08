@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from scripts import receiving_probe as probe
 from vard import receiving
+from vard.scripts import receiving_probe as probe
 
 #: The cases of the first build; they carry no group and no recipient, and stay as they were.
 FIRST = {f"{firm}{n}" for firm in "pk" for n in range(1, 7)}

@@ -29,8 +29,8 @@ from infra.answer_models import FRANKFURT_MODELS, AnswerModel, region_models
 from scripts import utf8_output
 from scripts.aws import AwsProblem, error_code, explain, is_login_problem
 from scripts.evaluate import stays_in_the_eu
-from scripts.tool_probe import READ_SECONDS, REFUSED_AS_SENT, model_client
 from vard import engine, receiving
+from vard.scripts.tool_probe import READ_SECONDS, REFUSED_AS_SENT, model_client
 
 CASES_FILE = Path(__file__).with_name("receiving-cases.json")
 
@@ -526,7 +526,7 @@ def usd(text: str) -> Decimal:
 def main(argv: list[str] | None = None) -> int:
     utf8_output()
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.receiving_probe",
+        prog="python -m vard.scripts.receiving_probe",
         description="Measure how cleanly each Frankfurt model checks delivery notes with tools.",
     )
     parser.add_argument("--model", action="append", help="a model name of the region's table")

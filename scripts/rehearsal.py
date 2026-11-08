@@ -303,7 +303,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "tools",
             "measure",
             "tool_probe, the answer model",
-            command=python("scripts.tool_probe", *model, *out("tools.json"), *region),
+            command=python("vard.scripts.tool_probe", *model, *out("tools.json"), *region),
             group="topics and grounding",
             lane="answer model",
         ),

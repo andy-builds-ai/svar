@@ -266,7 +266,7 @@ def summarise(model: AnswerModel, rows: Sequence[Mapping[str, Any]]) -> dict[str
 def main(argv: list[str] | None = None) -> int:
     utf8_output()
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.tool_probe",
+        prog="python -m vard.scripts.tool_probe",
         description="Check that answer models call a tool cleanly and ask instead of guessing.",
     )
     parser.add_argument("--model", action="append", help="a model name from MODELS")

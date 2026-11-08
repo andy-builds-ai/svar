@@ -2,7 +2,7 @@
 
 Vard reads both, compares them position by position and reports to a person, who decides; he
 books nothing, and there is no tool to book with. Where the documents come from is handed in:
-`scripts/receiving_probe.py` reads them from its case file, a later Vard from the business's
+`vard/scripts/receiving_probe.py` reads them from its case file, a later Vard from the business's
 own system.
 """
 

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts import tool_probe
+from vard.scripts import tool_probe
 
 
 def reply(text: str = "", *calls: dict[str, Any]) -> dict[str, Any]:

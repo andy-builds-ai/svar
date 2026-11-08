@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from scripts import receiving_probe as probe
 from vard import engine
+from vard.scripts import receiving_probe as probe
 
 NOTE = re.compile(r"LS-[A-Z]+-\d+")
 
