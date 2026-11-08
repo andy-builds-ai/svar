@@ -17,15 +17,18 @@ from svar.infra.answer_function import (
     PAGE_LAYER_FOLDER,
     PAGE_LOAD_CONCURRENCY,
 )
+from svar.infra.answer_prompts import (
+    DEFAULT_PROMPT,
+    PROMPT_EACH_PART,
+    PROMPT_SENTENCE_FIRST,
+    prompt_of,
+)
 from svar.infra.guardrails import GUARDRAIL_PROFILE_REGIONS
 from taug.infra.answer_models import (
     ANSWER_MODELS,
-    DEFAULT_PROMPT,
     DEFAULT_REGION,
     FRANKFURT_MODELS,
     FRANKFURT_PRICE_DATE,
-    PROMPT_EACH_PART,
-    PROMPT_SENTENCE_FIRST,
     REGIONS,
     answer_guardrail_uses_profile,
     answer_model,
@@ -475,11 +478,11 @@ def test_frankfurt_checks_grounding_at_its_own_threshold_ireland_at_the_default(
 
 
 def test_the_table_and_the_function_name_the_same_prompt_wordings() -> None:
-    """infra/ and app/ share no code, so each lists the names itself."""
+    """The stack and the function (svar/app/) share no code, so each lists the names itself."""
     assert set(prompts.PROMPTS) == {PROMPT_EACH_PART, PROMPT_SENTENCE_FIRST}
     assert prompts.DEFAULT_PROMPT == DEFAULT_PROMPT == PROMPT_EACH_PART
     for model in (*ANSWER_MODELS, *FRANKFURT_MODELS):
-        assert model.prompt in prompts.PROMPTS, model.name
+        assert prompt_of(model) in prompts.PROMPTS, model.name
 
 
 def test_the_prompt_belongs_to_the_model_nova_pro_in_both_tables_qwen_in_frankfurt() -> None:
@@ -487,13 +490,13 @@ def test_the_prompt_belongs_to_the_model_nova_pro_in_both_tables_qwen_in_frankfu
     `each-part` (14.10.2026). Qwen3 235B: c32 right 20 of 20 with `each-part` (07.10.2026).
     The other models keep the wording they have run with since 07.10.2026."""
     for table in (ANSWER_MODELS, FRANKFURT_MODELS):
-        by_name = {model.name: model.prompt for model in table}
+        by_name = {model.name: prompt_of(model) for model in table}
         assert by_name["Nova Pro"] == PROMPT_SENTENCE_FIRST
         assert {p for name, p in by_name.items() if name != "Nova Pro"} == {PROMPT_EACH_PART}
     frankfurt = REGIONS["eu-central-1"]
-    assert answer_model(frankfurt.answer_model_id, "eu-central-1").prompt == PROMPT_EACH_PART
+    assert prompt_of(answer_model(frankfurt.answer_model_id, "eu-central-1")) == PROMPT_EACH_PART
     ireland = REGIONS["eu-west-1"]
-    assert answer_model(ireland.answer_model_id, "eu-west-1").prompt == PROMPT_SENTENCE_FIRST
+    assert prompt_of(answer_model(ireland.answer_model_id, "eu-west-1")) == PROMPT_SENTENCE_FIRST
 
 
 @pytest.mark.parametrize(("region", "expected"), [("eu-central-1", 0.8), ("eu-west-1", 0.7)])

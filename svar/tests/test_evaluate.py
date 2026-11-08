@@ -257,7 +257,8 @@ def test_a_refusal_or_unanswerable_question_is_right_when_andur_declines(
 def test_settings_for_a_model_change_only_the_model_its_prompt_and_its_token_prices() -> None:
     prices = config.Prices(*(Decimal("0.1") for _ in range(5)))
     base = config.Settings(*(["x"] * 15), prices=prices, price_date="2026-01-01")
-    model = AnswerModel("M", "eu.m", "0.001", "0.002", "sentence-first")
+    # The wording comes with the model's name (svar/infra/answer_prompts.py).
+    model = AnswerModel("Nova Pro", "eu.m", "0.001", "0.002")
     settings = evaluate.settings_for(base, model)
     assert settings.model_id == "eu.m"
     assert base.answer_prompt == "each-part"

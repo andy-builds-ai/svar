@@ -13,6 +13,7 @@ import retrieval
 import sentences
 
 from svar.app.denied_topics import DENIED_TOPICS
+from svar.infra.answer_prompts import prompt_of
 from svar.infra.guardrails import GUARDRAIL_PROFILE_ID
 from svar.scripts import control_eval, control_marks, evaluate
 from svar.tests.test_handler import ENVIRONMENT
@@ -480,7 +481,7 @@ def test_without_a_topic_probe_the_regions_topic_model_checks_at_its_price() -> 
         base, model, "eu-central-1", {"answer": "gr-a", "excerpt": "gr-e"}
     )
     assert settings.topic_model_id == "openai.gpt-oss-20b-1:0"
-    assert settings.answer_prompt == model.prompt == "each-part"
+    assert settings.answer_prompt == prompt_of(model) == "each-part"
     assert (settings.topic_guardrail_id, settings.topic_guardrail_version) == (None, None)
     assert settings.prices.topic_model_input_tokens == Decimal("0.00009")
     assert settings.prices.topic_model_output_tokens == Decimal("0.0004")
@@ -496,7 +497,7 @@ def test_control_eval_asks_nova_pro_with_the_prompt_of_its_table_row() -> None:
     settings = control_eval.settings_for(
         base, nova_pro, "eu-west-1", {"answer": "gr-a", "topic": "gr-t", "excerpt": "gr-e"}
     )
-    assert settings.answer_prompt == nova_pro.prompt == "sentence-first"
+    assert settings.answer_prompt == prompt_of(nova_pro) == "sentence-first"
 
 
 def test_the_frankfurt_models_stay_in_the_eu_and_leave_the_stack_table_alone() -> None:

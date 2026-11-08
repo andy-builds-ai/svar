@@ -3,7 +3,7 @@
 The questions run through `answer_question` in svar/app/answering.py — retrieval, the
 prompt, `converse` with the guardrail, the excerpt guardrail and the cost line
 — with the deployed function's own settings. Only the model, its token prices
-and the wording of its system prompt (the `prompt` of its table row) change per
+and the wording of its system prompt (`prompt_of` in svar/infra/answer_prompts.py) change per
 model; the guardrail prices stay the deployed ones. No key
 and no budget are involved, so a run costs model and guardrail calls only.
 """
@@ -23,6 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from svar.infra.answer_prompts import prompt_of
 from taug.infra.answer_models import ANSWER_MODELS, PRICE_DATE, AnswerModel, region_models
 from taug.scripts import utf8_output
 from taug.scripts.aws import REGION, AwsProblem, client, explained
@@ -150,7 +151,7 @@ def score(question: Mapping[str, Any], body: Mapping[str, Any], app: Any) -> dic
 
 def settings_for(base: Any, model: AnswerModel, price_date: str = PRICE_DATE) -> Any:
     """The deployed settings with this model, its token prices read on ``price_date`` and the
-    wording of the system prompt of its table row."""
+    wording of the system prompt it answers with (svar/infra/answer_prompts.py)."""
     prices = dataclasses.replace(
         base.prices,
         input_tokens=Decimal(model.input_per_1k),
@@ -159,7 +160,7 @@ def settings_for(base: Any, model: AnswerModel, price_date: str = PRICE_DATE) ->
     return dataclasses.replace(
         base,
         model_id=model.model_id,
-        answer_prompt=model.prompt,
+        answer_prompt=prompt_of(model),
         prices=prices,
         price_date=price_date,
     )

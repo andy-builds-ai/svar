@@ -48,6 +48,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from svar.infra.answer_prompts import prompt_of
 from svar.infra.guardrails import (
     ANSWER_GUARDRAIL_READS_QUESTION_TOPICS,
     BLOCKED_INPUT_MESSAGE,
@@ -229,7 +230,7 @@ def settings_for(base: Any, model: AnswerModel, region: str, probes: Mapping[str
     return dataclasses.replace(
         base,
         model_id=model.model_id,
-        answer_prompt=model.prompt,
+        answer_prompt=prompt_of(model),
         region=region,
         prices=prices,
         price_date=region_models(region).price_date,

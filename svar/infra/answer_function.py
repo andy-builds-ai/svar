@@ -17,6 +17,7 @@ from aws_cdk import (
 )
 
 from svar.app.page import PAGE_FOLDER_VARIABLE
+from svar.infra.answer_prompts import prompt_of
 from svar.infra.guardrails import GUARDRAIL_PROFILE_REGIONS, guardrail_profile_arn
 from svar.infra.web import WEB_FOLDER
 from taug.infra.answer_models import (
@@ -302,7 +303,7 @@ def create_answer_function(
             **({} if page_layer is None else {PAGE_FOLDER_VARIABLE: PAGE_LAYER_FOLDER}),
             "KNOWLEDGE_BASE_ID": knowledge_base.attr_knowledge_base_id,
             "MODEL_ID": stack.answer_model_id,
-            "ANSWER_PROMPT": stack.answer_model.prompt,
+            "ANSWER_PROMPT": prompt_of(stack.answer_model),
             "REGION": Aws.REGION,
             "NUMBER_OF_RESULTS": str(NUMBER_OF_RESULTS),
             "API_KEY_PARAMETER_PATH": API_KEY_PARAMETER_PATH,
