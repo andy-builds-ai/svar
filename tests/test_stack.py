@@ -37,7 +37,6 @@ from svar.infra.answer_function import (
     ANSWER_MEMORY_MB,
     ANSWER_MODEL_ID,
     ANSWER_TIMEOUT_SECONDS,
-    API_KEY_PARAMETER_PATH,
     BUDGET_KEY_ATTRIBUTE,
     BUDGET_TABLE_NAME,
     BUDGET_TTL_ATTRIBUTE,
@@ -69,6 +68,7 @@ from svar.infra.web import ORIGIN_RESPONSE_TIMEOUT_SECONDS, SITE_ROOT_DOCUMENT, 
 from svar.scripts import ask, grounding_probe, topic_probe
 from taug.infra import answer_models
 from taug.infra.answer_models import PRICE_DATE, answer_model
+from taug.infra.keys import API_KEY_PARAMETER_PATH
 from taug.infra.knowledge_base import (
     CHUNK_MAX_TOKENS,
     CHUNK_OVERLAP_PERCENT,

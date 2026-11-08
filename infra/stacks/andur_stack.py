@@ -16,13 +16,11 @@ from svar.infra.answer_function import (
     ANSWER_FUNCTION_NAME,
     ANSWER_MAX_CONCURRENCY,
     ANSWER_MODEL_ID,
-    API_KEY_PARAMETER_PATH,
     create_answer_function,
     create_answer_role,
     create_budget_table,
     create_deploy_drain,
     create_function_url,
-    create_key_retirer,
     create_page_layer,
 )
 from svar.infra.guardrails import (
@@ -42,6 +40,7 @@ from taug.infra.answer_models import (
     answer_model,
     region_models,
 )
+from taug.infra.keys import API_KEY_PARAMETER_PATH, create_key_retirer
 from taug.infra.knowledge_base import (
     WORKSPACE_PREFIX,
     create_data_source,
