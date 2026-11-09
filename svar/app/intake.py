@@ -2,20 +2,15 @@
 
 import base64
 import json
-import re
 from collections.abc import Mapping
 from typing import Any
 
 import errors
 import sentences
 
-WORKSPACE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\Z")
-
-MAX_WORKSPACE_CHARACTERS = 64
+from taug.access.workspaces import KEY_HEADER, MAX_WORKSPACE_CHARACTERS, WORKSPACE_NAME
 
 MAX_QUESTION_CHARACTERS = 1000
-
-KEY_HEADER = "X-Andur-Key"
 
 
 def require_post(event: Mapping[str, Any]) -> None:

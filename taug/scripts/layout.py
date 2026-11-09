@@ -9,15 +9,16 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from taug.access.workspaces import (  # noqa: F401  (the scripts take them from here)
+    LAYERS,
+    MAX_WORKSPACE_CHARACTERS,
+    WORKSPACE_NAME,
+)
+
 BUCKET_PREFIX = "workspaces/"
 
-LAYERS = ("human", "agent", "inbox")
 SIDECAR_SUFFIX = ".metadata.json"
 REQUIRED_KEYS = ("workspace", "layer", "source", "license")
-
-WORKSPACE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\Z")
-
-MAX_WORKSPACE_CHARACTERS = 64
 
 CONTENT_TYPES = {
     ".md": "text/markdown; charset=utf-8",

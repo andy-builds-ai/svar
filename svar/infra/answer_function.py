@@ -1,12 +1,19 @@
 """The answer function: its role, its settings, its address, the key budgets it counts
 against, and what a deploy needs around it."""
 
-from typing import TYPE_CHECKING
+import shutil
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+import jsii
 from aws_cdk import (
+    AssetHashType,
     Aws,
+    BundlingOptions,
     CustomResource,
+    DockerImage,
     Duration,
+    ILocalBundling,
     RemovalPolicy,
     aws_bedrock as bedrock,
     aws_dynamodb as dynamodb,
@@ -47,6 +54,18 @@ EU_PROFILE_PREFIX = "eu."
 
 #: How many passages retrieve hands to the model per question.
 NUMBER_OF_RESULTS = 10
+
+#: What the answer function's package holds, from the repository root to its place in the
+#: package: Svar's code at the top, where Lambda imports ``handler``, and Taug's library under
+#: the name the tests import it by, ``taug.access``.
+ANSWER_PACKAGE = (
+    ("svar/app", "."),
+    ("taug/__init__.py", "taug/__init__.py"),
+    ("taug/access", "taug/access"),
+)
+
+#: `ASSET_EXCLUDES` as names: the package leaves these out wherever they are.
+PACKAGE_EXCLUDES = tuple(pattern.removeprefix("**/") for pattern in ASSET_EXCLUDES)
 
 #: USD per 1,000 tokens or guardrail text units, standard tier: the AWS Price
 #: List API behind aws.amazon.com/bedrock/pricing, read on the region's price
@@ -258,6 +277,49 @@ def create_answer_role(
     )
 
 
+def copy_answer_package(output_dir: Path, root: Path = REPOSITORY_ROOT) -> None:
+    """Copy `ANSWER_PACKAGE` from ``root`` into ``output_dir``, without `PACKAGE_EXCLUDES`."""
+    ignore = shutil.ignore_patterns(*PACKAGE_EXCLUDES)
+    for source, target in ANSWER_PACKAGE:
+        source_path = root / source
+        target_path = output_dir / target
+        if source_path.is_dir():
+            shutil.copytree(source_path, target_path, ignore=ignore, dirs_exist_ok=True)
+        else:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_path, target_path)
+
+
+@jsii.implements(ILocalBundling)
+class AnswerPackage:
+    """Bundles the answer function on this machine by copying `ANSWER_PACKAGE`; no Docker."""
+
+    def __init__(self, root: Path = REPOSITORY_ROOT) -> None:
+        self.root = root
+
+    def try_bundle(self, output_dir: str, *options: Any, **named: Any) -> bool:
+        # jsii hands the bundling options over as one positional argument; nothing here
+        # needs them.
+        copy_answer_package(Path(output_dir), self.root)
+        return True
+
+
+def answer_code(root: Path = REPOSITORY_ROOT) -> lambda_.Code:
+    """The answer function's package. Its hash is the hash of the package itself
+    (`AssetHashType.OUTPUT`): hashed by its source folder, svar/app, a change in
+    taug/access/ alone would never reach Lambda. The CLI bundles every stack for
+    synth, diff, deploy and refactor unless ``--exclusively`` names some."""
+    return lambda_.Code.from_asset(
+        str(root / "svar" / "app"),
+        asset_hash_type=AssetHashType.OUTPUT,
+        bundling=BundlingOptions(
+            # Required by the type, never pulled: the local bundler always bundles.
+            image=DockerImage.from_registry("local-bundling-only"),
+            local=AnswerPackage(root),
+        ),
+    )
+
+
 def create_answer_function(
     stack: "AndurStack",
     knowledge_base: bedrock.CfnKnowledgeBase,
@@ -291,7 +353,7 @@ def create_answer_function(
         description="Andur: Svar answers a question from one workspace's documents.",
         runtime=LAMBDA_RUNTIME,
         architecture=lambda_.Architecture.ARM_64,
-        code=lambda_.Code.from_asset(str(REPOSITORY_ROOT / "svar" / "app"), exclude=ASSET_EXCLUDES),
+        code=answer_code(),
         handler="handler.handler",
         timeout=Duration.seconds(ANSWER_TIMEOUT_SECONDS),
         memory_size=ANSWER_MEMORY_MB,

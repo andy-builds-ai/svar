@@ -59,6 +59,22 @@ class QuotaReached(HandlerError):
     status = 429
 
 
+class KeyReadsSpent(HandlerError):
+    """This instance has used its key reads for workspaces it holds no key for
+    (taug/access/keys.py).
+
+    Not 401, which would say the key is wrong without looking, and not 429, which
+    here means a key's own quota: the service holds back for a few seconds, and
+    that is what 503 with ``Retry-After`` says.
+    """
+
+    status = 503
+
+    def __init__(self, message: str, german: str, retry_after_seconds: int) -> None:
+        super().__init__(message, german)
+        self.headers = {"Retry-After": str(retry_after_seconds)}
+
+
 class MethodNotAllowed(HandlerError):
     status = 405
     headers = {"Allow": "POST"}

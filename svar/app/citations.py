@@ -4,8 +4,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-#: The three layers a document can come from, in the order they are trusted.
-LAYERS = ("human", "agent", "inbox")
+from taug.access.workspaces import LAYERS
 
 _DASH = "-–—"
 _PART = rf"\d+(?:\s*[{_DASH}]\s*\d+)?"

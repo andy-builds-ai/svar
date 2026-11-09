@@ -43,6 +43,7 @@ from svar.infra.guardrails import (
 )
 from svar.scripts import topic_probe
 from svar.scripts.evaluate import deployed_environment, import_app
+from taug.access.workspaces import keep_workspace
 from taug.infra.answer_models import region_answer_guardrail_uses_profile
 from taug.scripts import utf8_output
 from taug.scripts.aws import REGION, AwsProblem, client, error_code
@@ -194,7 +195,7 @@ def retrieve_sources(
         found = app.retrieval.retrieve_passages(
             agent, settings.knowledge_base_id, key[1], key[0], settings.number_of_results
         )
-        results, _ = app.retrieval.keep_workspace(found, key[0])
+        results, _ = keep_workspace(found, key[0])
         if not results:
             raise AwsProblem(f"No passages for {key[1]!r} in the workspace {key[0]}")
         sources[key] = app.prompts.build_sources(results)

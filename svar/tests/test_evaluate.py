@@ -9,7 +9,6 @@ from typing import Any
 import aws
 import config
 import errors
-import intake
 import llm
 import log
 import pytest
@@ -18,6 +17,7 @@ import sentences
 from svar.infra.answer_function import ANSWER_FUNCTION_NAME
 from svar.scripts import evaluate
 from svar.tests.test_handler import ENVIRONMENT
+from taug.access.workspaces import WORKSPACE_NAME
 from taug.infra.answer_models import ANSWER_MODELS, AnswerModel
 
 #: The answer function's modules, as the scripts take them (`evaluate.import_app`).
@@ -47,7 +47,7 @@ def test_the_question_set_covers_every_demo_workspace_and_every_kind(
     assert len(questions) == 30
     assert len({q["id"] for q in questions}) == len(questions)
     assert {q["workspace"] for q in questions} == demo_workspaces
-    assert all(intake.WORKSPACE_NAME.match(name) for name in demo_workspaces)
+    assert all(WORKSPACE_NAME.match(name) for name in demo_workspaces)
     assert {q["kind"] for q in questions} == set(evaluate.KINDS)
 
 

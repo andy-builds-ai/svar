@@ -9,15 +9,54 @@ from typing import Any
 
 import answering
 import budget
+import clients
 import clocks
 import config
 import errors
 import intake
-import keys
 import log
 import page
 import refunds
 import sentences
+
+from taug.access import keys
+
+
+def key_client(service: str, region: str) -> Any:
+    """The function's AWS client for the key check; one it cannot make leaves the key
+    unreadable, as a failed read does."""
+    try:
+        return clients.client(service, region)
+    except errors.ConfigurationError as error:
+        raise keys.KeyUnreadable(str(error)) from error
+
+
+def authorize(key: str, workspace: str, settings: config.Settings) -> None:
+    """Taug's key check (taug/access/keys.py), answered the way Svar answers: 401 for a key
+    that does not open the workspace, 500 when the key cannot be read, 503 with
+    ``Retry-After`` while the check holds back."""
+    store = keys.KeyStore(
+        path=settings.key_parameter_path,
+        region=settings.region,
+        make_client=key_client,
+        log_event=log.log_event,
+    )
+    try:
+        keys.authorize(key, workspace, store)
+    except keys.WrongKey as error:
+        raise errors.Unauthorized(
+            f"This key does not open the workspace {workspace}.",
+            f"Dieser Schlüssel öffnet den Arbeitsbereich {workspace} nicht.",
+        ) from error
+    except keys.KeyUnreadable as error:
+        raise errors.ConfigurationError(str(error)) from error
+    except keys.KeyReadsSpent as error:
+        raise errors.KeyReadsSpent(
+            "Too many keys are being checked right now; try again in a few seconds.",
+            "Gerade werden zu viele Schlüssel geprüft; versuchen Sie es in ein paar Sekunden "
+            "erneut.",
+            retry_after_seconds=error.retry_after_seconds,
+        ) from error
 
 
 def http_response(
@@ -41,7 +80,7 @@ def handle(event: Mapping[str, Any], record: log.RequestRecord) -> dict[str, Any
 
     settings = config.load_settings(os.environ)
     key = intake.request_key(event.get("headers"))
-    keys.authorize(key, workspace, settings)
+    authorize(key, workspace, settings)
 
     question = intake.requested_question(body)
     charge = budget.charge_question(settings, workspace, key)

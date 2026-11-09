@@ -1,20 +1,17 @@
 """Searching the knowledge base inside one workspace, and the passages as the response lists
 them."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 import aws
 import errors
 import log
 
+from taug.access.workspaces import workspace_filter
+
 #: How much of each passage the response carries as its excerpt.
 EXCERPT_CHARACTERS = 300
-
-
-def workspace_filter(workspace: str) -> dict[str, Any]:
-    """The retrieval filter that keeps a query inside one workspace."""
-    return {"equals": {"key": "workspace", "value": workspace}}
 
 
 def retrieve_passages(
@@ -44,17 +41,6 @@ def retrieve_passages(
             f"Die Wissensbasis konnte nicht durchsucht werden: {cause}.",
         ) from exc
     return response.get("retrievalResults", [])
-
-
-def keep_workspace(
-    results: Sequence[Mapping[str, Any]], workspace: str
-) -> tuple[list[Mapping[str, Any]], int]:
-    """Drop every passage whose workspace is not the requested one; return what is left and
-    how many went."""
-    kept = [
-        result for result in results if result.get("metadata", {}).get("workspace") == workspace
-    ]
-    return kept, len(results) - len(kept)
 
 
 def passage_text(result: Mapping[str, Any]) -> str:
