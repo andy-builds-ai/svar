@@ -103,19 +103,18 @@ def deploy_context() -> dict[str, Any]:
     return json.loads(CDK_JSON.read_text(encoding="utf-8"))["context"]
 
 
-def andur_stacks(app: cdk.App, name: str = "Test", **settings: Any) -> tuple[TaugStack, SvarStack]:
-    """Taug's stack and Svar's, wired as infra/app.py wires them; ``settings`` go to Svar's,
-    an ``env`` to both."""
-    env = settings.get("env")
-    taug = TaugStack(app, f"{name}TaugStack", env=env)
-    svar = SvarStack(app, f"{name}AndurStack", **settings)
+def andur_stacks(app: cdk.App, construct_id: str, **settings: Any) -> tuple[TaugStack, SvarStack]:
+    """Taug's stack and Svar's, wired as infra/app.py wires them. Svar's gets ``construct_id``
+    and ``settings``, Taug's the id with "Taug" after it, and an ``env`` goes to both."""
+    taug = TaugStack(app, f"{construct_id}Taug", env=settings.get("env"))
+    svar = SvarStack(app, construct_id, knowledge_base=taug.knowledge_base, **settings)
     svar.add_stack_dependency(taug, "Svar reads the knowledge base from Taug.")
     return taug, svar
 
 
 @pytest.fixture(scope="module")
 def stacks() -> tuple[TaugStack, SvarStack]:
-    return andur_stacks(cdk.App(context=deploy_context()))
+    return andur_stacks(cdk.App(context=deploy_context()), "TestAndurStack")
 
 
 @pytest.fixture(scope="module")
@@ -145,7 +144,21 @@ def only_resource(template: Template, resource_type: str) -> Mapping[str, Any]:
     return resource
 
 
-def get_att(stack: SvarStack, construct: Any, attribute: str) -> dict[str, list[str]]:
+def imported(
+    taug_stack: TaugStack, taug_template: Template, construct: Any, attribute: str
+) -> dict:
+    """The import Svar's template holds where it points at one of Taug's resources: CDK
+    exports the attribute from Taug's stack and imports it by the export's name."""
+    reference = get_att(taug_stack, construct, attribute)
+    (name,) = [
+        output["Export"]["Name"]
+        for output in taug_template.to_json()["Outputs"].values()
+        if output["Value"] == reference and "Export" in output
+    ]
+    return {"Fn::ImportValue": name}
+
+
+def get_att(stack: Any, construct: Any, attribute: str) -> dict[str, list[str]]:
     """The reference CloudFormation renders when one resource points at another."""
     return {"Fn::GetAtt": [stack.get_logical_id(construct), attribute]}
 
@@ -199,8 +212,10 @@ def documents_bucket(stack: SvarStack, template: Template) -> Mapping[str, Any]:
     return resource_of(stack, template, stack.documents_bucket)["Properties"]
 
 
-def test_documents_bucket_blocks_all_public_access(stack: SvarStack, template: Template) -> None:
-    assert documents_bucket(stack, template)["PublicAccessBlockConfiguration"] == {
+def test_documents_bucket_blocks_all_public_access(
+    taug_stack: TaugStack, taug_template: Template
+) -> None:
+    assert documents_bucket(taug_stack, taug_template)["PublicAccessBlockConfiguration"] == {
         "BlockPublicAcls": True,
         "BlockPublicPolicy": True,
         "IgnorePublicAcls": True,
@@ -208,13 +223,15 @@ def test_documents_bucket_blocks_all_public_access(stack: SvarStack, template: T
     }
 
 
-def test_documents_bucket_is_versioned(stack: SvarStack, template: Template) -> None:
-    assert documents_bucket(stack, template)["VersioningConfiguration"] == {"Status": "Enabled"}
+def test_documents_bucket_is_versioned(taug_stack: TaugStack, taug_template: Template) -> None:
+    assert documents_bucket(taug_stack, taug_template)["VersioningConfiguration"] == {
+        "Status": "Enabled"
+    }
 
 
-def test_old_document_versions_expire(stack: SvarStack, template: Template) -> None:
+def test_old_document_versions_expire(taug_stack: TaugStack, taug_template: Template) -> None:
     """Versioning without an expiry would keep every old version forever."""
-    (rule,) = documents_bucket(stack, template)["LifecycleConfiguration"]["Rules"]
+    (rule,) = documents_bucket(taug_stack, taug_template)["LifecycleConfiguration"]["Rules"]
     assert rule["Status"] == "Enabled"
     assert rule["NoncurrentVersionExpiration"] == {
         "NoncurrentDays": NONCURRENT_VERSION_RETENTION_DAYS
@@ -225,11 +242,11 @@ def test_old_document_versions_expire(stack: SvarStack, template: Template) -> N
 
 
 def test_documents_and_their_policy_survive_stack_deletion(
-    stack: SvarStack, template: Template
+    taug_stack: TaugStack, taug_template: Template
 ) -> None:
     """Documents are the one thing that cannot be rebuilt — nor their SSL-only rule."""
-    bucket = resource_of(stack, template, stack.documents_bucket)
-    policy = resource_of(stack, template, stack.documents_bucket.policy)
+    bucket = resource_of(taug_stack, taug_template, taug_stack.documents_bucket)
+    policy = resource_of(taug_stack, taug_template, taug_stack.documents_bucket.policy)
     assert bucket["DeletionPolicy"] == "Retain"
     assert policy["DeletionPolicy"] == "Retain"
 
@@ -243,21 +260,23 @@ def test_the_page_and_its_bucket_go_with_the_stack(stack: SvarStack, template: T
     assert copier["Properties"]["Prune"] is True
 
 
-def test_derived_data_is_deleted_with_the_stack(template: Template) -> None:
+def test_derived_data_is_deleted_with_the_stack(taug_template: Template) -> None:
     """Vectors are rebuilt from documents, so nothing derived may linger."""
-    assert only_resource(template, "AWS::S3Vectors::VectorBucket")["DeletionPolicy"] == "Delete"
-    assert only_resource(template, "AWS::S3Vectors::Index")["DeletionPolicy"] == "Delete"
+    assert (
+        only_resource(taug_template, "AWS::S3Vectors::VectorBucket")["DeletionPolicy"] == "Delete"
+    )
+    assert only_resource(taug_template, "AWS::S3Vectors::Index")["DeletionPolicy"] == "Delete"
 
-    data_source = only_resource(template, "AWS::Bedrock::DataSource")
+    data_source = only_resource(taug_template, "AWS::Bedrock::DataSource")
     assert data_source["Properties"]["DataDeletionPolicy"] == "DELETE"
 
 
 # --- Vector store --------------------------------------------------------
 
 
-def test_vector_index_matches_the_embedding_model(template: Template) -> None:
+def test_vector_index_matches_the_embedding_model(taug_template: Template) -> None:
     """Index and knowledge base must agree on dimension and data type."""
-    template.has_resource_properties(
+    taug_template.has_resource_properties(
         "AWS::S3Vectors::Index",
         {
             "DataType": "float32",
@@ -267,8 +286,8 @@ def test_vector_index_matches_the_embedding_model(template: Template) -> None:
     )
 
 
-def test_vector_index_name_carries_its_configuration(template: Template) -> None:
-    index = only_resource(template, "AWS::S3Vectors::Index")
+def test_vector_index_name_carries_its_configuration(taug_template: Template) -> None:
+    index = only_resource(taug_template, "AWS::S3Vectors::Index")
     name = index["Properties"]["IndexName"]
 
     assert name == VECTOR_INDEX_NAME
@@ -296,11 +315,11 @@ def test_replacement_safe_name_changes_with_every_setting() -> None:
 
 
 def test_knowledge_base_and_data_source_names_follow_their_configuration(
-    template: Template,
+    taug_template: Template,
 ) -> None:
     """A new index replaces the base; the base must not collide with its old self."""
-    knowledge_base = only_resource(template, "AWS::Bedrock::KnowledgeBase")["Properties"]
-    data_source = only_resource(template, "AWS::Bedrock::DataSource")["Properties"]
+    knowledge_base = only_resource(taug_template, "AWS::Bedrock::KnowledgeBase")["Properties"]
+    data_source = only_resource(taug_template, "AWS::Bedrock::DataSource")["Properties"]
 
     assert knowledge_base["Name"] == KNOWLEDGE_BASE_NAME
     assert data_source["Name"] == DATA_SOURCE_NAME
@@ -311,10 +330,10 @@ def test_knowledge_base_and_data_source_names_follow_their_configuration(
 
 
 def test_non_filterable_keys_in_the_template_are_exactly_the_constant(
-    template: Template,
+    taug_template: Template,
 ) -> None:
     """Not a subset: an extra key here would silently switch off a filter."""
-    index = only_resource(template, "AWS::S3Vectors::Index")
+    index = only_resource(taug_template, "AWS::S3Vectors::Index")
     keys = index["Properties"]["MetadataConfiguration"]["NonFilterableMetadataKeys"]
     assert keys == NON_FILTERABLE_METADATA_KEYS
 
@@ -334,17 +353,17 @@ def test_workspace_and_layer_stay_filterable() -> None:
 # --- Knowledge base ------------------------------------------------------
 
 
-def test_knowledge_base_exists_and_uses_s3_vectors(template: Template) -> None:
-    template.resource_count_is("AWS::Bedrock::KnowledgeBase", 1)
-    template.has_resource_properties(
+def test_knowledge_base_exists_and_uses_s3_vectors(taug_template: Template) -> None:
+    taug_template.resource_count_is("AWS::Bedrock::KnowledgeBase", 1)
+    taug_template.has_resource_properties(
         "AWS::Bedrock::KnowledgeBase",
         {"StorageConfiguration": Match.object_like({"Type": "S3_VECTORS"})},
     )
 
 
-def test_embedding_model_is_titan_text_embeddings_v2(template: Template) -> None:
+def test_embedding_model_is_titan_text_embeddings_v2(taug_template: Template) -> None:
     """The model id is buried in a Fn::Join; assert on the rendered JSON."""
-    properties = only_resource(template, "AWS::Bedrock::KnowledgeBase")["Properties"]
+    properties = only_resource(taug_template, "AWS::Bedrock::KnowledgeBase")["Properties"]
     vector_config = properties["KnowledgeBaseConfiguration"]["VectorKnowledgeBaseConfiguration"]
 
     model_arn_parts = vector_config["EmbeddingModelArn"]["Fn::Join"][1]
@@ -358,28 +377,30 @@ def test_embedding_model_is_titan_text_embeddings_v2(template: Template) -> None
     }
 
 
-def test_resources_are_wired_by_reference(stack: SvarStack, template: Template) -> None:
+def test_resources_are_wired_by_reference(taug_stack: TaugStack, taug_template: Template) -> None:
     """References, not copied strings: a renamed resource keeps its wiring."""
-    knowledge_base = only_resource(template, "AWS::Bedrock::KnowledgeBase")["Properties"]
+    knowledge_base = only_resource(taug_template, "AWS::Bedrock::KnowledgeBase")["Properties"]
     assert knowledge_base["StorageConfiguration"]["S3VectorsConfiguration"]["IndexArn"] == get_att(
-        stack, stack.vector_index, "IndexArn"
+        taug_stack, taug_stack.vector_index, "IndexArn"
     )
     assert knowledge_base["RoleArn"] == get_att(
-        stack, stack.knowledge_base_role.node.default_child, "Arn"
+        taug_stack, taug_stack.knowledge_base_role.node.default_child, "Arn"
     )
 
-    data_source = only_resource(template, "AWS::Bedrock::DataSource")["Properties"]
+    data_source = only_resource(taug_template, "AWS::Bedrock::DataSource")["Properties"]
     assert data_source["DataSourceConfiguration"]["S3Configuration"]["BucketArn"] == get_att(
-        stack, stack.documents_bucket.node.default_child, "Arn"
+        taug_stack, taug_stack.documents_bucket.node.default_child, "Arn"
     )
-    assert data_source["KnowledgeBaseId"] == get_att(stack, stack.knowledge_base, "KnowledgeBaseId")
+    assert data_source["KnowledgeBaseId"] == get_att(
+        taug_stack, taug_stack.knowledge_base, "KnowledgeBaseId"
+    )
 
 
 # --- Data source ---------------------------------------------------------
 
 
-def test_data_source_crawls_only_the_workspace_prefix(template: Template) -> None:
-    template.has_resource_properties(
+def test_data_source_crawls_only_the_workspace_prefix(taug_template: Template) -> None:
+    taug_template.has_resource_properties(
         "AWS::Bedrock::DataSource",
         {
             "DataSourceConfiguration": Match.object_like(
@@ -392,8 +413,8 @@ def test_data_source_crawls_only_the_workspace_prefix(template: Template) -> Non
     )
 
 
-def test_chunking_is_fixed_size_as_configured(template: Template) -> None:
-    template.has_resource_properties(
+def test_chunking_is_fixed_size_as_configured(taug_template: Template) -> None:
+    taug_template.has_resource_properties(
         "AWS::Bedrock::DataSource",
         {
             "VectorIngestionConfiguration": {
@@ -412,11 +433,13 @@ def test_chunking_is_fixed_size_as_configured(template: Template) -> None:
 # --- Permissions ---------------------------------------------------------
 
 
-def test_role_may_only_read_our_own_documents_bucket(stack: SvarStack, template: Template) -> None:
-    bucket_arn = get_att(stack, stack.documents_bucket.node.default_child, "Arn")
+def test_role_may_only_read_our_own_documents_bucket(
+    taug_stack: TaugStack, taug_template: Template
+) -> None:
+    bucket_arn = get_att(taug_stack, taug_stack.documents_bucket.node.default_child, "Arn")
     same_account = {"StringEquals": {"aws:ResourceAccount": {"Ref": "AWS::AccountId"}}}
 
-    policies = role_policies(stack, template, stack.knowledge_base_role)
+    policies = role_policies(taug_stack, taug_template, taug_stack.knowledge_base_role)
     list_bucket, get_object = policies["ReadDocuments"]["Statement"]
 
     assert list_bucket["Action"] == "s3:ListBucket"
@@ -428,8 +451,10 @@ def test_role_may_only_read_our_own_documents_bucket(stack: SvarStack, template:
     assert get_object["Condition"] == same_account
 
 
-def test_role_may_only_invoke_the_embedding_model(stack: SvarStack, template: Template) -> None:
-    policies = role_policies(stack, template, stack.knowledge_base_role)
+def test_role_may_only_invoke_the_embedding_model(
+    taug_stack: TaugStack, taug_template: Template
+) -> None:
+    policies = role_policies(taug_stack, taug_template, taug_stack.knowledge_base_role)
     list_models, invoke_model = policies["InvokeEmbeddingModel"]["Statement"]
 
     assert list_models["Action"] == "bedrock:ListFoundationModels"
@@ -457,7 +482,7 @@ def all_policy_statements(template: Template) -> list[tuple[str, dict[str, Any]]
 
 
 def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(
-    template: Template,
+    template: Template, taug_template: Template
 ) -> None:
     """Two actions that cannot be scoped; nothing else gets to use that excuse.
 
@@ -471,7 +496,10 @@ def test_the_only_wildcard_resources_are_model_listing_and_cache_clearing(
         sorted(action) if isinstance(action, list) else [action]
         for action in (
             statement["Action"]
-            for _, statement in all_policy_statements(template)
+            for _, statement in [
+                *all_policy_statements(template),
+                *all_policy_statements(taug_template),
+            ]
             if statement["Resource"] == "*"
         )
     ]
@@ -523,11 +551,13 @@ def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
         )
 
 
-def test_role_may_only_touch_our_own_vector_index(stack: SvarStack, template: Template) -> None:
+def test_role_may_only_touch_our_own_vector_index(
+    taug_stack: TaugStack, taug_template: Template
+) -> None:
     """No wildcard on s3vectors — one index, five actions."""
-    (statement,) = role_policies(stack, template, stack.knowledge_base_role)["UseVectorIndex"][
-        "Statement"
-    ]
+    (statement,) = role_policies(taug_stack, taug_template, taug_stack.knowledge_base_role)[
+        "UseVectorIndex"
+    ]["Statement"]
     assert sorted(statement["Action"]) == [
         "s3vectors:DeleteVectors",
         "s3vectors:GetIndex",
@@ -539,10 +569,10 @@ def test_role_may_only_touch_our_own_vector_index(stack: SvarStack, template: Te
 
 
 def test_role_can_only_be_assumed_by_bedrock_in_this_account(
-    stack: SvarStack, template: Template
+    taug_stack: TaugStack, taug_template: Template
 ) -> None:
     """Without the source conditions the role is a confused-deputy hole."""
-    role = resource_of(stack, template, stack.knowledge_base_role)
+    role = resource_of(taug_stack, taug_template, taug_stack.knowledge_base_role)
     (statement,) = role["Properties"]["AssumeRolePolicyDocument"]["Statement"]
 
     assert statement["Principal"] == {"Service": "bedrock.amazonaws.com"}
@@ -572,9 +602,8 @@ def test_the_only_compute_that_runs_between_deploys_is_the_answer_function(
 # --- Outputs -------------------------------------------------------------
 
 
-def test_stack_publishes_what_later_steps_need(template: Template) -> None:
-    """Build steps 2 and 3 address this stack only through its outputs."""
-    outputs = template.find_outputs("*")
+def test_stacks_publish_what_later_steps_need(template: Template, taug_template: Template) -> None:
+    """The scripts address each stack only through its outputs (taug/scripts/aws.py)."""
     assert {
         "KnowledgeBaseId",
         "DataSourceId",
@@ -582,16 +611,14 @@ def test_stack_publishes_what_later_steps_need(template: Template) -> None:
         "VectorBucketName",
         "VectorIndexArn",
         "KnowledgeBaseRoleArn",
-        "FunctionUrl",
-        "WebUrl",
         "ApiKeyParameterPath",
-        "BudgetTableName",
-    } <= set(outputs)
+    } <= set(taug_template.find_outputs("*"))
+    assert {"FunctionUrl", "WebUrl", "BudgetTableName"} <= set(template.find_outputs("*"))
 
 
-def test_vector_bucket_output_is_a_name_not_an_arn(template: Template) -> None:
+def test_vector_bucket_output_is_a_name_not_an_arn(taug_template: Template) -> None:
     """`ref` on a vector bucket yields its ARN — an easy mislabel to make."""
-    outputs = template.find_outputs("VectorBucketName")
+    outputs = taug_template.find_outputs("VectorBucketName")
     rendered = str(outputs["VectorBucketName"]["Value"])
     assert "arn:" not in rendered
     assert "andur-vectors-" in rendered
@@ -667,13 +694,15 @@ def test_answer_function_runs_at_most_a_few_requests_at_once(
 
 
 def test_answer_function_is_configured_only_through_its_environment(
-    stack: SvarStack, template: Template
+    stack: SvarStack, template: Template, taug_stack: TaugStack, taug_template: Template
 ) -> None:
     variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"][
         "Variables"
     ]
     assert variables == {
-        "KNOWLEDGE_BASE_ID": get_att(stack, stack.knowledge_base, "KnowledgeBaseId"),
+        "KNOWLEDGE_BASE_ID": imported(
+            taug_stack, taug_template, taug_stack.knowledge_base, "KnowledgeBaseId"
+        ),
         "MODEL_ID": ANSWER_MODEL_ID,
         "ANSWER_PROMPT": "sentence-first",
         "REGION": {"Ref": "AWS::Region"},
@@ -709,7 +738,7 @@ def test_the_model_id_is_configuration_not_handler_code() -> None:
 
 
 def test_answer_role_has_five_policies_on_named_resources(
-    stack: SvarStack, template: Template
+    stack: SvarStack, template: Template, taug_stack: TaugStack, taug_template: Template
 ) -> None:
     policies = role_policies(stack, template, stack.answer_role)
     assert set(policies) == {
@@ -730,7 +759,9 @@ def test_answer_role_has_five_policies_on_named_resources(
 
     (retrieve,) = policies["RetrieveFromKnowledgeBase"]["Statement"]
     assert retrieve["Action"] == "bedrock:Retrieve"
-    assert retrieve["Resource"] == get_att(stack, stack.knowledge_base, "KnowledgeBaseArn")
+    assert retrieve["Resource"] == imported(
+        taug_stack, taug_template, taug_stack.knowledge_base, "KnowledgeBaseArn"
+    )
 
     # The default model is an EU profile: the profile needs the guardrail, the
     # model behind it needs the profile.
@@ -794,7 +825,7 @@ def guarded_by(stack: SvarStack) -> dict[str, Any]:
 
 def test_a_model_in_the_region_is_invoked_directly_with_its_own_prices() -> None:
     app = cdk.App(context=deploy_context())
-    stack = SvarStack(app, "RegionalModelStack", answer_model_id=REGIONAL_MODEL_ID)
+    _, stack = andur_stacks(app, "RegionalModelStack", answer_model_id=REGIONAL_MODEL_ID)
     template = Template.from_stack(stack)
     policies = role_policies(stack, template, stack.answer_role)
     invoke, apply_guardrail = policies["InvokeAnswerModel"]["Statement"]
@@ -812,7 +843,7 @@ def test_a_model_in_the_region_is_invoked_directly_with_its_own_prices() -> None
 def test_a_model_without_a_price_does_not_synthesise() -> None:
     app = cdk.App(context=deploy_context())
     with pytest.raises(KeyError, match="has no price"):
-        SvarStack(app, "UnpricedModelStack", answer_model_id="eu.unpriced-model-v1:0")
+        andur_stacks(app, "UnpricedModelStack", answer_model_id="eu.unpriced-model-v1:0")
 
 
 def test_the_default_model_carries_its_own_prices() -> None:
@@ -824,12 +855,16 @@ def test_the_default_model_carries_its_own_prices() -> None:
     assert (row.name, row.input_per_1k, row.output_per_1k) == ("Nova Pro", "0.00092", "0.00368")
 
 
-def test_account_wide_names_carry_the_region(stack: SvarStack, template: Template) -> None:
+def test_account_wide_names_carry_the_region(
+    template: Template, taug_stack: TaugStack, taug_template: Template
+) -> None:
     """IAM and CloudFront names hold for the whole account: without the region,
     a second stack in another region collides with the first."""
     resources = template.to_json()["Resources"].values()
     names = [
-        resource_of(stack, template, stack.knowledge_base_role)["Properties"]["RoleName"],
+        resource_of(taug_stack, taug_template, taug_stack.knowledge_base_role)["Properties"][
+            "RoleName"
+        ],
         *(
             r["Properties"]["ResponseHeadersPolicyConfig"]["Name"]
             for r in resources
@@ -1332,7 +1367,7 @@ def test_the_second_deploy_took_the_topics_off_the_answer_guardrail_and_nothing_
 
     second = guardrails(stack, template.to_json()["Resources"])
     monkeypatch.setattr(stack_guardrails, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
-    other = SvarStack(cdk.App(context=deploy_context()), "FirstDeployStack")
+    _, other = andur_stacks(cdk.App(context=deploy_context()), "FirstDeployStack")
     first = guardrails(other, Template.from_stack(other).to_json()["Resources"])
 
     first_topics = first["answer"]["TopicPolicyConfig"]["TopicsConfig"]
@@ -1444,7 +1479,7 @@ def test_with_the_flag_on_the_grounding_probe_copies_the_question_topics_too(
 
     monkeypatch.setattr(stack_guardrails, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
     monkeypatch.setattr(grounding_probe, "ANSWER_GUARDRAIL_READS_QUESTION_TOPICS", True)
-    other = SvarStack(cdk.App(context=deploy_context()), "FirstDeployProbeStack")
+    _, other = andur_stacks(cdk.App(context=deploy_context()), "FirstDeployProbeStack")
     properties = resource_of(other, Template.from_stack(other), other.guardrail)["Properties"]
     probe = grounding_probe.probe_request()
     topics = probe["topicPolicyConfig"]
@@ -1503,7 +1538,7 @@ def test_the_eu_guardrail_profile_routes_inside_the_eu_only() -> None:
 
 def test_the_pinned_region_synthesises_with_its_own_profile() -> None:
     app = cdk.App(context=deploy_context())
-    stack = SvarStack(app, "IrelandStack", env=cdk.Environment(region="eu-west-1"))
+    _, stack = andur_stacks(app, "IrelandStack", env=cdk.Environment(region="eu-west-1"))
     properties = resource_of(stack, Template.from_stack(stack), stack.guardrail)["Properties"]
     assert properties["CrossRegionConfig"] == {"GuardrailProfileArn": profile_arn("eu-west-1")}
 
@@ -1514,7 +1549,7 @@ def test_a_stack_outside_the_regions_of_the_model_table_does_not_synthesise(regi
     Tel Aviv: neither keeps the guardrail's checks in the EU, and neither has prices."""
     app = cdk.App(context=deploy_context())
     with pytest.raises(KeyError, match="has no models"):
-        SvarStack(app, "OutsideStack", env=cdk.Environment(region=region))
+        andur_stacks(app, "OutsideStack", env=cdk.Environment(region=region))
 
 
 def test_a_region_outside_the_profiles_regions_does_not_synthesise_its_guardrails(
@@ -1525,7 +1560,7 @@ def test_a_region_outside_the_profiles_regions_does_not_synthesise_its_guardrail
     monkeypatch.setitem(answer_models.REGIONS, "eu-west-2", answer_models.REGIONS["eu-west-1"])
     app = cdk.App(context=deploy_context())
     with pytest.raises(ValueError, match="not a source region"):
-        SvarStack(app, "OutsideStack", env=cdk.Environment(region="eu-west-2"))
+        andur_stacks(app, "OutsideStack", env=cdk.Environment(region="eu-west-2"))
 
 
 def test_topics_stay_inside_what_bedrock_accepts() -> None:
@@ -1595,7 +1630,7 @@ def test_a_changed_setting_makes_a_new_guardrail_version(monkeypatch: pytest.Mon
     from svar.infra import guardrails as stack_guardrails
 
     def version_description() -> str:
-        other = SvarStack(cdk.App(context=deploy_context()), "VersionStack")
+        _, other = andur_stacks(cdk.App(context=deploy_context()), "VersionStack")
         return Template.from_stack(other).to_json()["Resources"][
             other.get_logical_id(other.guardrail_version)
         ]["Properties"]["Description"]
@@ -1622,7 +1657,7 @@ def test_a_changed_output_action_makes_new_versions_of_both_guardrails(
     from svar.infra import guardrails as stack_guardrails
 
     def descriptions() -> tuple[str, str]:
-        other = SvarStack(cdk.App(context=deploy_context()), "ActionStack")
+        _, other = andur_stacks(cdk.App(context=deploy_context()), "ActionStack")
         resources = Template.from_stack(other).to_json()["Resources"]
         return tuple(
             resources[other.get_logical_id(version)]["Properties"]["Description"]
@@ -1690,7 +1725,7 @@ def test_a_changed_topic_makes_a_new_version_of_the_topic_guardrail_only(
     from svar.infra import guardrails as stack_guardrails
 
     def descriptions() -> tuple[str, str]:
-        other = SvarStack(cdk.App(context=deploy_context()), "TopicStack")
+        _, other = andur_stacks(cdk.App(context=deploy_context()), "TopicStack")
         resources = Template.from_stack(other).to_json()["Resources"]
         return tuple(
             resources[other.get_logical_id(version)]["Properties"]["Description"]
