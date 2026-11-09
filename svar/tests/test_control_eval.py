@@ -66,7 +66,8 @@ def test_the_set_tempts_in_every_way_and_keeps_its_own_ids(
 
 
 def test_every_pellwick_fact_stands_in_a_listed_document(questions: list[dict[str, Any]]) -> None:
-    """Pellwick's documents are in the repository; Kalvenstett's are not (scripts/README.md)."""
+    """Pellwick's documents are in the repository; Kalvenstett's are not
+    (svar/scripts/README.md)."""
     texts = documents("pellwick")
     for question in questions:
         if question["workspace"] != "pellwick" or question["kind"] != "answer":

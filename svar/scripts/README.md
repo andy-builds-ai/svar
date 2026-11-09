@@ -82,8 +82,8 @@ It asks the 30 questions in `evaluation-questions.json` — 22 that the
 documents answer, 4 that the guardrail must refuse, 4 that no document
 answers — of every model in `MODELS`, through `answer_question` in
 `svar/app/answering.py` with the deployed function's own settings. Only the model,
-its token prices and the wording of its system prompt (the `prompt` of its row
-in `taug/infra/answer_models.py`, the function's `ANSWER_PROMPT`) change, so a run
+its token prices and the wording of its system prompt (`prompt_of` in
+`svar/infra/answer_prompts.py`, the function's `ANSWER_PROMPT`) change, so a run
 before the deploy that brings `ANSWER_PROMPT` still asks each model with its
 own wording; see *Evaluation* in
 [docs/decisions.md](../../docs/decisions.md). No key and no budget are used.
@@ -509,10 +509,11 @@ Standard tier needs a profile (AWS refused it without one on 06.10.2026:
 "Enable cross-Region inference for your guardrail to use Standard tier").
 Retrieval stays with the deployed knowledge base in `--retrieve-region`,
 once per question, and every model gets the same passages; they are saved
-with the run. Prices, their date and the wording of the system prompt (the
-row's `prompt`) come from the table of `--region` in `taug/infra/answer_models.py`
-(`REGIONS`): a run of Nova Pro with `--region eu-west-1` counts Ireland's token
-prices, one with `--region eu-central-1` Frankfurt's.
+with the run. Prices and their date come from the table of `--region` in
+`taug/infra/answer_models.py` (`REGIONS`): a run of Nova Pro with
+`--region eu-west-1` counts Ireland's token prices, one with
+`--region eu-central-1` Frankfurt's. The wording of the system prompt comes
+from `prompt_of` in `svar/infra/answer_prompts.py`, by the model's name.
 
 The marks, each on what the model wrote before any guardrail replaced it
 (Bedrock keeps that text in the guardrail trace):

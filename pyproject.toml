@@ -18,7 +18,7 @@ dependencies = [
     # test counts.
     "aws-cdk-lib>=2.273.0",
     "constructs>=10.0.0,<11.0.0",
-    # Used by scripts/ only, and imported lazily there.
+    # Used by the scripts only (scripts/ and each part's scripts/), and imported lazily there.
     # The crt extra is what lets botocore read the credentials `aws login`
     # writes (login_session profiles); without it the scripts cannot sign in.
     "boto3[crt]>=1.43.0",

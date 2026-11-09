@@ -721,7 +721,7 @@ def test_answer_role_has_five_policies_on_named_resources(
     }
     # Only through a numbered version of the answer guardrail: <guardrail arn>:<number>, never
     # the draft. What that allows and refuses, step by step through a deploy:
-    # tests/test_deploy_steps.py.
+    # svar/tests/test_deploy_steps.py.
     assert profile["Condition"] == guarded_by(stack)
     # The answer and topic guardrails run through the EU profile: the profile in every
     # region it routes to, and in none outside the EU.

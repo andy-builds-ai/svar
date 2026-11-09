@@ -942,7 +942,7 @@ from files.
 |---|---|
 | `KNOWLEDGE_BASE_ID` | The stack's knowledge base. |
 | `MODEL_ID` | The region's answer model in `REGIONS` (`taug/infra/answer_models.py`): `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile, in eu-west-1; `qwen.qwen3-235b-a22b-2507-v1:0`, Qwen3 235B in the region itself, in eu-central-1. |
-| `ANSWER_PROMPT` | Optional. The wording of the system prompt (`prompts.PROMPTS`) that the answer model's row in `taug/infra/answer_models.py` names: `sentence-first` for Nova Pro in eu-west-1, `each-part` for Qwen3 235B in eu-central-1. Without it, `each-part`. An unknown name is refused. |
+| `ANSWER_PROMPT` | Optional. The wording of the system prompt (`prompts.PROMPTS`) that `prompt_of` in `svar/infra/answer_prompts.py` gives the answer model: `sentence-first` for Nova Pro in eu-west-1, `each-part` for Qwen3 235B in eu-central-1. Without it, `each-part`. An unknown name is refused. |
 | `REGION` | The stack's region, `eu-west-1` or `eu-central-1`. |
 | `NUMBER_OF_RESULTS` | Passages per question, `10`. Retrieve may return fewer. |
 | `API_KEY_PARAMETER_PATH` | `/andur/api-keys`. |

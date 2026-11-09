@@ -24,7 +24,7 @@ two fictional demo companies of `knowledge/` and is where models and checks
 are measured against each other.
 Both were last deployed on 21.10.2026.
 
-![An answer on Svar's page in Frankfurt, in German: the question, the answer citing [1], and the sources it rests on, each marked as written by a person](svar/docs/screenshot-answer.png)
+![An answer on Svar's page in Frankfurt, in German: the question, the answer citing [1], and the sources it rests on, each marked as written by a person](docs/screenshot-answer.png)
 
 ## How a question travels
 
@@ -115,7 +115,7 @@ call may have run and been paid for. `svar/app/handler.py` runs steps 1 and 2
   ([docs/operating.md](../docs/operating.md#another-region)).
 - **In Frankfurt a model in the region checks the topics**
   ([decisions.md:710](../docs/decisions.md?plain=1#L710),
-  [:732](../docs/decisions.md?plain=1#L748)). Bedrock's topic guardrail reads
+  [:748](../docs/decisions.md?plain=1#L748)). Bedrock's topic guardrail reads
   German only in its Standard tier, and that tier works only through an EU
   profile, which runs the check in six EU regions and so would carry it out
   of Germany. The older tier stays in Frankfurt but let through German advice

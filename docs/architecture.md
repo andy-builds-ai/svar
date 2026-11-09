@@ -142,16 +142,30 @@ carries its cost in USD, with the day its prices were read. Both are in
 [svar/app/README.md](../svar/app/README.md#the-guardrail).
 
 ```
-infra/       the CDK app, the models per region, and the stack: one module per part
-svar/app/         the answer function behind /ask: handler.py and one module per step
-svar/web/         the page: index.html, app.js, language.js, markdown.js, style.css
-scripts/     ingest, retrieve, ask, workspace, and the measurements: evaluate,
-             topic_probe, grounding_probe, control_eval, tool_probe, receiving_probe,
-             rehearsal
-vard/        Vard's loop and his first responsibility, measured, not deployed
-knowledge/   the demo corpus: two fictional companies
-docs/        architecture, operating, retrieval findings, costs, decisions, metadata convention
-tests/       stack template, answer function, scripts, page
+.github/workflows/  CI: ruff, the tests, cdk synth for both regions
+infra/              the CDK app (app.py) and the one stack (stacks/andur_stack.py), which
+                    wires Taug's and Svar's blocks together
+scripts/            the rehearsal of a new workspace across the parts
+tests/              stack template and rehearsal
+conftest.py         the test setup every part's tests share
+docs/               architecture, operating, costs, decisions
+knowledge/          the demo corpus: two fictional companies
+taug/infra/         the knowledge base, the regions with their models and prices, the key
+                    path and the key retirer (api_keys/), shared helpers
+taug/scripts/       ingest, layout, retrieve, workspace, aws
+taug/docs/          retrieval findings, metadata convention
+taug/tests/         key retirer, ingest, retrieve, workspace
+svar/app/           the answer function behind /ask: handler.py and one module per step
+svar/web/           the page: index.html, app.js, language.js, markdown.js, style.css
+svar/infra/         the answer function, the guardrails, the page's distribution, the
+                    deploy drain (deploy_drain/), the prompt wording per model
+svar/scripts/       ask, plan, and the measurements: evaluate, topic_probe,
+                    topic_model_probe, grounding_probe, control_eval, with their question sets
+svar/docs/          screenshot and walkthrough of the page
+svar/tests/         answer function, page, regions, deploy steps, scripts
+vard/               Vard's loop and his first responsibility, measured, not deployed
+vard/scripts/       receiving_probe, tool_probe and their cases
+vard/tests/         loop, cases, probes
 ```
 
 ## Build steps

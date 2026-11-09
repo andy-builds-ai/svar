@@ -76,9 +76,9 @@ def deployed_model_name(region: str) -> str:
 
 def german_questions(workspace: str) -> Path | None:
     """The workspace's own German questions on its German documents,
-    `scripts/evaluation-questions-<workspace>.json`; None when there is no such file. A file of
-    that name with a question of another workspace or in another language is refused, so that a
-    workspace named like another set (`de`, `control`) never measures that set."""
+    `svar/scripts/evaluation-questions-<workspace>.json`; None when there is no such file. A
+    file of that name with a question of another workspace or in another language is refused,
+    so that a workspace named like another set (`de`, `control`) never measures that set."""
     path = REPOSITORY / "svar" / "scripts" / f"evaluation-questions-{workspace}.json"
     if not path.is_file():
         return None

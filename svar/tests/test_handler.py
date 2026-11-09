@@ -1722,7 +1722,7 @@ def test_the_budget_is_never_read_before_it_is_written(aws: dict[str, Any]) -> N
 def test_a_question_that_passed_the_budget_stays_counted_unless_aws_failed_it(
     aws: dict[str, Any],
 ) -> None:
-    """An answer counts; a failure on AWS's side is given back (tests/test_refund.py)."""
+    """An answer counts; a failure on AWS's side is given back (svar/tests/test_refund.py)."""
     assert call(event())[0] == 200
     assert number(budget_item(aws), "questions_used") == 1
 
@@ -4244,7 +4244,7 @@ def test_an_answer_the_topic_guardrail_cannot_check_is_not_given(
     aws["guardrail"].topic_error = client_error("AccessDeniedException", operation="ApplyGuardrail")
     status, body = call(event(in_(asked)))
     assert status == 502
-    # The model answered, and was paid for: the question stays counted (tests/test_refund.py).
+    # The model answered, and was paid for: the question stays counted (svar/tests/test_refund.py).
     assert body == {"error": sentence}
     (line,) = [line for line in log_lines(caplog) if line["event"] == "topic-guard-failed"]
     assert line["detail"] == "ClientError: AccessDeniedException"
