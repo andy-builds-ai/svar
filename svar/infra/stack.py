@@ -6,6 +6,7 @@ from aws_cdk import (
     CfnOutput,
     Stack,
     Token,
+    aws_bedrock as bedrock,
     aws_cloudfront as cloudfront,
     aws_lambda as lambda_,
     aws_s3 as s3,
@@ -42,15 +43,6 @@ from taug.infra.answer_models import (
     answer_model,
     region_models,
 )
-from taug.infra.keys import API_KEY_PARAMETER_PATH
-from taug.infra.knowledge_base import (
-    WORKSPACE_PREFIX,
-    create_data_source,
-    create_documents_bucket,
-    create_knowledge_base,
-    create_knowledge_base_role,
-    create_vector_store,
-)
 from taug.infra.shared import create_log_group
 
 #: The stack's description, the same before and after Taug's documents, vectors and knowledge
@@ -67,6 +59,7 @@ class SvarStack(Stack):
         scope: Construct,
         construct_id: str,
         *,
+        knowledge_base: bedrock.CfnKnowledgeBase,
         answer_model_id: str = ANSWER_MODEL_ID,
         topic_model_id: str | None = None,
         answer_guardrail_profile: bool = True,
@@ -74,7 +67,9 @@ class SvarStack(Stack):
         behind_cloudfront: bool = True,
         **kwargs,
     ) -> None:
-        """``topic_model_id`` None: the topic guardrail checks the denied topics, through the
+        """``knowledge_base``: Taug's (taug/infra/stack.py), which the function searches;
+        CDK passes its id and ARN between the stacks as an export and an import.
+        ``topic_model_id`` None: the topic guardrail checks the denied topics, through the
         EU guardrail profile. A model id: that model checks them in the stack's region, and there
         is no topic guardrail. ``answer_guardrail_profile``: whether the answer guardrail runs
         through the profile too; the excerpt guardrail never does. ``behind_cloudfront`` False:
@@ -95,15 +90,7 @@ class SvarStack(Stack):
         self.answer_max_concurrency = answer_max_concurrency
         self.behind_cloudfront = behind_cloudfront
 
-        self.documents_bucket = create_documents_bucket(self)
-        self.vector_bucket, self.vector_index = create_vector_store(self)
-        self.knowledge_base_role = create_knowledge_base_role(
-            self, self.documents_bucket, self.vector_index
-        )
-        self.knowledge_base = create_knowledge_base(
-            self, self.vector_index, self.knowledge_base_role
-        )
-        self.data_source = create_data_source(self, self.knowledge_base, self.documents_bucket)
+        self.knowledge_base = knowledge_base
 
         self.budget_table = create_budget_table(self)
         self.answer_log_group = create_log_group(
@@ -163,45 +150,6 @@ class SvarStack(Stack):
 
     def _create_outputs(self) -> None:
         """Everything a script or a CLI call needs to address this stack."""
-        CfnOutput(
-            self,
-            "KnowledgeBaseId",
-            value=self.knowledge_base.attr_knowledge_base_id,
-            description="Pass this to bedrock-agent-runtime retrieve.",
-        )
-        CfnOutput(
-            self,
-            "DataSourceId",
-            value=self.data_source.attr_data_source_id,
-            description="Pass this to bedrock-agent start-ingestion-job.",
-        )
-        CfnOutput(
-            self,
-            "DocumentsBucketName",
-            value=self.documents_bucket.bucket_name,
-            description=(
-                f"Upload documents under {WORKSPACE_PREFIX}<workspace>/<layer>/, each with "
-                "its sidecar file (docs/metadata.md). Without it there is no workspace filter."
-            ),
-        )
-        CfnOutput(
-            self,
-            "VectorBucketName",
-            value=self.vector_bucket.vector_bucket_name,
-            description="S3 Vectors bucket holding the embeddings.",
-        )
-        CfnOutput(
-            self,
-            "VectorIndexArn",
-            value=self.vector_index.attr_index_arn,
-            description="The vector index the knowledge base writes to.",
-        )
-        CfnOutput(
-            self,
-            "KnowledgeBaseRoleArn",
-            value=self.knowledge_base_role.role_arn,
-            description="Service role assumed by Bedrock Knowledge Bases.",
-        )
         if self.distribution is not None:
             CfnOutput(
                 self,
@@ -233,14 +181,6 @@ class SvarStack(Stack):
                     "the header X-Andur-Key."
                 ),
             )
-        CfnOutput(
-            self,
-            "ApiKeyParameterPath",
-            value=API_KEY_PARAMETER_PATH,
-            description=(
-                "Parameter Store path of the workspace keys: <path>/<workspace>, SecureString."
-            ),
-        )
         CfnOutput(
             self,
             "GuardrailVersion",

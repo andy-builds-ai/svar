@@ -36,6 +36,7 @@ from taug.infra.answer_models import (
     region_models,
 )
 from tests.test_stack import (
+    andur_stacks,
     deploy_context,
     get_att,
     guarded_by,
@@ -71,12 +72,12 @@ def stack_in(region: str, **overrides: object) -> SvarStack:
         "behind_cloudfront": models.behind_cloudfront,
         **overrides,
     }
-    return SvarStack(
+    return andur_stacks(
         cdk.App(context=deploy_context()),
         f"Stack{region.replace('-', '')}{len(overrides)}",
         env=cdk.Environment(account=ACCOUNT, region=region),
         **settings,
-    )
+    )[1]
 
 
 @pytest.fixture(scope="module")
@@ -340,7 +341,7 @@ def test_frankfurt_has_no_cloudfront_and_no_site_bucket(
         assert template.find_resources(resource_type) == {}
     assert template.find_resources("Custom::CDKBucketDeployment") == {}
     assert stack.site_bucket is None and stack.distribution is None
-    assert len(template.find_resources("AWS::S3::Bucket")) == 1  # the documents
+    assert template.find_resources("AWS::S3::Bucket") == {}  # the documents are Taug's
     assert "cloudfront" not in json.dumps(template.to_json()["Resources"]).lower()
 
 

@@ -47,6 +47,7 @@ svar = SvarStack(
     app,
     "AndurStack",
     description=SVAR_DESCRIPTION,
+    knowledge_base=taug.knowledge_base,
     answer_model_id=MODELS.answer_model_id,
     topic_model_id=MODELS.topic_model_id,
     answer_guardrail_profile=MODELS.answer_guardrail_profile,
