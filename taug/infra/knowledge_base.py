@@ -15,7 +15,7 @@ from aws_cdk import (
 )
 
 if TYPE_CHECKING:
-    from infra.stacks.andur_stack import AndurStack
+    from svar.infra.stack import AndurStack
 
 
 #: Titan Text Embeddings V2. The model id is part of the Bedrock ARN.
