@@ -32,7 +32,7 @@ from svar.infra.answer_function import (
     EU_PROFILE_PREFIX,
 )
 from svar.infra.deploy_drain import handler as drain_handler
-from svar.infra.stack import AndurStack
+from svar.infra.stack import SvarStack
 from tests.test_stack import REGIONAL_MODEL_ID, deploy_context
 
 ACCOUNT = "111122223333"
@@ -84,7 +84,7 @@ def synthesise(
     with pytest.MonkeyPatch.context() as patch:
         if change is not None:
             change(patch)
-        stack = AndurStack(cdk.App(context=deploy_context()), "StepStack", answer_model_id=model_id)
+        stack = SvarStack(cdk.App(context=deploy_context()), "StepStack", answer_model_id=model_id)
         resources = Template.from_stack(stack).to_json()["Resources"]
     entry_point = (
         f"arn:aws:bedrock:{REGION}:{ACCOUNT}:inference-profile/{model_id}"

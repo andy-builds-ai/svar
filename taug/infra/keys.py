@@ -1,8 +1,8 @@
-"""Taug's key resources in the one stack: where the workspace keys live, and the function
-that answers the Delete of the key resources the stack used to have.
+"""Taug's key resources: where the workspace keys live, and the function that answers the
+Delete of the key resources Andur's stack used to have.
 
-The keys belong to the workspaces (Taug); until the stack is split, the answer function of
-Svar reads them (svar/infra/answer_function.py)."""
+The keys belong to the workspaces (Taug); Svar's answer function reads them with Taug's
+key check (taug/access/keys.py), packed into it."""
 
 from typing import TYPE_CHECKING
 
@@ -23,7 +23,7 @@ from taug.infra.shared import (
 )
 
 if TYPE_CHECKING:
-    from svar.infra.stack import AndurStack
+    from taug.infra.stack import TaugStack
 
 
 #: Where the workspace keys live: ``<path>/<workspace>``, one SecureString each.
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 API_KEY_PARAMETER_PATH = "/andur/api-keys"
 
 
-def create_key_retirer(stack: "AndurStack") -> cr.Provider:
+def create_key_retirer(stack: "TaugStack") -> cr.Provider:
     """The function that answers the Delete of the key resources this stack used to have.
 
     It deletes nothing (taug/infra/api_keys/handler.py), and it has no permission on Parameter

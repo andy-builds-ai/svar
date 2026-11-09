@@ -42,7 +42,7 @@ from taug.infra.shared import (
 )
 
 if TYPE_CHECKING:
-    from svar.infra.stack import AndurStack
+    from svar.infra.stack import SvarStack
 
 
 #: A model id runs in the stack's region; an ``eu.`` inference profile id runs
@@ -120,7 +120,7 @@ DEPLOY_DRAIN_SECONDS = ANSWER_TIMEOUT_SECONDS + 30
 PAGE_LAYER_FOLDER = "/opt"
 
 
-def create_budget_table(stack: "AndurStack") -> dynamodb.TableV2:
+def create_budget_table(stack: "SvarStack") -> dynamodb.TableV2:
     """One item per key: what it has spent, of how much, and until when."""
     return dynamodb.TableV2(
         stack,
@@ -135,7 +135,7 @@ def create_budget_table(stack: "AndurStack") -> dynamodb.TableV2:
     )
 
 
-def invoke_answer_model(stack: "AndurStack", guardrail_arn: str) -> list[iam.PolicyStatement]:
+def invoke_answer_model(stack: "SvarStack", guardrail_arn: str) -> list[iam.PolicyStatement]:
     """Invoke the answer model only with a numbered version of the answer guardrail.
 
     Any numbered version, not the deployed one alone: a deploy that changes a guardrail
@@ -189,7 +189,7 @@ def invoke_answer_model(stack: "AndurStack", guardrail_arn: str) -> list[iam.Pol
 
 
 def create_answer_role(
-    stack: "AndurStack",
+    stack: "SvarStack",
     knowledge_base: bedrock.CfnKnowledgeBase,
     budget_table: dynamodb.TableV2,
     log_group: logs.LogGroup,
@@ -321,7 +321,7 @@ def answer_code(root: Path = REPOSITORY_ROOT) -> lambda_.Code:
 
 
 def create_answer_function(
-    stack: "AndurStack",
+    stack: "SvarStack",
     knowledge_base: bedrock.CfnKnowledgeBase,
     budget_table: dynamodb.TableV2,
     role: iam.Role,
@@ -388,7 +388,7 @@ def create_answer_function(
     )
 
 
-def reserved_concurrency(stack: "AndurStack") -> int | None:
+def reserved_concurrency(stack: "SvarStack") -> int | None:
     """The answer function's reservation: `answer_max_concurrency`, and where it serves the
     page as well, `PAGE_LOAD_CONCURRENCY` on top; None leaves it to the account."""
     if stack.answer_max_concurrency is None:
@@ -397,7 +397,7 @@ def reserved_concurrency(stack: "AndurStack") -> int | None:
     return stack.answer_max_concurrency + page
 
 
-def create_function_url(stack: "AndurStack", function: lambda_.Function) -> lambda_.FunctionUrl:
+def create_function_url(stack: "SvarStack", function: lambda_.Function) -> lambda_.FunctionUrl:
     """The function's own HTTPS address. Behind CloudFront set to AWS_IAM: reachable for
     CloudFront alone. Without CloudFront open (NONE): it is the address, and the key header
     is the gate, as it is behind CloudFront. CDK grants both actions a URL of NONE needs
@@ -411,7 +411,7 @@ def create_function_url(stack: "AndurStack", function: lambda_.Function) -> lamb
     return function.add_function_url(auth_type=auth_type)
 
 
-def create_page_layer(stack: "AndurStack") -> lambda_.LayerVersion:
+def create_page_layer(stack: "SvarStack") -> lambda_.LayerVersion:
     """The page's files from web/, for a function that serves them itself; Lambda unpacks
     them into `PAGE_LAYER_FOLDER`. No bucket and nothing public: the files reach a browser
     only through the function."""
@@ -426,7 +426,7 @@ def create_page_layer(stack: "AndurStack") -> lambda_.LayerVersion:
 
 
 def create_deploy_drain(
-    stack: "AndurStack", function: lambda_.Function, versions: list[bedrock.CfnGuardrailVersion]
+    stack: "SvarStack", function: lambda_.Function, versions: list[bedrock.CfnGuardrailVersion]
 ) -> CustomResource:
     """A resource that waits `DEPLOY_DRAIN_SECONDS` after ``function`` has changed, in every
     deploy that replaces one of ``versions``.

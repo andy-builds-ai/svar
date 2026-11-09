@@ -22,7 +22,7 @@ from svar.app.page import (
 from taug.infra.shared import ASSET_EXCLUDES, REPOSITORY_ROOT, create_log_group
 
 if TYPE_CHECKING:
-    from svar.infra.stack import AndurStack
+    from svar.infra.stack import SvarStack
 
 
 #: The file CloudFront, or the function, serves for the bare address (svar/app/page.py).
@@ -35,7 +35,7 @@ ORIGIN_RESPONSE_TIMEOUT_SECONDS = 120
 WEB_FOLDER = REPOSITORY_ROOT / "svar" / "web"
 
 
-def create_site_bucket(stack: "AndurStack") -> s3.Bucket:
+def create_site_bucket(stack: "SvarStack") -> s3.Bucket:
     """The bucket the page is served from — private, and reachable only through CloudFront."""
     return s3.Bucket(
         stack,
@@ -48,7 +48,7 @@ def create_site_bucket(stack: "AndurStack") -> s3.Bucket:
     )
 
 
-def create_security_headers(stack: "AndurStack") -> cloudfront.ResponseHeadersPolicy:
+def create_security_headers(stack: "SvarStack") -> cloudfront.ResponseHeadersPolicy:
     """The headers every response carries, page and answer alike."""
     return cloudfront.ResponseHeadersPolicy(
         stack,
@@ -78,7 +78,7 @@ def create_security_headers(stack: "AndurStack") -> cloudfront.ResponseHeadersPo
 
 
 def create_distribution(
-    stack: "AndurStack", site_bucket: s3.Bucket, function_url: lambda_.FunctionUrl
+    stack: "SvarStack", site_bucket: s3.Bucket, function_url: lambda_.FunctionUrl
 ) -> cloudfront.Distribution:
     """One address for everything: the page from the bucket, `ASK_PATH` from the function."""
     headers = create_security_headers(stack)
@@ -122,7 +122,7 @@ def create_distribution(
 
 
 def allow_cloudfront_to_invoke(
-    stack: "AndurStack", function: lambda_.Function, distribution: cloudfront.Distribution
+    stack: "SvarStack", function: lambda_.Function, distribution: cloudfront.Distribution
 ) -> lambda_.CfnPermission:
     """The second of the two permissions the CloudFront documentation asks for.
 
@@ -144,7 +144,7 @@ def allow_cloudfront_to_invoke(
 
 
 def upload_the_page(
-    stack: "AndurStack", site_bucket: s3.Bucket, distribution: cloudfront.Distribution
+    stack: "SvarStack", site_bucket: s3.Bucket, distribution: cloudfront.Distribution
 ) -> s3_deployment.BucketDeployment:
     """Put web/ into the site bucket as part of the deploy, and clear the caches."""
     return s3_deployment.BucketDeployment(

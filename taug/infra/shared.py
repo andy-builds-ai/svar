@@ -1,19 +1,15 @@
-"""What the parts of the stack share: the Lambda runtime, how code is packaged, log
+"""What the parts of both stacks share: the Lambda runtime, how code is packaged, log
 groups."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from aws_cdk import (
     RemovalPolicy,
+    Stack,
     aws_iam as iam,
     aws_lambda as lambda_,
     aws_logs as logs,
 )
-
-if TYPE_CHECKING:
-    from svar.infra.stack import AndurStack
-
 
 #: The newest Python runtime this CDK version offers.
 LAMBDA_RUNTIME = lambda_.Runtime.PYTHON_3_14
@@ -26,9 +22,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ASSET_EXCLUDES = ["**/__pycache__", "*.pyc", "README.md"]
 
 
-def create_log_group(
-    stack: "AndurStack", construct_id: str, name: str | None = None
-) -> logs.LogGroup:
+def create_log_group(stack: Stack, construct_id: str, name: str | None = None) -> logs.LogGroup:
     """A log group with a retention, deleted with the stack."""
     return logs.LogGroup(
         stack,

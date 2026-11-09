@@ -1,4 +1,6 @@
-"""The Andur infrastructure stack: its parts wired together, and its outputs."""
+"""Svar's stack, named AndurStack in AWS: its parts wired together, and its outputs.
+
+Taug's stack (taug/infra/stack.py) holds what it stands on."""
 
 from aws_cdk import (
     CfnOutput,
@@ -40,7 +42,7 @@ from taug.infra.answer_models import (
     answer_model,
     region_models,
 )
-from taug.infra.keys import API_KEY_PARAMETER_PATH, create_key_retirer
+from taug.infra.keys import API_KEY_PARAMETER_PATH
 from taug.infra.knowledge_base import (
     WORKSPACE_PREFIX,
     create_data_source,
@@ -51,9 +53,14 @@ from taug.infra.knowledge_base import (
 )
 from taug.infra.shared import create_log_group
 
+#: The stack's description, the same before and after Taug's documents, vectors and knowledge
+#: base move out: a move may change nothing else in the template.
+SVAR_DESCRIPTION = "Svar: guardrails, answer function and page, on Taug's knowledge base."
 
-class AndurStack(Stack):
-    """Everything Svar runs on, in one stack."""
+
+class SvarStack(Stack):
+    """Svar: the answer function with its guardrails, budgets and page. Deployed under the
+    stack name it always had, AndurStack (infra/app.py)."""
 
     def __init__(
         self,
@@ -98,7 +105,6 @@ class AndurStack(Stack):
         )
         self.data_source = create_data_source(self, self.knowledge_base, self.documents_bucket)
 
-        self.key_retirer = create_key_retirer(self)
         self.budget_table = create_budget_table(self)
         self.answer_log_group = create_log_group(
             self, "AnswerFunctionLogs", f"/aws/lambda/{ANSWER_FUNCTION_NAME}"

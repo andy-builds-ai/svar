@@ -14,7 +14,7 @@ from svar.app.denied_topics import DENIED_TOPICS
 from taug.infra.answer_models import region_models
 
 if TYPE_CHECKING:
-    from svar.infra.stack import AndurStack
+    from svar.infra.stack import SvarStack
 
 
 GUARDRAIL_NAME = "andur-answer-guardrail"
@@ -102,7 +102,7 @@ def masking_policy() -> bedrock.CfnGuardrail.SensitiveInformationPolicyConfigPro
 
 
 def guardrail_with_version(
-    stack: "AndurStack", construct_id: str, label: str, properties: dict[str, Any]
+    stack: "SvarStack", construct_id: str, label: str, properties: dict[str, Any]
 ) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
     """A guardrail from ``properties``, and a numbered version that follows every one of
     them."""
@@ -118,7 +118,7 @@ def guardrail_with_version(
     return guardrail, version
 
 
-def guardrail_profile_arn(stack: "AndurStack", region: str) -> str:
+def guardrail_profile_arn(stack: "SvarStack", region: str) -> str:
     """The EU guardrail profile in ``region``.
 
     A stack whose region is set to one outside the profile's regions would send
@@ -139,7 +139,7 @@ def guardrail_profile_arn(stack: "AndurStack", region: str) -> str:
     )
 
 
-def cross_region_config(stack: "AndurStack", profile: bool) -> dict[str, Any]:
+def cross_region_config(stack: "SvarStack", profile: bool) -> dict[str, Any]:
     """The EU guardrail profile for a guardrail, or nothing: masking and the grounding check
     run in the region without a profile."""
     if not profile:
@@ -173,7 +173,7 @@ def topic_policy(on_answer: bool) -> bedrock.CfnGuardrail.TopicPolicyConfigPrope
 
 
 def create_answer_guardrail(
-    stack: "AndurStack",
+    stack: "SvarStack",
 ) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
     """The guardrail on every answer, and the numbered version the function uses. Its
     topics read the question only while `ANSWER_GUARDRAIL_READS_QUESTION_TOPICS`, and never
@@ -221,7 +221,7 @@ def create_answer_guardrail(
 
 
 def create_excerpt_guardrail(
-    stack: "AndurStack",
+    stack: "SvarStack",
 ) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
     """The guardrail that masks the sources' excerpts, and its numbered version."""
     return guardrail_with_version(
@@ -239,7 +239,7 @@ def create_excerpt_guardrail(
 
 
 def create_topic_guardrail(
-    stack: "AndurStack",
+    stack: "SvarStack",
 ) -> tuple[bedrock.CfnGuardrail, bedrock.CfnGuardrailVersion]:
     """The guardrail that checks the question and the answer, without its citations, for
     the denied topics, and its numbered version. The function applies it as INPUT to the

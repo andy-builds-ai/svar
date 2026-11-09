@@ -23,7 +23,7 @@ from svar.infra.answer_prompts import (
     prompt_of,
 )
 from svar.infra.guardrails import GUARDRAIL_PROFILE_REGIONS
-from svar.infra.stack import AndurStack
+from svar.infra.stack import SvarStack
 from taug.infra.answer_models import (
     ANSWER_MODELS,
     DEFAULT_REGION,
@@ -61,7 +61,7 @@ def profile_arn(region: str) -> dict[str, object]:
     }
 
 
-def stack_in(region: str, **overrides: object) -> AndurStack:
+def stack_in(region: str, **overrides: object) -> SvarStack:
     """The stack as infra/app.py builds it for ``region``, with ``overrides`` on top."""
     models = region_models(region)
     settings = {
@@ -71,7 +71,7 @@ def stack_in(region: str, **overrides: object) -> AndurStack:
         "behind_cloudfront": models.behind_cloudfront,
         **overrides,
     }
-    return AndurStack(
+    return SvarStack(
         cdk.App(context=deploy_context()),
         f"Stack{region.replace('-', '')}{len(overrides)}",
         env=cdk.Environment(account=ACCOUNT, region=region),
@@ -80,13 +80,13 @@ def stack_in(region: str, **overrides: object) -> AndurStack:
 
 
 @pytest.fixture(scope="module")
-def frankfurt() -> tuple[AndurStack, Template]:
+def frankfurt() -> tuple[SvarStack, Template]:
     stack = stack_in("eu-central-1")
     return stack, Template.from_stack(stack)
 
 
 @pytest.fixture(scope="module")
-def fallback() -> tuple[AndurStack, Template]:
+def fallback() -> tuple[SvarStack, Template]:
     """Frankfurt with the topic guardrail through the EU profile instead of a topic model."""
     stack = stack_in("eu-central-1", topic_model_id=None)
     return stack, Template.from_stack(stack)
@@ -157,7 +157,7 @@ def test_a_region_without_a_table_is_refused() -> None:
 
 
 def test_the_fallback_sends_only_the_topic_check_through_the_profile(
-    fallback: tuple[AndurStack, Template],
+    fallback: tuple[SvarStack, Template],
 ) -> None:
     """Masking and grounding stay in eu-central-1; the Standard topic tier, which reads German,
     goes only with the EU profile."""
@@ -172,7 +172,7 @@ def test_the_fallback_sends_only_the_topic_check_through_the_profile(
 
 
 def test_the_fallback_invokes_qwen_in_the_region_and_applies_its_three_guardrails(
-    fallback: tuple[AndurStack, Template],
+    fallback: tuple[SvarStack, Template],
 ) -> None:
     stack, template = fallback
     statements = role_policies(stack, template, stack.answer_role)["InvokeAnswerModel"]["Statement"]
@@ -198,7 +198,7 @@ def test_the_fallback_invokes_qwen_in_the_region_and_applies_its_three_guardrail
 
 
 def test_the_fallback_tells_the_function_its_model_and_frankfurt_prices(
-    fallback: tuple[AndurStack, Template],
+    fallback: tuple[SvarStack, Template],
 ) -> None:
     stack, template = fallback
     variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"][
@@ -257,7 +257,7 @@ def test_the_grounding_probe_copies_the_answer_guardrail_of_each_region() -> Non
 
 
 def test_frankfurt_uses_no_topic_guardrail_and_no_profile(
-    frankfurt: tuple[AndurStack, Template],
+    frankfurt: tuple[SvarStack, Template],
 ) -> None:
     stack, template = frankfurt
     guardrails = template.find_resources("AWS::Bedrock::Guardrail")
@@ -269,7 +269,7 @@ def test_frankfurt_uses_no_topic_guardrail_and_no_profile(
 
 
 def test_frankfurt_may_invoke_its_topic_model_there_and_nothing_more(
-    frankfurt: tuple[AndurStack, Template],
+    frankfurt: tuple[SvarStack, Template],
 ) -> None:
     stack, template = frankfurt
     statements = role_policies(stack, template, stack.answer_role)["InvokeAnswerModel"]["Statement"]
@@ -293,7 +293,7 @@ def test_frankfurt_may_invoke_its_topic_model_there_and_nothing_more(
 
 
 def test_frankfurt_tells_the_function_both_models_and_frankfurt_prices(
-    frankfurt: tuple[AndurStack, Template],
+    frankfurt: tuple[SvarStack, Template],
 ) -> None:
     stack, template = frankfurt
     variables = resource_of(stack, template, stack.answer_function)["Properties"]["Environment"][
@@ -331,7 +331,7 @@ CLOUDFRONT_TYPES = (
 
 
 def test_frankfurt_has_no_cloudfront_and_no_site_bucket(
-    frankfurt: tuple[AndurStack, Template],
+    frankfurt: tuple[SvarStack, Template],
 ) -> None:
     """Nothing of a request passes an edge location outside the region, and no bucket holds
     the page: the function hands it out."""
@@ -345,7 +345,7 @@ def test_frankfurt_has_no_cloudfront_and_no_site_bucket(
 
 
 def test_frankfurt_opens_the_url_and_lets_it_invoke_the_function_and_nothing_else(
-    frankfurt: tuple[AndurStack, Template],
+    frankfurt: tuple[SvarStack, Template],
 ) -> None:
     """AuthType NONE needs both actions since October 2025: the URL itself, and the function
     only through the URL (Lambda docs, "Control access to Lambda function URLs")."""
@@ -375,7 +375,7 @@ def test_frankfurt_opens_the_url_and_lets_it_invoke_the_function_and_nothing_els
     }
 
 
-def test_frankfurt_serves_the_page_from_a_layer(frankfurt: tuple[AndurStack, Template]) -> None:
+def test_frankfurt_serves_the_page_from_a_layer(frankfurt: tuple[SvarStack, Template]) -> None:
     stack, template = frankfurt
     assert stack.page_layer is not None
     (layer,) = template.find_resources("AWS::Lambda::LayerVersion")
@@ -385,7 +385,7 @@ def test_frankfurt_serves_the_page_from_a_layer(frankfurt: tuple[AndurStack, Tem
 
 
 def test_frankfurt_keeps_room_for_a_page_load_beside_its_questions(
-    frankfurt: tuple[AndurStack, Template],
+    frankfurt: tuple[SvarStack, Template],
 ) -> None:
     """Each file of the page is a call of the function: a page load must not wait for, or be
     refused beside, the five questions the reservation allows."""
@@ -399,7 +399,7 @@ def test_frankfurt_keeps_room_for_a_page_load_beside_its_questions(
     assert "ReservedConcurrentExecutions" not in properties["Properties"]
 
 
-def test_frankfurt_names_the_url_as_its_address(frankfurt: tuple[AndurStack, Template]) -> None:
+def test_frankfurt_names_the_url_as_its_address(frankfurt: tuple[SvarStack, Template]) -> None:
     """svar/scripts/ask.py posts to <WebUrl>/ask, in either region."""
     stack, template = frankfurt
     outputs = template.to_json()["Outputs"]
@@ -460,7 +460,7 @@ def grounding_filters(request_filters: list[dict[str, object]]) -> dict[str, obj
 
 
 def test_frankfurt_checks_grounding_at_its_own_threshold_ireland_at_the_default(
-    frankfurt: tuple[AndurStack, Template],
+    frankfurt: tuple[SvarStack, Template],
 ) -> None:
     """0.8 withheld the most made-up answers and none of the right ones to German documents,
     Qwen3 235B's own in three runs (07.10.2026); Ireland keeps 0.7."""
