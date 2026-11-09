@@ -12,7 +12,7 @@ from aws_cdk import (
 )
 
 if TYPE_CHECKING:
-    from infra.stacks.andur_stack import AndurStack
+    from svar.infra.stack import AndurStack
 
 
 #: The newest Python runtime this CDK version offers.

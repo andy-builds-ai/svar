@@ -11,7 +11,6 @@ import prompts
 import pytest
 from aws_cdk.assertions import Template
 
-from infra.stacks.andur_stack import AndurStack
 from svar.infra.answer_function import (
     ANSWER_MAX_CONCURRENCY,
     PAGE_LAYER_FOLDER,
@@ -24,6 +23,7 @@ from svar.infra.answer_prompts import (
     prompt_of,
 )
 from svar.infra.guardrails import GUARDRAIL_PROFILE_REGIONS
+from svar.infra.stack import AndurStack
 from taug.infra.answer_models import (
     ANSWER_MODELS,
     DEFAULT_REGION,

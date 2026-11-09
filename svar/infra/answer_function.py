@@ -42,7 +42,7 @@ from taug.infra.shared import (
 )
 
 if TYPE_CHECKING:
-    from infra.stacks.andur_stack import AndurStack
+    from svar.infra.stack import AndurStack
 
 
 #: A model id runs in the stack's region; an ``eu.`` inference profile id runs

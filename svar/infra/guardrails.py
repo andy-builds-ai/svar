@@ -14,7 +14,7 @@ from svar.app.denied_topics import DENIED_TOPICS
 from taug.infra.answer_models import region_models
 
 if TYPE_CHECKING:
-    from infra.stacks.andur_stack import AndurStack
+    from svar.infra.stack import AndurStack
 
 
 GUARDRAIL_NAME = "andur-answer-guardrail"

@@ -28,7 +28,6 @@ import pytest
 import sentences
 from aws_cdk.assertions import Match, Template
 
-from infra.stacks.andur_stack import AndurStack
 from svar.app.denied_topics import DENIED_TOPICS
 from svar.app.page import ASK_PATH, HSTS_MAX_AGE_DAYS
 from svar.infra.answer_function import (
@@ -64,6 +63,7 @@ from svar.infra.guardrails import (
     TOPIC_GUARDRAIL_NAME,
     TOPICS_TIER,
 )
+from svar.infra.stack import AndurStack
 from svar.infra.web import ORIGIN_RESPONSE_TIMEOUT_SECONDS, SITE_ROOT_DOCUMENT, WEB_FOLDER
 from svar.scripts import ask, grounding_probe, topic_probe
 from taug.infra import answer_models

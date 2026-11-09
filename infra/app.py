@@ -13,11 +13,11 @@ import aws_cdk as cdk
 
 # `cdk` runs this file directly, so only `infra/` lands on the import path.
 # Adding the repository root lets the app and the tests import the stack by
-# the same name, `infra.stacks.andur_stack`.
+# the same name, `svar.infra.stack`.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from infra.stacks.andur_stack import AndurStack  # noqa: E402
 from svar.infra.answer_function import ANSWER_MAX_CONCURRENCY  # noqa: E402
+from svar.infra.stack import AndurStack  # noqa: E402
 from taug.infra.answer_models import DEFAULT_REGION, region_models  # noqa: E402
 
 app = cdk.App()

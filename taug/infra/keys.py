@@ -23,7 +23,7 @@ from taug.infra.shared import (
 )
 
 if TYPE_CHECKING:
-    from infra.stacks.andur_stack import AndurStack
+    from svar.infra.stack import AndurStack
 
 
 #: Where the workspace keys live: ``<path>/<workspace>``, one SecureString each.

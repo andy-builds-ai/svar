@@ -22,7 +22,7 @@ from svar.app.page import (
 from taug.infra.shared import ASSET_EXCLUDES, REPOSITORY_ROOT, create_log_group
 
 if TYPE_CHECKING:
-    from infra.stacks.andur_stack import AndurStack
+    from svar.infra.stack import AndurStack
 
 
 #: The file CloudFront, or the function, serves for the bare address (svar/app/page.py).
