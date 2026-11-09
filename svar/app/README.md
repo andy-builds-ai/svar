@@ -32,7 +32,7 @@ question meets them:
 | `handler.py` | The entry: one HTTP request in, one response and one log line out |
 | `intake.py` | Reads the method, the body's fields and the key header |
 | `config.py` | Reads and checks the settings from the environment |
-| `keys.py` | Checks the key against Parameter Store, cached per instance |
+| `taug/access/keys.py` | Checks the key against Parameter Store, cached per instance (Taug's library, packed with this folder) |
 | `budget.py` | Counts the question against the key's budget or its plan's quota |
 | `answering.py` | One question start to finish: search, topic checks, model, response |
 | `retrieval.py` | Searches the knowledge base inside one workspace |
@@ -52,9 +52,13 @@ plans a key can carry (*Plans* below); `page.py` serves the
 page where no CloudFront stands in front (above); `topic_model.py` and
 `denied_topics.py` hold the topic model's prompt and the denied topics.
 Lambda packages this folder and imports the modules by their plain names,
-`handler`, `aws`, `keys` and the rest; the tests import them the same way
-([conftest.py](../../conftest.py)). Nothing else is needed but the
-standard library and the boto3 the Lambda runtime brings.
+`handler`, `aws` and the rest; the tests import them the same way
+([conftest.py](../../conftest.py)). Next to them the package holds Taug's
+library, [taug/access/](../../taug/access/): the workspace rules and the key
+check, imported as `taug.access` in Lambda as in the tests
+(`ANSWER_PACKAGE` in [svar/infra/answer_function.py](../infra/answer_function.py)).
+Nothing else is needed but the standard library and the boto3 the Lambda
+runtime brings.
 
 ## Asking
 

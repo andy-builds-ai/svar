@@ -1,20 +1,22 @@
-"""The workspace keys: read from Parameter Store, cached per instance, compared in constant time."""
+"""The workspace keys: read from Parameter Store, cached per instance, compared in constant time.
+
+Taug's key check, packed into the function that checks keys (Svar's answer function). It imports
+nothing from that function: the caller brings how to make the SSM client and where to log
+(`KeyStore`), and turns the three exceptions below into its own answers."""
 
 import hmac
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
-import aws
-import clients
-import clocks
-import config
-import errors
-import intake
-import log
+from taug.access import aws_errors as aws
+from taug.access.workspaces import WORKSPACE_NAME
 
 KEY_CACHE_SECONDS = 300
 
 #: How long a key may go on deciding after its last good read while it cannot be
-#: read again. Past this, its workspace is a 500 until Parameter Store answers.
+#: read again. Past this, its workspace is `KeyUnreadable` until Parameter Store answers.
 KEY_MAX_AGE_SECONDS = 3 * KEY_CACHE_SECONDS
 
 KEY_RELOAD_MIN_SECONDS = 10
@@ -31,34 +33,62 @@ UNKNOWN_KEY_READS = 10
 WRONG_KEY_READS = 10
 
 
-class KeyReadsSpent(errors.HandlerError):
+#: Seconds that only run forward: how old a cached key is. A test sets it, as it sets the
+#: caller's clock.
+clock: Callable[[], float] = time.monotonic
+
+
+class KeyUnreadable(Exception):
+    """A key could not be read, now or moments ago: the caller is set up wrong, or Parameter
+    Store does not answer. Svar answers 500."""
+
+
+class KeyReadsSpent(Exception):
     """This instance has used its reads for workspaces it holds no key for.
 
-    Not 401, which would say the key is wrong without looking, and not 429, which
-    here means a key's own quota: the service holds back for a few seconds, and
-    that is what 503 with ``Retry-After`` says.
+    Not `WrongKey`, which would say the key is wrong without looking: the check holds
+    back for a few seconds. Svar answers 503 with ``Retry-After``, not 429, which there
+    means a key's own quota.
     """
 
-    status = 503
-    headers = {"Retry-After": str(KEY_RELOAD_MIN_SECONDS)}
+    retry_after_seconds = KEY_RELOAD_MIN_SECONDS
 
 
-def read_workspace_key(path: str, workspace: str, region: str) -> str | None:
+class WrongKey(Exception):
+    """The presented key is not the requested workspace's key, or the workspace has none.
+    Svar answers 401."""
+
+
+@dataclass(frozen=True)
+class KeyStore:
+    """Where the keys are read, and what the caller lends the check to read them."""
+
+    #: Parameter Store path of the keys, one SecureString each at ``<path>/<workspace>``.
+    path: str
+    region: str
+    #: Makes an AWS client: ``make_client("ssm", region)``. It raises `KeyUnreadable` when
+    #: it cannot.
+    make_client: Callable[[str, str], Any]
+    #: Writes one event to the caller's log: ``log_event(event, **fields)``.
+    log_event: Callable[..., None]
+
+
+def read_workspace_key(store: KeyStore, workspace: str) -> str | None:
     """The key of one workspace, read and decrypted from ``<path>/<workspace>``.
 
     None when Parameter Store holds no such parameter: an answer, not an outage.
     """
-    if not intake.WORKSPACE_NAME.match(workspace):
-        # The handler checks the name first; without the check a name could leave the path.
+    if not WORKSPACE_NAME.match(workspace):
+        # The caller checks the name first; without the check a name could leave the path.
         raise ValueError("Only a checked workspace name may name a key.")
-    ssm = clients.client("ssm", region)
+    ssm = store.make_client("ssm", store.region)
     try:
-        response = ssm.get_parameter(Name=f"{path}/{workspace}", WithDecryption=True)
+        response = ssm.get_parameter(Name=f"{store.path}/{workspace}", WithDecryption=True)
     except aws.botocore_errors() as exc:
         if aws.error_code(exc) == "ParameterNotFound":
             return None
-        log.log_event("keys-unreadable", workspace=workspace, detail=aws.error_detail(exc))
-        raise errors.ConfigurationError(
+        store.log_event("keys-unreadable", workspace=workspace, detail=aws.error_detail(exc))
+        raise KeyUnreadable(
             f"The key of the workspace {workspace} could not be read: {aws.error_cause(exc)}."
         ) from exc
     return response["Parameter"]["Value"]
@@ -111,7 +141,8 @@ def forget_unknown_workspaces(now: float) -> None:
 
 
 def count_unknown_read(now: float) -> None:
-    """Allow one more read for a workspace this instance holds no key for, or refuse (503).
+    """Allow one more read for a workspace this instance holds no key for, or refuse it
+    (`KeyReadsSpent`).
 
     At most `UNKNOWN_KEY_READS` every `KEY_RELOAD_MIN_SECONDS`: a stream of invented
     names must not spend the account's Parameter Store reads, which the workspaces need
@@ -119,11 +150,7 @@ def count_unknown_read(now: float) -> None:
     """
     _unknown_reads[:] = [at for at in _unknown_reads if now - at < KEY_RELOAD_MIN_SECONDS]
     if len(_unknown_reads) >= UNKNOWN_KEY_READS:
-        raise KeyReadsSpent(
-            "Too many keys are being checked right now; try again in a few seconds.",
-            "Gerade werden zu viele Schlüssel geprüft; versuchen Sie es in ein paar Sekunden "
-            "erneut.",
-        )
+        raise KeyReadsSpent(f"More than {UNKNOWN_KEY_READS} keys in {KEY_RELOAD_MIN_SECONDS} s.")
     _unknown_reads.append(now)
 
 
@@ -131,7 +158,7 @@ def may_read_for_wrong_key(now: float) -> bool:
     """Whether one more read because of a key that is not the cached one is allowed.
 
     At most `WRONG_KEY_READS` every `KEY_RELOAD_MIN_SECONDS`, across workspaces. Over
-    the cap the cached key decides: a wrong key is still a 401, and only a key that
+    the cap the cached key decides: a wrong key is still `WrongKey`, and only a key that
     was just changed waits a few seconds longer.
     """
     _wrong_key_reads[:] = [at for at in _wrong_key_reads if now - at < KEY_RELOAD_MIN_SECONDS]
@@ -141,20 +168,20 @@ def may_read_for_wrong_key(now: float) -> bool:
     return True
 
 
-def reload_workspace_key(path: str, workspace: str, region: str) -> str | None:
+def reload_workspace_key(store: KeyStore, workspace: str) -> str | None:
     """Read one workspace's key now and keep it, or keep that there is none.
 
     A read that fails is remembered: in the cached entry, or for a name without
     one in `_failed_reads`, so the next read waits `KEY_RELOAD_MIN_SECONDS`.
     """
-    tried_at = clocks.clock()
+    tried_at = clock()
     known = _key_cache.get(workspace)
     if known is not None:
         known.tried_at = tried_at
     try:
-        key = read_workspace_key(path, workspace, region)
-    except errors.ConfigurationError:
-        failed_at = clocks.clock()
+        key = read_workspace_key(store, workspace)
+    except KeyUnreadable:
+        failed_at = clock()
         if known is not None:
             known.tried_at = failed_at
         else:
@@ -165,32 +192,32 @@ def reload_workspace_key(path: str, workspace: str, region: str) -> str | None:
             _failed_reads[workspace] = failed_at
         raise
     _failed_reads.pop(workspace, None)
-    _key_cache[workspace] = KnownKey(key=key, read_at=clocks.clock(), tried_at=tried_at)
+    _key_cache[workspace] = KnownKey(key=key, read_at=clock(), tried_at=tried_at)
     forget_unknown_workspaces(tried_at)
     return key
 
 
-def current_key(presented: str, workspace: str, path: str, region: str) -> str | None:
+def current_key(presented: str, workspace: str, store: KeyStore) -> str | None:
     """The workspace's key as this request decides with it, read at most once per request.
 
     It is read when this instance has never read it, when it is `KEY_CACHE_SECONDS`
     old, or when it is not the presented key, so a new key works at once; the
     last two at most every `KEY_RELOAD_MIN_SECONDS` per workspace. A key that
     cannot be read again goes on deciding until it is `KEY_MAX_AGE_SECONDS` old;
-    then the request is a 500. A read for a workspace without a key in the cache
+    then it is `KeyUnreadable`. A read for a workspace without a key in the cache
     counts against `UNKNOWN_KEY_READS`, a read because the presented key is not the
     cached one against `WRONG_KEY_READS`.
     """
-    now = clocks.clock()
+    now = clock()
     known = _key_cache.get(workspace)
     if known is None:
         failed_at = _failed_reads.get(workspace)
         if failed_at is not None and now - failed_at < KEY_RELOAD_MIN_SECONDS:
-            raise errors.ConfigurationError(
+            raise KeyUnreadable(
                 f"The key of the workspace {workspace} could not be read moments ago."
             )
         count_unknown_read(now)
-        return reload_workspace_key(path, workspace, region)
+        return reload_workspace_key(store, workspace)
     age = now - known.read_at
     stale = age >= KEY_CACHE_SECONDS
     if (stale or not same_key(presented, known.key)) and (
@@ -201,31 +228,30 @@ def current_key(presented: str, workspace: str, path: str, region: str) -> str |
         elif not stale and not may_read_for_wrong_key(now):
             return known.key
         try:
-            return reload_workspace_key(path, workspace, region)
-        except errors.ConfigurationError as error:
-            log.log_event("keys-reload-failed", workspace=workspace, error=str(error), stale=stale)
+            return reload_workspace_key(store, workspace)
+        except KeyUnreadable as error:
+            store.log_event(
+                "keys-reload-failed", workspace=workspace, error=str(error), stale=stale
+            )
             if age >= KEY_MAX_AGE_SECONDS:
                 raise
     if age >= KEY_MAX_AGE_SECONDS:
-        raise errors.ConfigurationError(
+        raise KeyUnreadable(
             f"The key of the workspace {workspace} is past its "
             f"{KEY_MAX_AGE_SECONDS} seconds and could not be read again."
         )
     return known.key
 
 
-def authorize(key: str, workspace: str, settings: config.Settings) -> None:
-    """Refuse a key that is not the requested workspace's key (401).
+def authorize(key: str, workspace: str, store: KeyStore) -> None:
+    """Refuse a key that is not the requested workspace's key (`WrongKey`, 401 in Svar).
 
     A wrong key, another workspace's key and a workspace without a key get the
     same sentence. Status and timing can still tell a cached workspace from an
-    unknown name (503 reaches only names without a cached key; 500 those, and a
-    cached key that is past `KEY_MAX_AGE_SECONDS` and cannot be read again, see
+    unknown name (`KeyReadsSpent` reaches only names without a cached key; `KeyUnreadable`
+    those, and a cached key that is past `KEY_MAX_AGE_SECONDS` and cannot be read again, see
     `current_key`), so workspace names are not a secret.
     """
-    stored = current_key(key, workspace, settings.key_parameter_path, settings.region)
+    stored = current_key(key, workspace, store)
     if not same_key(key, stored):
-        raise errors.Unauthorized(
-            f"This key does not open the workspace {workspace}.",
-            f"Dieser Schlüssel öffnet den Arbeitsbereich {workspace} nicht.",
-        )
+        raise WrongKey(f"This key does not open the workspace {workspace}.")

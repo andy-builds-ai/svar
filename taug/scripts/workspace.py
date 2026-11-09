@@ -314,7 +314,7 @@ def carry_out(
     return removal.key is not None
 
 
-#: ``KEY_CACHE_SECONDS`` in svar/app/keys.py, in minutes.
+#: ``KEY_CACHE_SECONDS`` in taug/access/keys.py, in minutes.
 KEY_CACHE_MINUTES = 5
 
 

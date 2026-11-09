@@ -38,7 +38,6 @@ import errors
 import guardrails
 import handler  # svar/app/handler.py
 import intake
-import keys
 import llm
 import log
 import plans
@@ -61,6 +60,8 @@ from errors import (
 from intake import KEY_HEADER, MAX_QUESTION_CHARACTERS
 from llm import ANSWER_TEMPERATURE, MAX_ANSWER_TOKENS
 from prompts import MAX_SOURCE_CHARACTERS
+
+from taug.access import keys, workspaces
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -610,6 +611,7 @@ def cold_start(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     monkeypatch.setattr(keys, "_unknown_reads", [])
     monkeypatch.setattr(keys, "_wrong_key_reads", [])
     monkeypatch.setattr(clocks, "clock", clock)
+    monkeypatch.setattr(keys, "clock", clock)
     monkeypatch.setattr(clocks, "wall_clock", FakeWallClock())
     clients.log_sdk_versions.cache_clear()
     return clock
@@ -818,13 +820,18 @@ def test_key_path_has_a_leading_slash_and_no_trailing_one(path: str) -> None:
         config.load_settings({**ENVIRONMENT, "API_KEY_PARAMETER_PATH": path})
 
 
-def test_workspace_rule_and_layers_match_the_fill_script() -> None:
-    """The handler cannot import scripts/ (Lambda gets app/ only), so a test keeps them equal."""
+def test_the_function_and_the_fill_script_take_the_workspace_rule_from_taug() -> None:
+    """One source for the name rule, its length and the layers: Taug's library, which the
+    function packs and the scripts import. A copy in either would drift."""
     layout = pytest.importorskip("taug.scripts.layout")
 
-    assert intake.WORKSPACE_NAME.pattern == layout.WORKSPACE_NAME.pattern
-    assert citations.LAYERS == layout.LAYERS
-    assert intake.MAX_WORKSPACE_CHARACTERS == layout.MAX_WORKSPACE_CHARACTERS
+    for module in (intake, layout):
+        assert module.WORKSPACE_NAME is workspaces.WORKSPACE_NAME
+        assert module.MAX_WORKSPACE_CHARACTERS is workspaces.MAX_WORKSPACE_CHARACTERS
+    for module in (citations, layout):
+        assert module.LAYERS is workspaces.LAYERS
+    assert intake.KEY_HEADER is workspaces.KEY_HEADER
+    assert retrieval.workspace_filter is workspaces.workspace_filter
 
 
 # --- Reading the request -------------------------------------------------
@@ -1096,9 +1103,9 @@ def test_the_key_is_read_at_most_once_per_request(
 
     read = keys.read_workspace_key
 
-    def slow(path: str, workspace: str, region: str) -> str | None:
+    def slow(store: keys.KeyStore, workspace: str) -> str | None:
         cold_start.advance(aws_module.call_seconds("ssm"))
-        return read(path, workspace, region)
+        return read(store, workspace)
 
     monkeypatch.setattr(keys, "read_workspace_key", slow)
     assert call(event(key="wrong-key"))[0] == 401
@@ -1130,7 +1137,10 @@ def test_only_a_checked_workspace_name_names_a_key(aws: dict[str, Any]) -> None:
     """The name ends up in a parameter path; it must not leave the key path."""
     for name in ("../other", "a/b", "Quillmoor", ""):
         with pytest.raises(ValueError):
-            keys.read_workspace_key("/andur/api-keys", name, "eu-west-1")
+            keys.read_workspace_key(
+                keys.KeyStore("/andur/api-keys", "eu-west-1", handler.key_client, log.log_event),
+                name,
+            )
     assert aws["ssm"].calls == []
 
 
@@ -1252,9 +1262,9 @@ def test_a_failed_read_is_remembered_from_when_it_failed(
     aws["ssm"].error = client_error("ThrottlingException", operation="GetParameter")
     read = keys.read_workspace_key
 
-    def slow(path: str, workspace: str, region: str) -> str | None:
+    def slow(store: keys.KeyStore, workspace: str) -> str | None:
         cold_start.advance(22)
-        return read(path, workspace, region)
+        return read(store, workspace)
 
     monkeypatch.setattr(keys, "read_workspace_key", slow)
     assert call(event())[0] == 500
@@ -2539,7 +2549,7 @@ def test_a_failed_retrieval_is_a_retrieval_error() -> None:
 
 def test_passages_of_another_workspace_are_dropped() -> None:
     results = [hit(), hit(workspace="pellwick"), {"content": {"text": "no metadata"}}]
-    kept, dropped = retrieval.keep_workspace(results, "quillmoor")
+    kept, dropped = workspaces.keep_workspace(results, "quillmoor")
     assert kept == [hit()]
     assert dropped == 2
 

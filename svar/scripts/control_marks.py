@@ -10,6 +10,7 @@ from typing import Any
 
 from svar.infra.guardrails import BLOCKED_INPUT_MESSAGE, BLOCKED_OUTPUT_MESSAGE
 from svar.scripts.evaluate import contains, declined, import_app
+from taug.access.workspaces import keep_workspace
 from taug.infra.answer_models import AnswerModel
 from taug.scripts.layout import document_of
 
@@ -299,7 +300,7 @@ def original_text(model_output: Any) -> str | None:
 def passage_texts(app: Any, results: Sequence[Mapping[str, Any]], workspace: str) -> list[str]:
     """The passages as the model reads them: of the workspace only, cut like the handler cuts
     them."""
-    kept, _ = app.retrieval.keep_workspace(results, workspace)
+    kept, _ = keep_workspace(results, workspace)
     return [app.prompts.capped(app.retrieval.passage_text(result)) for result in kept]
 
 

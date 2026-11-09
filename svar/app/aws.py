@@ -1,8 +1,16 @@
 """AWS clients for the answer function: timeouts, retries and readable causes."""
 
 import functools
-from collections.abc import Mapping
 from typing import Any, NamedTuple
+
+# The error helpers live in Taug's library, which this function packs next to its own
+# code; the rest of the function keeps calling them as aws.<name>.
+from taug.access.aws_errors import (  # noqa: F401
+    botocore_errors,
+    error_cause,
+    error_code,
+    error_detail,
+)
 
 
 class ClientLimits(NamedTuple):
@@ -171,41 +179,6 @@ def sdk_versions() -> dict[str, str]:
     return {"boto3": boto3.__version__, "botocore": botocore.__version__}
 
 
-def botocore_errors() -> tuple[type[BaseException], ...]:
-    """The two botocore base exceptions: service errors and client-side errors."""
-    from botocore.exceptions import BotoCoreError, ClientError
-
-    return BotoCoreError, ClientError
-
-
-def error_code(exc: BaseException) -> str | None:
-    """The AWS error code of a `ClientError`, or None for anything else."""
-    response = getattr(exc, "response", None)
-    if not isinstance(response, Mapping):
-        return None
-    return response.get("Error", {}).get("Code")
-
-
-_THROTTLING_CODES = {
-    "ThrottlingException",
-    "Throttling",
-    "TooManyRequestsException",
-    "ServiceQuotaExceededException",
-}
-_UNAVAILABLE_CODES = {
-    "ServiceUnavailableException",
-    "InternalServerException",
-    "ModelNotReadyException",
-}
-
-
-def error_detail(exc: BaseException) -> str:
-    """What a log line may say about a botocore exception: its class and its code."""
-    code = error_code(exc)
-    name = type(exc).__name__
-    return f"{name}: {code}" if code else name
-
-
 #: The botocore exceptions of a call that ran out of time: it may have run, and been paid for.
 _TIMEOUT_ERRORS = {"ReadTimeoutError", "ConnectTimeoutError"}
 
@@ -217,22 +190,3 @@ def timed_out(exc: BaseException | None) -> bool:
             return True
         exc = exc.__cause__
     return False
-
-
-def error_cause(exc: BaseException) -> str:
-    """A short cause for a botocore exception, safe to send to the caller."""
-    code = error_code(exc)
-    name = type(exc).__name__
-    if code in _THROTTLING_CODES:
-        return "too many requests right now (throttled), try again in a moment"
-    if code in {"AccessDeniedException", "AccessDenied"}:
-        return "access denied"
-    if code == "ResourceNotFoundException":
-        return "not found"
-    if code in _UNAVAILABLE_CODES:
-        return f"the service is unavailable ({code})"
-    if name in {"ReadTimeoutError", "ConnectTimeoutError"}:
-        return "no response within the timeout"
-    if name == "EndpointConnectionError":
-        return "the service could not be reached"
-    return code or name

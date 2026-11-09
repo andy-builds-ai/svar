@@ -15,6 +15,8 @@ import retrieval
 import sentences
 import topic_check
 
+from taug.access import workspaces
+
 
 def refused_for_topics(
     settings: config.Settings, checked: Mapping[str, Any], record: log.RequestRecord
@@ -59,7 +61,7 @@ def answer_question(
         workspace,
         settings.number_of_results,
     )
-    results, record.dropped = retrieval.keep_workspace(retrieved, workspace)
+    results, record.dropped = workspaces.keep_workspace(retrieved, workspace)
     record.hits = len(results)
     if not results:
         # No model call and no guardrail call: nothing that is billed per answer.
