@@ -376,7 +376,7 @@ def run_add(args: argparse.Namespace, settings: Mapping[str, str], connect: Any)
     # nothing else, `> /dev/null` keeps it off the screen.
     print(f"Stored a new key for workspace {args.workspace} under {name}.", file=sys.stderr)
     budget = (
-        "has the default budget (app/README.md, 'Keys are budgets, not passwords')"
+        "has the default budget (svar/app/README.md, 'Keys are budgets, not passwords')"
         if args.plan == DEMO or failed
         else f"is on the plan {describe_plan(args.plan)}"
     )

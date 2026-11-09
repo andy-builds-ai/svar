@@ -47,7 +47,9 @@ def describe_plan(name: str) -> str:
     """What a key on this plan may ask, in one line."""
     plan = plan_named(name)
     if plan is None:
-        return "demo: the stack's demo budget (app/README.md, 'Keys are budgets, not passwords')"
+        return (
+            "demo: the stack's demo budget (svar/app/README.md, 'Keys are budgets, not passwords')"
+        )
     return (
         f"{plan.name}: {plan.questions_per_month:,} questions a calendar month, at most "
         f"{plan.questions_per_day:,} a day, German time"

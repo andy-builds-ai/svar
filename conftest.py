@@ -1,7 +1,7 @@
 """Shared test setup.
 
 Lambda imports the answer function's modules by their plain names, ``handler``
-and ``aws``, because it packages the app/ folder as its import root. The tests
+and ``aws``, because it packages the svar/app/ folder as its import root. The tests
 put the same folder on the import path, so they import exactly what Lambda
 imports, under the same names.
 """
