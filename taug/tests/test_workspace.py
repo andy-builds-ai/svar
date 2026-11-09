@@ -16,6 +16,7 @@ import plans
 import pytest
 
 from svar.scripts import plan as plan_step
+from svar.scripts.ask import SVAR_STACK_NAME
 from svar.tests.test_handler import (
     apply_update,
     assert_every_placeholder_is_used,
@@ -50,13 +51,19 @@ class FakeClientError(Exception):
 
 
 class FakeCloudFormation:
+    """Taug's stack and Svar's: the budget table is Svar's output, every other one Taug's."""
+
     def __init__(self, outputs: dict[str, str]) -> None:
         self.outputs = outputs
+        self.stacks: list[str] = []
 
     def describe_stacks(self, StackName: str) -> dict[str, Any]:
+        self.stacks.append(StackName)
+        svar = StackName == SVAR_STACK_NAME
+        outputs = {k: v for k, v in self.outputs.items() if (k in workspace.SVAR_OUTPUTS) == svar}
         return {
             "Stacks": [
-                {"Outputs": [{"OutputKey": k, "OutputValue": v} for k, v in self.outputs.items()]}
+                {"Outputs": [{"OutputKey": k, "OutputValue": v} for k, v in outputs.items()]}
             ]
         }
 
@@ -536,7 +543,8 @@ def test_plan_leaves_an_item_of_another_workspace_alone(
 def test_plan_reads_the_key_path_and_the_table_and_nothing_else() -> None:
     account = Account({"ApiKeyParameterPath": PATH, "BudgetTableName": TABLE})
     assert run(account, "plan", TARGET, "firma") == 0
-    assert account.connected == ["cloudformation", "ssm", "dynamodb"]
+    assert account.connected == ["cloudformation", "cloudformation", "ssm", "dynamodb"]
+    assert account.cloudformation.stacks == ["TaugStack", "AndurStack"]
 
 
 def test_remove_shows_and_deletes_the_plan_items_of_every_key(

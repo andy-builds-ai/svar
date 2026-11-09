@@ -19,8 +19,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from svar.infra.answer_function import ANSWER_MAX_CONCURRENCY  # noqa: E402
 from svar.infra.stack import SVAR_DESCRIPTION, SvarStack  # noqa: E402
+from svar.scripts.ask import SVAR_STACK_NAME  # noqa: E402
 from taug.infra.answer_models import DEFAULT_REGION, region_models  # noqa: E402
 from taug.infra.stack import TAUG_DESCRIPTION, TaugStack  # noqa: E402
+from taug.scripts.aws import TAUG_STACK_NAME  # noqa: E402
 
 app = cdk.App()
 
@@ -39,13 +41,14 @@ if CONCURRENCY not in (None, "none"):
 #: Both stacks go to the same account and region.
 ENVIRONMENT = cdk.Environment(account=os.environ.get("CDK_DEFAULT_ACCOUNT"), region=REGION)
 
-taug = TaugStack(app, "TaugStack", description=TAUG_DESCRIPTION, env=ENVIRONMENT)
+# The stack names the scripts read their outputs by.
+taug = TaugStack(app, TAUG_STACK_NAME, description=TAUG_DESCRIPTION, env=ENVIRONMENT)
 
 # Svar keeps the stack name it was deployed under, so its function, address and page stay
 # where they are; Taug's parts move out of it into TaugStack (docs/decisions.md).
 svar = SvarStack(
     app,
-    "AndurStack",
+    SVAR_STACK_NAME,
     description=SVAR_DESCRIPTION,
     knowledge_base=taug.knowledge_base,
     answer_model_id=MODELS.answer_model_id,

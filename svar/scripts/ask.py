@@ -14,7 +14,7 @@ from typing import Any
 from taug.scripts import utf8_output
 from taug.scripts.aws import (
     REGION,
-    STACK_NAME,
+    TAUG_STACK_NAME,
     AwsProblem,
     client,
     error_code,
@@ -26,7 +26,11 @@ from taug.scripts.aws import (
 #: Set this to use a key you already have instead of reading Parameter Store.
 API_KEY_ENVIRONMENT_VARIABLE = "ANDUR_API_KEY"
 
-#: The stack output that carries the address; ``/ask`` is appended to it.
+#: Svar's stack. It keeps the name Andur's one stack had, so the function, its address and
+#: the page stayed where they were when Taug moved into its own stack (infra/app.py).
+SVAR_STACK_NAME = "AndurStack"
+
+#: The stack output that carries the address; ``/ask`` is appended to it. It is Svar's.
 WEB_URL_OUTPUT = "WebUrl"
 
 #: The path on that address that reaches the answer function.
@@ -161,7 +165,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="the language Svar's own sentences come in; default: the function's, English",
     )
     parser.add_argument("--json", action="store_true", help="print the raw JSON response")
-    parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
+    parser.add_argument(
+        "--stack-name", default=SVAR_STACK_NAME, help=f"Svar's stack; default: {SVAR_STACK_NAME}"
+    )
+    parser.add_argument(
+        "--taug-stack-name",
+        default=TAUG_STACK_NAME,
+        help=f"Taug's stack, which names the key path; default: {TAUG_STACK_NAME}",
+    )
     parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
     parser.add_argument("--url", help=f"the web address; default: stack output {WEB_URL_OUTPUT}")
     return parser.parse_args(argv)
@@ -171,15 +182,19 @@ def main(argv: list[str] | None = None) -> int:
     utf8_output()
     args = parse_args(argv)
     given_key = os.environ.get(API_KEY_ENVIRONMENT_VARIABLE, "").strip()
-    # The key path is only needed when the key has to come from Parameter Store.
-    wanted: dict[str, str | None] = {WEB_URL_OUTPUT: args.url}
-    if not given_key:
-        wanted["ApiKeyParameterPath"] = None
     try:
         settings = resolve(
-            wanted,
+            {WEB_URL_OUTPUT: args.url},
             lambda: read_stack_outputs(client("cloudformation", args.region), args.stack_name),
         )
+        # The key path is only needed when the key has to come from Parameter Store.
+        if not given_key:
+            settings |= resolve(
+                {"ApiKeyParameterPath": None},
+                lambda: read_stack_outputs(
+                    client("cloudformation", args.region), args.taug_stack_name
+                ),
+            )
         key = header_value(
             given_key
             or read_key(client("ssm", args.region), settings["ApiKeyParameterPath"], args.workspace)

@@ -542,7 +542,9 @@ def test_the_stack_must_be_finished_and_have_its_outputs(tmp_path: Path) -> None
             )
         },
     )
-    assert rehearsal_checks.check_stack(ctx) == f"AndurStack CREATE_COMPLETE in {REGION}"
+    assert rehearsal_checks.check_stack(ctx) == (
+        f"TaugStack CREATE_COMPLETE and AndurStack CREATE_COMPLETE in {REGION}"
+    )
     ctx.clients = lambda s: Fake(describe_stacks=stack("UPDATE_ROLLBACK_COMPLETE", "WebUrl"))
     with pytest.raises(StepFailed, match="not deployed and finished"):
         rehearsal_checks.check_stack(ctx)
@@ -602,6 +604,7 @@ def test_the_deploy_time_reads_both_stacks(tmp_path: Path) -> None:
     finished = (T0 + timedelta(minutes=2)).astimezone().strftime("%d.%m.%Y %H:%M")
     assert rehearsal_checks.check_deploy_time(ctx) == (
         f"CDKToolkit create 2 min 00 s, finished {finished}; "
+        f"TaugStack create 2 min 00 s, finished {finished}; "
         f"AndurStack create 2 min 00 s, finished {finished}"
     )
 

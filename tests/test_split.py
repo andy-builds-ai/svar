@@ -14,7 +14,10 @@ import aws_cdk as cdk
 import pytest
 from aws_cdk.assertions import Template
 
+from svar.scripts.ask import SVAR_STACK_NAME
 from taug.infra.answer_models import region_models
+from taug.infra.shared import REPOSITORY_ROOT
+from taug.scripts.aws import TAUG_STACK_NAME
 from tests.test_stack import andur_stacks, deploy_context
 
 #: What moves from AndurStack to TaugStack, by logical id: the documents, the vectors and the
@@ -99,6 +102,16 @@ CANNOT_MOVE = {
     "AWS::Lambda::LayerVersion",
     "AWS::DynamoDB::GlobalTable",
 }
+
+
+def test_the_stack_names_are_the_ones_aws_and_the_scripts_know() -> None:
+    """Svar's stack keeps the name the one stack had; infra/app.py and every script take both
+    names from these two constants."""
+    assert (TAUG_STACK_NAME, SVAR_STACK_NAME) == ("TaugStack", "AndurStack")
+    app = (REPOSITORY_ROOT / "infra" / "app.py").read_text(encoding="utf-8")
+    assert "TaugStack(app, TAUG_STACK_NAME," in app
+    assert "    SVAR_STACK_NAME,\n" in app
+    assert '"AndurStack"' not in app and '"TaugStack"' not in app
 
 
 @pytest.fixture(scope="module", params=["eu-west-1", "eu-central-1"])

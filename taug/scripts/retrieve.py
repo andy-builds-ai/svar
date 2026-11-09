@@ -7,7 +7,7 @@ from typing import Any
 from taug.scripts import utf8_output
 from taug.scripts.aws import (
     REGION,
-    STACK_NAME,
+    TAUG_STACK_NAME,
     AwsProblem,
     client,
     explained,
@@ -70,7 +70,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--workspace", required=True, help="the workspace to search in")
     parser.add_argument("--layer", choices=LAYERS, help="only chunks from this layer")
     parser.add_argument("--results", type=int, default=5, help="number of hits (default: 5)")
-    parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
+    parser.add_argument("--stack-name", default=TAUG_STACK_NAME, help=f"default: {TAUG_STACK_NAME}")
     parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
     parser.add_argument("--knowledge-base-id", help="default: stack output KnowledgeBaseId")
     args = parser.parse_args(argv)

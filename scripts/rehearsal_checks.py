@@ -31,7 +31,8 @@ HTTP_TIMEOUT_SECONDS = 10
 #: The CloudFormation stack `cdk bootstrap` creates.
 BOOTSTRAP_STACK = "CDKToolkit"
 
-#: The stack outputs the steps and the scripts they run read; checked before anything is paid.
+#: The outputs of both stacks the steps and the scripts they run read; checked before anything
+#: is paid.
 NEEDED_OUTPUTS = (
     "WebUrl",
     "ApiKeyParameterPath",
@@ -68,17 +69,25 @@ def check_identity(ctx: Context) -> str:
 
 
 def check_stack(ctx: Context) -> str:
-    """The stack is deployed and finished, and has the outputs the steps need."""
-    with explained(f"Reading stack {ctx.stack_name}"):
-        stacks = ctx.client("cloudformation").describe_stacks(StackName=ctx.stack_name)["Stacks"]
-    status = stacks[0]["StackStatus"]
-    if status not in _DONE:
-        raise StepFailed(f"{ctx.stack_name} is {status}, not deployed and finished")
-    ctx.outputs = {o["OutputKey"]: o["OutputValue"] for o in stacks[0].get("Outputs", [])}
+    """Taug's stack and Svar's are deployed and finished, and between them have the outputs the
+    steps need."""
+    outputs: dict[str, str] = {}
+    found = []
+    for name in (ctx.taug_stack_name, ctx.stack_name):
+        with explained(f"Reading stack {name}"):
+            stacks = ctx.client("cloudformation").describe_stacks(StackName=name)["Stacks"]
+        status = stacks[0]["StackStatus"]
+        if status not in _DONE:
+            raise StepFailed(f"{name} is {status}, not deployed and finished")
+        outputs |= {o["OutputKey"]: o["OutputValue"] for o in stacks[0].get("Outputs", [])}
+        found.append(f"{name} {status}")
+    ctx.outputs = outputs
     missing = [name for name in NEEDED_OUTPUTS if name not in ctx.outputs]
     if missing:
-        raise StepFailed(f"{ctx.stack_name} has no output {', '.join(missing)}")
-    return f"{ctx.stack_name} {status} in {ctx.region}"
+        raise StepFailed(
+            f"{ctx.taug_stack_name} and {ctx.stack_name} have no output {', '.join(missing)}"
+        )
+    return f"{' and '.join(found)} in {ctx.region}"
 
 
 def last_deploy(
@@ -119,7 +128,7 @@ def check_deploy_time(ctx: Context) -> str:
     """How long the operator's bootstrap and deploy took, by CloudFormation's own events."""
     cloudformation = ctx.client("cloudformation")
     parts = []
-    for name in (BOOTSTRAP_STACK, ctx.stack_name):
+    for name in (BOOTSTRAP_STACK, ctx.taug_stack_name, ctx.stack_name):
         with explained(f"Reading the events of {name}"):
             found = last_deploy(stack_events(cloudformation, name), name)
         if found is None:

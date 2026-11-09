@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from svar.app.plans import DEMO
+from svar.scripts.ask import SVAR_STACK_NAME
 from svar.scripts.plan import (
     BUDGET_KEY_ATTRIBUTE,
     BUDGET_WORKSPACE_ATTRIBUTE,
@@ -29,7 +30,7 @@ from svar.scripts.plan import (
 from taug.scripts import utf8_output
 from taug.scripts.aws import (
     REGION,
-    STACK_NAME,
+    TAUG_STACK_NAME,
     AwsProblem,
     client,
     error_code,
@@ -57,6 +58,8 @@ KEY_DESCRIPTION = "Andur workspace key. Send it in the header X-Andur-Key."
 ADD_OUTPUTS = ("ApiKeyParameterPath",)
 ADD_WITH_PLAN_OUTPUTS = ("ApiKeyParameterPath", "BudgetTableName")
 PLAN_OUTPUTS = ("ApiKeyParameterPath", "BudgetTableName")
+#: The outputs of Svar's stack among the ones above; all others are Taug's.
+SVAR_OUTPUTS = ("BudgetTableName",)
 REMOVE_OUTPUTS = (
     "ApiKeyParameterPath",
     "BudgetTableName",
@@ -326,7 +329,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         prog="python -m taug.scripts.workspace",
         description="Add a workspace's key, change its plan, or remove a workspace from Andur.",
     )
-    parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
+    parser.add_argument(
+        "--stack-name", default=TAUG_STACK_NAME, help=f"Taug's stack; default: {TAUG_STACK_NAME}"
+    )
+    parser.add_argument(
+        "--svar-stack-name",
+        default=SVAR_STACK_NAME,
+        help=f"Svar's stack, which names the budget table; default: {SVAR_STACK_NAME}",
+    )
     parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
     commands = parser.add_subparsers(dest="command", required=True)
     add = commands.add_parser(
@@ -403,8 +413,10 @@ def command(args: argparse.Namespace, *words: str) -> str:
     options: list[str] = []
     if args.region != REGION:
         options += ["--region", args.region]
-    if args.stack_name != STACK_NAME:
+    if args.stack_name != TAUG_STACK_NAME:
         options += ["--stack-name", args.stack_name]
+    if args.svar_stack_name != SVAR_STACK_NAME:
+        options += ["--svar-stack-name", args.svar_stack_name]
     return " ".join(["python -m taug.scripts.workspace", *options, *words])
 
 
@@ -478,8 +490,14 @@ def main(argv: list[str] | None = None, connect: Callable[[str, str], Any] = cli
         wanted, run = REMOVE_OUTPUTS, run_remove
     try:
         settings = resolve(
-            dict.fromkeys(wanted),
+            dict.fromkeys(name for name in wanted if name not in SVAR_OUTPUTS),
             lambda: read_stack_outputs(connect("cloudformation", args.region), args.stack_name),
+        )
+        settings |= resolve(
+            dict.fromkeys(name for name in wanted if name in SVAR_OUTPUTS),
+            lambda: read_stack_outputs(
+                connect("cloudformation", args.region), args.svar_stack_name
+            ),
         )
         return run(args, settings, connect)
     except AwsProblem as problem:

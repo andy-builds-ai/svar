@@ -280,15 +280,16 @@ def deployed(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         seen["requests"].append(request)
         return seen.get("response", (200, ANSWER))
 
+    def fake_outputs(cloudformation: Any, stack: str) -> dict[str, str]:
+        """The address is Svar's output, the key path Taug's."""
+        seen.setdefault("stacks", []).append(stack)
+        return {
+            ask.SVAR_STACK_NAME: {ask.WEB_URL_OUTPUT: WEB_URL},
+            "TaugStack": {"ApiKeyParameterPath": "/andur/api-keys"},
+        }.get(stack, {})
+
     monkeypatch.setattr(ask, "client", fake_client)
-    monkeypatch.setattr(
-        ask,
-        "read_stack_outputs",
-        lambda cloudformation, stack: {
-            ask.WEB_URL_OUTPUT: WEB_URL,
-            "ApiKeyParameterPath": "/andur/api-keys",
-        },
-    )
+    monkeypatch.setattr(ask, "read_stack_outputs", fake_outputs)
     monkeypatch.setattr(ask, "send", fake_send)
     monkeypatch.delenv(ask.API_KEY_ENVIRONMENT_VARIABLE, raising=False)
     return seen
@@ -298,6 +299,7 @@ def test_main_asks_the_web_address_and_never_prints_the_key(
     deployed: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert ask.main(["How do I export?", "--workspace", "quillmoor"]) == 0
+    assert deployed["stacks"] == ["AndurStack", "TaugStack"]
     (request,) = deployed["requests"]
     assert request.full_url == ASK_URL
     assert request.get_header(ask.KEY_HEADER.capitalize()) == KEY
