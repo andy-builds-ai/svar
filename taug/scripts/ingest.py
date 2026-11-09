@@ -14,7 +14,7 @@ from typing import Any
 from taug.scripts import utf8_output
 from taug.scripts.aws import (
     REGION,
-    STACK_NAME,
+    TAUG_STACK_NAME,
     AwsProblem,
     client,
     error_code,
@@ -430,7 +430,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="delete objects the folder no longer has; without it they are only listed",
     )
-    parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
+    parser.add_argument("--stack-name", default=TAUG_STACK_NAME, help=f"default: {TAUG_STACK_NAME}")
     parser.add_argument("--region", default=REGION, help=f"default: {REGION}")
     parser.add_argument(
         "--bucket", help="documents bucket; default: stack output DocumentsBucketName"

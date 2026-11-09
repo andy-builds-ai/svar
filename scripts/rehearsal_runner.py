@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from svar.scripts.ask import API_KEY_ENVIRONMENT_VARIABLE
-from taug.scripts.aws import AwsProblem, read_stack_outputs
+from taug.scripts.aws import TAUG_STACK_NAME, AwsProblem, read_stack_outputs
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 
@@ -31,6 +31,7 @@ class Context:
     """What the steps share: the run's settings and what earlier steps found out."""
 
     region: str
+    #: Svar's stack; Taug's is `taug_stack_name`.
     stack_name: str
     workspace: str
     other_workspace: str
@@ -43,6 +44,8 @@ class Context:
     documents: frozenset[str] = frozenset()
     #: The file names the other workspace's own documents go up as, from the demo folder.
     other_files: frozenset[str] = frozenset()
+    taug_stack_name: str = TAUG_STACK_NAME
+    #: The outputs of both stacks; no name is in both.
     outputs: dict[str, str] = field(default_factory=dict)
     account: str | None = None
     started: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -51,11 +54,15 @@ class Context:
         return self.clients(service)
 
     def output(self, name: str) -> str:
-        """A stack output; read from the stack the first time one is needed."""
+        """A stack output; read from both stacks the first time one is needed."""
         if not self.outputs:
-            self.outputs = read_stack_outputs(self.client("cloudformation"), self.stack_name)
+            cloudformation = self.client("cloudformation")
+            self.outputs = {
+                **read_stack_outputs(cloudformation, self.taug_stack_name),
+                **read_stack_outputs(cloudformation, self.stack_name),
+            }
         if name not in self.outputs:
-            raise StepFailed(f"the stack has no output {name}")
+            raise StepFailed(f"neither stack has the output {name}")
         return self.outputs[name]
 
 

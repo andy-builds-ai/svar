@@ -53,10 +53,11 @@ from scripts.rehearsal_runner import (
     select,
     summary_lines,
 )
+from svar.scripts.ask import SVAR_STACK_NAME
 from svar.scripts.control_eval import QUESTIONS_FILE as CONTROL_QUESTIONS
 from taug.infra.answer_models import REGIONS, answer_model
 from taug.scripts import utf8_output
-from taug.scripts.aws import STACK_NAME, client
+from taug.scripts.aws import TAUG_STACK_NAME, client
 from taug.scripts.ingest import discover
 from taug.scripts.layout import SIDECAR_SUFFIX, document_of, upload_items
 
@@ -405,7 +406,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         choices=RUN_REGIONS,
         help=f"a region whose function is its own address; default {DEFAULT_REGION}",
     )
-    parser.add_argument("--stack-name", default=STACK_NAME, help=f"default: {STACK_NAME}")
+    parser.add_argument(
+        "--stack-name", default=SVAR_STACK_NAME, help=f"Svar's stack; default: {SVAR_STACK_NAME}"
+    )
+    parser.add_argument(
+        "--taug-stack-name",
+        default=TAUG_STACK_NAME,
+        help=f"Taug's stack; default: {TAUG_STACK_NAME}",
+    )
     parser.add_argument("--expect-role", help="stop unless signed in with this role")
     parser.add_argument(
         "--manual",
@@ -482,6 +490,7 @@ def main(argv: list[str] | None = None) -> int:
     ctx = Context(
         region=args.region,
         stack_name=args.stack_name,
+        taug_stack_name=args.taug_stack_name,
         workspace=args.workspace,
         other_workspace=args.other_workspace,
         out_dir=args.out_dir,

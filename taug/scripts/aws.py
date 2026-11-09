@@ -6,7 +6,9 @@ from typing import Any
 
 from taug.infra.answer_models import DEFAULT_REGION
 
-STACK_NAME = "AndurStack"
+#: Taug's stack (infra/app.py): the documents, the knowledge base and the key path. Svar's
+#: stack, with the page and the budget table, is `SVAR_STACK_NAME` in svar/scripts/ask.py.
+TAUG_STACK_NAME = "TaugStack"
 #: The default of every `--region`: the region taug/infra/answer_models.py names, so a move is one
 #: setting for the stack and the scripts alike.
 REGION = DEFAULT_REGION
