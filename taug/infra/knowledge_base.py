@@ -15,7 +15,7 @@ from aws_cdk import (
 )
 
 if TYPE_CHECKING:
-    from svar.infra.stack import AndurStack
+    from taug.infra.stack import TaugStack
 
 
 #: Titan Text Embeddings V2. The model id is part of the Bedrock ARN.
@@ -68,7 +68,7 @@ DATA_SOURCE_NAME = replacement_safe_name(
 )
 
 
-def create_documents_bucket(stack: "AndurStack") -> s3.Bucket:
+def create_documents_bucket(stack: "TaugStack") -> s3.Bucket:
     """The source of truth: the files a workspace owner uploads."""
     bucket = s3.Bucket(
         stack,
@@ -93,7 +93,7 @@ def create_documents_bucket(stack: "AndurStack") -> s3.Bucket:
 
 
 def create_vector_store(
-    stack: "AndurStack",
+    stack: "TaugStack",
 ) -> tuple[s3vectors.CfnVectorBucket, s3vectors.CfnIndex]:
     """The S3 Vectors bucket and the single index the knowledge base writes to."""
     vector_bucket = s3vectors.CfnVectorBucket(
@@ -122,7 +122,7 @@ def create_vector_store(
 
 
 def create_knowledge_base_role(
-    stack: "AndurStack", documents_bucket: s3.Bucket, vector_index: s3vectors.CfnIndex
+    stack: "TaugStack", documents_bucket: s3.Bucket, vector_index: s3vectors.CfnIndex
 ) -> iam.Role:
     """The role Bedrock assumes while crawling, embedding and indexing."""
     return iam.Role(
@@ -199,7 +199,7 @@ def embedding_model_arn() -> str:
 
 
 def create_knowledge_base(
-    stack: "AndurStack", vector_index: s3vectors.CfnIndex, role: iam.Role
+    stack: "TaugStack", vector_index: s3vectors.CfnIndex, role: iam.Role
 ) -> bedrock.CfnKnowledgeBase:
     """The managed RAG pipeline: embed, store, retrieve."""
     return bedrock.CfnKnowledgeBase(
@@ -230,7 +230,7 @@ def create_knowledge_base(
 
 
 def create_data_source(
-    stack: "AndurStack", knowledge_base: bedrock.CfnKnowledgeBase, documents_bucket: s3.Bucket
+    stack: "TaugStack", knowledge_base: bedrock.CfnKnowledgeBase, documents_bucket: s3.Bucket
 ) -> bedrock.CfnDataSource:
     """What to crawl, and how to cut it into chunks."""
     return bedrock.CfnDataSource(
