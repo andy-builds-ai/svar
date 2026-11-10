@@ -1,5 +1,5 @@
-"""Taug's key resources: where the workspace keys live, and the function that answers the
-Delete of the key resources Andur's stack used to have.
+"""Taug's key resources: where the workspace keys live, and the key retirer, built anew as
+the first content of Taug's stack.
 
 The keys belong to the workspaces (Taug); Svar's answer function reads them with Taug's
 key check (taug/access/keys.py), packed into it."""
@@ -32,18 +32,23 @@ API_KEY_PARAMETER_PATH = "/andur/api-keys"
 
 
 def create_key_retirer(stack: "TaugStack") -> cr.Provider:
-    """The function that answers the Delete of the key resources this stack used to have.
+    """The key retirer: the function that answered, in Andur's one stack, the Delete of the
+    key resources that stack used to have, and deleted nothing
+    (taug/infra/api_keys/handler.py).
 
-    It deletes nothing (taug/infra/api_keys/handler.py), and it has no permission on Parameter
-    Store either: the removed resources go in the deploy's cleanup phase, after this role
-    and this function are updated, so the Delete finds neither code nor a right to
-    delete a key. The construct ids are the old ones, so the deploy updates these
-    resources in place instead of replacing them.
+    In Taug's stack it answers no Delete. A custom resource sends its Delete to the function
+    its ``ServiceToken`` names, the provider in its own stack, and no resource names this
+    one. No stack this code deploys holds a ``Custom::AndurApiKey``: the templates have
+    none, and a stack in eu-west-1 or eu-central-1 still holding one loses it, to the
+    retirer in that same stack, on the last deploy before the split, whose ``cdk diff``
+    shows it. The old stack in us-east-1, deliberately left at a version with key
+    resources, keeps its own retirer, and this code cannot be deployed there: the region
+    has no models (``region_models``).
 
-    Remove all of it only once no deployed stack holds a ``Custom::AndurApiKey`` any
-    more, in any account and region: a stack that skipped this deploy would send the
-    Delete to the old function, which may delete keys. The old stack in us-east-1 is
-    one, deliberately left at a version with key resources (docs/decisions.md).
+    It is built here, under its old construct ids, because ``cdk refactor`` creates no
+    stack: Taug's stack is deployed with this in it before the knowledge base moves in
+    (docs/decisions.md). Its role may only write its log, so not even a Delete that did
+    reach it could take a key.
     """
     log_group = create_log_group(stack, "ApiKeyFunctionLogs")
     role = iam.Role(

@@ -15,7 +15,7 @@ and the table of regions and models with their prices.
 | [infra/stack.py](infra/stack.py) | `TaugStack`: the documents, the vectors, the knowledge base, the key retirer, and the outputs the scripts read. |
 | [infra/knowledge_base.py](infra/knowledge_base.py) | Builds the documents bucket (`workspaces/<workspace>/<layer>/`), the vector store, the knowledge base and its data source. |
 | [infra/answer_models.py](infra/answer_models.py) | The regions a stack may run in, the models each region may use, and their token prices. Model ids and prices live here and nowhere else. |
-| [infra/keys.py](infra/keys.py) | Where the workspace keys live in Parameter Store, and the function that answers the Delete of the key resources Andur's stack used to have. |
+| [infra/keys.py](infra/keys.py) | Where the workspace keys live in Parameter Store, and the key retirer, which answered the Delete of the key resources Andur's one stack used to have; in `TaugStack` no resource calls it, it is the stack's first content. |
 | [infra/api_keys/](infra/api_keys/handler.py) | That function's code, a code package of its own. |
 | [infra/shared.py](infra/shared.py) | What the stack modules of both stacks share: the Lambda runtime, how code is packaged, log groups. |
 | [scripts/](scripts/README.md) | `ingest` (check a folder, upload it, sync the knowledge base), `retrieve` (search one workspace), `workspace` (add a workspace's key, put it on a plan, remove a workspace), with `layout` and `aws` underneath. |

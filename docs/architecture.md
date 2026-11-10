@@ -93,8 +93,10 @@ eu-central-1, measured from a laptop in Germany
 `infra/app.py` builds two stacks in one account and region. Taug's,
 `TaugStack` (`taug/infra/stack.py`), creates the documents bucket, the
 vector bucket and index, the knowledge base with its service role, a data
-source pointing at the documents, and the key retirer, which answers the
-Delete of key resources Andur's stack used to have and deletes nothing.
+source pointing at the documents, and the key retirer, which answered the
+Delete of key resources Andur's one stack used to have; here no resource
+calls it, and it stands as the stack's first content
+([decisions](decisions.md)).
 Svar's, `AndurStack` (`svar/infra/stack.py`), depends on it and imports the
 knowledge base's id and ARN. It creates the table that
 holds each key's budget, the guardrails (on the answer, on the excerpts of

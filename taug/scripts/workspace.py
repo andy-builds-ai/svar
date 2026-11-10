@@ -492,12 +492,14 @@ def main(argv: list[str] | None = None, connect: Callable[[str, str], Any] = cli
         settings = resolve(
             dict.fromkeys(name for name in wanted if name not in SVAR_OUTPUTS),
             lambda: read_stack_outputs(connect("cloudformation", args.region), args.stack_name),
+            stack_name=args.stack_name,
         )
         settings |= resolve(
             dict.fromkeys(name for name in wanted if name in SVAR_OUTPUTS),
             lambda: read_stack_outputs(
                 connect("cloudformation", args.region), args.svar_stack_name
             ),
+            stack_name=args.svar_stack_name,
         )
         return run(args, settings, connect)
     except AwsProblem as problem:

@@ -20,7 +20,8 @@ def lifecycle(request_type: str, physical_id: str | None = None) -> dict[str, An
 
 
 def test_a_delete_succeeds_and_keeps_its_id(capsys: pytest.CaptureFixture[str]) -> None:
-    """The Delete of every removed key resource comes here; CloudFormation must see success."""
+    """In Andur's one stack the Delete of every removed key resource came here, and wherever
+    one still does, CloudFormation must see success."""
     result = handler.on_event(lifecycle("Delete", f"{PATH}/quillmoor"), None)
 
     assert result == {"PhysicalResourceId": f"{PATH}/quillmoor"}

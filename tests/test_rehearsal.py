@@ -1,6 +1,7 @@
 """The rehearsal run: its plan, how it runs and times the steps, and its checks, without AWS."""
 
 import http.client
+import importlib
 import json
 import socket
 import sys
@@ -93,6 +94,43 @@ def test_every_command_runs_in_the_region_and_only_frankfurt_can_be_it(plan: lis
     with pytest.raises(SystemExit):
         rehearsal.parse_args(["--workspace", "k", "--source", "s", "--question", "q",
                               "--out-dir", "o", "--region", "eu-west-1"])  # fmt: skip
+
+
+#: What each script that reads a stack's outputs must read, as its own parser gives it: Taug's
+#: scripts name Taug's stack with --stack-name, ask names Svar's with it.
+STACKS_READ = {
+    "taug.scripts.ingest": {"stack_name": "TaugProbe"},
+    "taug.scripts.retrieve": {"stack_name": "TaugProbe"},
+    "taug.scripts.workspace": {"stack_name": "TaugProbe", "svar_stack_name": "SvarProbe"},
+    "svar.scripts.ask": {"stack_name": "SvarProbe", "taug_stack_name": "TaugProbe"},
+}
+
+
+def test_every_script_that_reads_a_stack_reads_the_stacks_the_run_was_given(
+    tmp_path: Path,
+) -> None:
+    """--stack-name and --taug-stack-name reach every step, each read by the script's own
+    parser, so no step falls back to the default names while the checks read others."""
+    plan = rehearsal.build_plan(
+        arguments(tmp_path, "--stack-name", "SvarProbe", "--taug-stack-name", "TaugProbe")
+    )
+    reading = [step for step in plan if step.command and step.command[2] in STACKS_READ]
+    assert [step.id for step in reading] == [
+        "documents-check",
+        "key",
+        "documents",
+        "search",
+        "first-question",
+        "demo-documents",
+        "search-apart",
+        "key-apart",
+    ]
+    for step in reading:
+        assert step.command is not None
+        module = importlib.import_module(step.command[2])
+        parsed = vars(module.parse_args(list(step.command[3:])))
+        expected = STACKS_READ[step.command[2]]
+        assert {name: parsed[name] for name in expected} == expected, step.id
 
 
 def test_the_key_is_never_captured_and_the_plan_reaches_it(plan: list[Step]) -> None:

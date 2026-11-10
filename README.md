@@ -69,7 +69,7 @@ Claude Code work in this repository under the rules in
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
-pytest -q                                  # 1,597 tests, no AWS needed; one is skipped without a time zone database
+pytest -q                                  # 1,598 tests, no AWS needed; one is skipped without a time zone database
 ruff check && ruff format --check
 ```
 

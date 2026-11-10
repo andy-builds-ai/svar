@@ -93,7 +93,7 @@ def test_the_packaged_handler_imports_as_lambda_imports_it(tmp_path: Path) -> No
         tmp_path,
     )
     assert result.returncode == 0, result.stderr
-    module_file, same = result.stdout.split()
+    module_file, same = result.stdout.splitlines()
     assert Path(module_file).resolve().is_relative_to(tmp_path.resolve())
     assert same == "True"
 

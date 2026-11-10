@@ -52,6 +52,10 @@ vector bucket, the index, the knowledge base role, the knowledge base and its
 data source), move into `TaugStack` with their logical ids unchanged. The key
 retirer cannot move, because its provider's IAM policy is NON_PROVISIONABLE;
 it is built anew in `TaugStack` under its old ids, and its two log groups go.
+There it answers no Delete: a custom resource sends its Delete to the function
+its `ServiceToken` names, the provider in its own stack. It is `TaugStack`'s
+first content, because `cdk refactor` creates no stack, so the stack must be
+deployed with something in it before the seven move.
 The budget table stays with Svar, whose function counts on it. Taug's key check
 and workspace rules become a library (`taug/access/`) that Svar's answer
 function packs next to its own code, not a function or layer of their own: a
@@ -239,6 +243,14 @@ region. Removing them from the code removes them everywhere the code is
 deployed next, and on a stack that skipped this deploy the Delete would reach
 the old function, which may delete keys. One such stack exists: the old one in
 us-east-1, deliberately left at a version with key resources.
+
+Since 2026-11-10 (the split above) `AndurStack` no longer has the function, and
+the one built anew in `TaugStack` receives no Delete. A stack that still holds
+a key resource must first be deployed at the last one-stack version, which
+removes it with the retirer in the same stack; `cdk diff` shows such a
+resource before. In eu-west-1 and eu-central-1 that deploy is a step before
+the split. The stack in us-east-1 cannot take this code: that region has no
+models (`region_models`).
 
 **2026-10-01 — Removing a workspace shows before it deletes.** Without
 `--yes`, `remove` lists what it would delete and deletes nothing, because a

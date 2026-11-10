@@ -517,8 +517,8 @@ def test_only_cdk_s_own_deploy_time_roles_have_a_managed_policy(
 ) -> None:
     """Known exceptions: all three belong to functions CDK generates for a deploy.
 
-    One answers the Delete of the retired key resources, one runs the deploy
-    drain, the third copies web/ into the site bucket.
+    One is the key retirer's, which no resource calls any more, one runs the
+    deploy drain, the third copies web/ into the site bucket.
     Each gets AWSLambdaBasicExecutionRole from its construct; this stack does
     not create these roles and cannot narrow them without replacing the
     constructs. Every role the stack defines itself carries inline policies
@@ -1754,9 +1754,10 @@ def test_no_role_may_do_more_than_count_on_the_budget_table(template: Template) 
 # --- Workspace keys ------------------------------------------------------
 
 
-#: The logical ids of the key function as deployed before 2026-10-01. The Delete of each
-#: removed key resource reaches the function under these ids; a new id would make a new
-#: function, and the old one, still able to delete keys, would answer that Delete.
+#: The logical ids of the key function as deployed before 2026-10-01. In Andur's one stack the
+#: Delete of each removed key resource reached the function under these ids. Taug's stack
+#: builds it anew under the same ids, as its first content (taug/infra/keys.py); no resource
+#: sends a Delete there.
 DEPLOYED_KEY_FUNCTION_IDS = {
     "ApiKeyFunctionRoleC17A4D17": "AWS::IAM::Role",
     "ApiKeyFunction7C99575B": "AWS::Lambda::Function",
@@ -1777,8 +1778,8 @@ def test_the_stack_creates_no_workspace_key(template: Template) -> None:
 
 
 def test_the_key_function_keeps_its_logical_ids(taug_template: Template) -> None:
-    """Built anew in Taug's stack, under the ids it had: a stack still holding a key
-    resource sends its Delete to a function of this name."""
+    """Built anew in Taug's stack, under the ids it had in Andur's one stack, so the split
+    keeps the names the tests of the split (tests/test_split.py) hold."""
     resources = taug_template.to_json()["Resources"]
     for logical_id, resource_type in DEPLOYED_KEY_FUNCTION_IDS.items():
         assert resources[logical_id]["Type"] == resource_type, logical_id

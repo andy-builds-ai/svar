@@ -186,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         settings = resolve(
             {WEB_URL_OUTPUT: args.url},
             lambda: read_stack_outputs(client("cloudformation", args.region), args.stack_name),
+            stack_name=args.stack_name,
         )
         # The key path is only needed when the key has to come from Parameter Store.
         if not given_key:
@@ -194,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
                 lambda: read_stack_outputs(
                     client("cloudformation", args.region), args.taug_stack_name
                 ),
+                stack_name=args.taug_stack_name,
             )
         key = header_value(
             given_key

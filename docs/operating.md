@@ -161,6 +161,25 @@ account and region: a second copy under other stack names collides with
 the first. A copy in another region does not, because every name that holds
 for the whole account carries the region.
 
+A replaced knowledge base takes two deploys, because `AndurStack` imports its
+id and ARN from `TaugStack` (`cdk.json` keeps these references `strong`). A
+setting in its name's digest (`KNOWLEDGE_BASE_NAME` in
+`taug/infra/knowledge_base.py`, which takes in the index's name) gives it a
+new id and ARN, and CloudFormation does not change an exported value while
+another stack imports it ("Considerations" in [Get exported outputs from a
+deployed CloudFormation
+stack](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-stack-exports.html)):
+`cdk deploy --all` stops at `TaugStack`. The way out is the one the
+documentation of `Stack.exportValue` in aws-cdk-lib gives for loosening a
+reference between two stacks. First deploy: build the new knowledge base,
+with its data source (and a new index, if the index changes), under new
+construct ids next to the old ones; point Svar's function at the new one; in
+`TaugStack` call `self.export_value(...)` on the old knowledge base's id and
+ARN, which keeps their exports under the names they have; deploy, then
+ingest. Second deploy: remove the old knowledge base, its data source and the
+two `export_value` calls; deploy again. `tests/test_split.py` holds the
+logical ids and changes with the first step.
+
 `cdk destroy --all` deliberately leaves the documents bucket and its bucket policy
 behind. Vectors can be rebuilt from documents; documents cannot be rebuilt
 from anything. Because the bucket name is fixed, the bucket left behind also

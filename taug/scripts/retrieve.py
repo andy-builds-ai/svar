@@ -87,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         settings = resolve(
             {"KnowledgeBaseId": args.knowledge_base_id},
             lambda: read_stack_outputs(client("cloudformation", args.region), args.stack_name),
+            stack_name=args.stack_name,
         )
         hits = retrieve(
             client("bedrock-agent-runtime", args.region),
