@@ -52,7 +52,7 @@ DENIED_TOPICS = (
             "Who is the richest person in the world?",
             "Is our CEO married?",
             "Where does my colleague live?",
-            "Welcher Religion gehört mein Kollege an?",
+            "Welche Religion hat mein Kollege?",
         ],
     ),
 )
