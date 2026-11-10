@@ -67,18 +67,23 @@ def test_arguments_override_stack_outputs_and_skip_the_lookup() -> None:
     def load() -> dict[str, str]:
         return read_stack_outputs(cloudformation, "AndurStack")
 
-    assert resolve({"KnowledgeBaseId": "MINE"}, load) == {"KnowledgeBaseId": "MINE"}
+    assert resolve({"KnowledgeBaseId": "MINE"}, load, stack_name="AndurStack") == {
+        "KnowledgeBaseId": "MINE"
+    }
     assert cloudformation.calls == 0
-    assert resolve({"KnowledgeBaseId": None, "DataSourceId": "DS9"}, load) == {
+    assert resolve(
+        {"KnowledgeBaseId": None, "DataSourceId": "DS9"}, load, stack_name="AndurStack"
+    ) == {
         "KnowledgeBaseId": "KB123",
         "DataSourceId": "DS9",
     }
     assert cloudformation.calls == 1
 
 
-def test_resolve_names_a_missing_output() -> None:
-    with pytest.raises(AwsProblem, match="no output VectorIndexArn"):
-        resolve({"VectorIndexArn": None}, lambda: {})
+def test_resolve_names_a_missing_output_and_the_stack_it_read() -> None:
+    """Two stacks hold the outputs now; the message says which one lacked it."""
+    with pytest.raises(AwsProblem, match=r"^Stack TaugStack has no output VectorIndexArn\."):
+        resolve({"VectorIndexArn": None}, lambda: {}, stack_name="TaugStack")
 
 
 # --- Error messages ------------------------------------------------------

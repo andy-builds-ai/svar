@@ -179,6 +179,11 @@ def python(*arguments: str) -> tuple[str, ...]:
 def build_plan(args: argparse.Namespace) -> list[Step]:
     """Every step of the run, in its order."""
     region = ("--region", args.region)
+    # Every script that reads a stack's outputs reads the stacks the checks read: Taug's
+    # scripts name Taug's stack with --stack-name, ask names Svar's with it.
+    taug_stack = ("--stack-name", args.taug_stack_name)
+    workspace_stacks = (*taug_stack, "--svar-stack-name", args.stack_name)
+    ask_stacks = ("--stack-name", args.stack_name, "--taug-stack-name", args.taug_stack_name)
     model = ("--model", args.model)
     w = args.workspace
     source = str(args.source)
@@ -217,13 +222,15 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "documents-check",
             "setup",
             "The documents checked, no AWS",
-            command=python("taug.scripts.ingest", "--check", "--source", source, "--workspace", w),
+            command=python(
+                "taug.scripts.ingest", "--check", "--source", source, "--workspace", w, *taug_stack
+            ),
         ),
         Step(
             "key",
             "setup",
             "Workspace and its key",
-            command=python("taug.scripts.workspace", *region, "add", w, *plan),
+            command=python("taug.scripts.workspace", *workspace_stacks, *region, "add", w, *plan),
             secret_stdout=True,
         ),
         Step(
@@ -237,13 +244,17 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "documents",
             "setup",
             "The documents uploaded and indexed",
-            command=python("taug.scripts.ingest", "--source", source, "--workspace", w, *region),
+            command=python(
+                "taug.scripts.ingest", "--source", source, "--workspace", w, *taug_stack, *region
+            ),
         ),
         Step(
             "search",
             "setup",
             "A search in the new workspace",
-            command=python("taug.scripts.retrieve", args.question, "--workspace", w, *region),
+            command=python(
+                "taug.scripts.retrieve", args.question, "--workspace", w, *taug_stack, *region
+            ),
             reads=hits_only_in_workspace,
         ),
         Step(
@@ -251,7 +262,14 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "setup",
             "The first question, through ask.py",
             command=python(
-                "svar.scripts.ask", args.question, "--workspace", w, "--language", "de", *region
+                "svar.scripts.ask",
+                args.question,
+                "--workspace",
+                w,
+                "--language",
+                "de",
+                *ask_stacks,
+                *region,
             ),
             reads=answered,
         ),
@@ -267,14 +285,19 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "demo-documents",
             "apart",
             "The demo workspaces' documents (the measurements need them)",
-            command=python("taug.scripts.ingest", *region),
+            command=python("taug.scripts.ingest", *taug_stack, *region),
         ),
         Step(
             "search-apart",
             "apart",
             "A search in another workspace finds nothing of the new one",
             command=python(
-                "taug.scripts.retrieve", args.question, "--workspace", args.other_workspace, *region
+                "taug.scripts.retrieve",
+                args.question,
+                "--workspace",
+                args.other_workspace,
+                *taug_stack,
+                *region,
             ),
             reads=no_hits_of_workspace,
         ),
@@ -283,7 +306,12 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
             "apart",
             "The new key is refused in another workspace",
             command=python(
-                "svar.scripts.ask", args.question, "--workspace", args.other_workspace, *region
+                "svar.scripts.ask",
+                args.question,
+                "--workspace",
+                args.other_workspace,
+                *ask_stacks,
+                *region,
             ),
             reads=refused_with_401,
             exit_code=1,

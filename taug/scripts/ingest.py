@@ -467,6 +467,7 @@ def main(argv: list[str] | None = None) -> int:
                 "DataSourceId": args.data_source_id,
             },
             lambda: read_stack_outputs(client("cloudformation", args.region), args.stack_name),
+            stack_name=args.stack_name,
         )
         bucket = settings["DocumentsBucketName"]
         s3 = client("s3", args.region)

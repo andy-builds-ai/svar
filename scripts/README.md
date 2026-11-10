@@ -70,7 +70,8 @@ this order, each step timed on its own:
 deploy time names when the deploy finished, since a deploy that changed nothing
 leaves no event and the last one may be older. The stacks are Svar's,
 `AndurStack` (`--stack-name`), and Taug's, `TaugStack` (`--taug-stack-name`);
-the run reads the outputs of both.
+the run reads the outputs of both and hands both names to every script it
+runs that reads a stack (`ingest`, `retrieve`, `workspace`, `ask`).
 
 A step by hand stands in the plan as such. With `--manual skip`, the default,
 it is recorded as open and the run goes on; `--manual wait` stops there until

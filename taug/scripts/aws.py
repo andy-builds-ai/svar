@@ -108,8 +108,11 @@ def read_stack_outputs(cloudformation: Any, stack_name: str) -> dict[str, str]:
     return {item["OutputKey"]: item["OutputValue"] for item in stacks[0].get("Outputs", [])}
 
 
-def resolve(overrides: Mapping[str, str | None], load_outputs: Any) -> dict[str, str]:
-    """Fill in every setting not given on the command line from the stack outputs."""
+def resolve(
+    overrides: Mapping[str, str | None], load_outputs: Any, *, stack_name: str
+) -> dict[str, str]:
+    """Fill in every setting not given on the command line from the outputs of `stack_name`,
+    which `load_outputs` reads."""
     missing = [key for key, value in overrides.items() if not value]
     outputs = load_outputs() if missing else {}
     resolved: dict[str, str] = {}
@@ -119,5 +122,8 @@ def resolve(overrides: Mapping[str, str | None], load_outputs: Any) -> dict[str,
         elif key in outputs:
             resolved[key] = outputs[key]
         else:
-            raise AwsProblem(f"The stack has no output {key}. Is it the Andur stack?")
+            raise AwsProblem(
+                f"Stack {stack_name} has no output {key}. Is it the stack that has it, "
+                "deployed from this code?"
+            )
     return resolved
