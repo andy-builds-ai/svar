@@ -1,6 +1,6 @@
 # Svar's scripts — asking and measuring
 
-Five commands, all run from the repository root. What the scripts need (install, AWS login, the deployed stack): [taug/scripts/README.md](../../taug/scripts/README.md#what-they-need).
+Five commands, all run from the repository root. What the scripts need (install, AWS login, the deployed stacks): [taug/scripts/README.md](../../taug/scripts/README.md#what-they-need).
 
 | Command | Does |
 |---|---|
@@ -22,13 +22,16 @@ It sends what any client sends, the page included: a `POST` to
 `<WebUrl>/ask` with the workspace key in `X-Andur-Key` and the SHA-256 of the
 body in `x-amz-content-sha256`. Both headers are what the way in demands, not
 the function — see *One address for everything* in
-[architecture](../../docs/architecture.md#one-address-for-everything). The stack output
-`FunctionUrl` is not an address to send to: from outside the account it
+[architecture](../../docs/architecture.md#one-address-for-everything). The output
+`FunctionUrl` of `AndurStack` is not an address to send to: from outside the account it
 answers 403 to everyone but CloudFront.
 
-The key comes from Parameter Store (`/andur/api-keys/<workspace>`, decrypted)
-and is never printed. To use a key you already have, set `ANDUR_API_KEY`;
-with `--url` as well, the script needs no AWS access at all. Space and a line
+The script reads `WebUrl` from Svar's stack, `AndurStack` (`--stack-name`),
+and the key's path, `ApiKeyParameterPath`, from Taug's, `TaugStack`
+(`--taug-stack-name`). The key comes from Parameter Store
+(`/andur/api-keys/<workspace>`, decrypted) and is never printed. To use a key
+you already have, set `ANDUR_API_KEY`; then the script does not read
+`TaugStack`, and with `--url` as well, it needs no AWS access at all. Space and a line
 end around the key are dropped, as the function drops them; a key that still
 cannot go into a header is refused without being shown (exit code 2).
 

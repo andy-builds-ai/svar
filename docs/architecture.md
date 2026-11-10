@@ -2,7 +2,7 @@
 
 Svar is a chatbot: it answers questions from a company's own documents, and
 says where each answer came from. It is one part of a larger system called
-Andur. The second part, the agent Vard, is not in the stack yet (`vard/`,
+Andur. The second part, the agent Vard, is in neither stack yet (`vard/`,
 [README](../vard/README.md)).
 
 It is shown with made-up companies. Each has its handbooks, policies and
@@ -16,8 +16,9 @@ drops any passage of another workspace before the prompt is built. A test on
 14.10.2026 found none in the search results of another workspace
 ([README](../svar/README.md#privacy-and-separation)).
 
-Runs entirely on AWS, defined as code. `cdk deploy` builds the stack.
-`cdk destroy` removes it except the documents bucket, which stays. Keys and
+Runs entirely on AWS, defined as code. `cdk deploy --all` builds two stacks,
+Taug's `TaugStack` first, then Svar's `AndurStack`. `cdk destroy --all`
+removes them except the documents bucket, which stays. Keys and
 documents are added afterwards with the scripts
 ([README](../README.md#build-and-test-it)).
 
@@ -37,8 +38,8 @@ documents are added afterwards with the scripts
 | Page | Static files on S3, private; in Frankfurt a layer of the answer function | Five files, no framework, nothing loaded from another server. |
 | The way in | CloudFront, one distribution; in Frankfurt the answer function's own URL | One https address for the page and for questions. CloudFront's permanent free tier is 1 TB and 10 million requests a month; a demo never leaves it. |
 
-The stack has no OpenSearch cluster, no NAT gateway, no container service
-and nothing else with a monthly base fee. Idle, it costs cents
+The stacks have no OpenSearch cluster, no NAT gateway, no container service
+and nothing else with a monthly base fee. Idle, they cost cents
 ([README](../svar/README.md#cost-measured)).
 
 ## One address for everything
@@ -87,17 +88,23 @@ question was 2.8 and 2.9 seconds in eu-west-1 and 2.3 to 3.0 seconds in
 eu-central-1, measured from a laptop in Germany
 ([README](../svar/README.md#measured)).
 
-## What the stack creates
+## What the stacks create
 
-The stack creates the documents bucket, the
+`infra/app.py` builds two stacks in one account and region. Taug's,
+`TaugStack` (`taug/infra/stack.py`), creates the documents bucket, the
 vector bucket and index, the knowledge base with its service role, a data
-source pointing at the documents, the table that
+source pointing at the documents, and the key retirer, which answers the
+Delete of key resources Andur's stack used to have and deletes nothing.
+Svar's, `AndurStack` (`svar/infra/stack.py`), depends on it and imports the
+knowledge base's id and ARN. It creates the table that
 holds each key's budget, the guardrails (on the answer, on the excerpts of
 its sources, and in Ireland on the denied topics), the answer function, the
 bucket holding the page, and the CloudFront distribution that
 serves both; in Frankfurt neither of the last two, since the function
-serves the page from a layer at its own URL. A fill script loads a demo
-corpus of two fictional companies into it, a retrieve script shows that a
+serves the page from a layer at its own URL. The answer function packs
+Taug's access library (`taug/access/`: the key check and the workspace
+rules) next to its own code. A fill script loads a demo
+corpus of two fictional companies into Taug's, a retrieve script shows that a
 query in one company's workspace never returns the other's documents, and an
 ask script puts a question to the deployed address. The page itself is five
 files in `svar/web/`: no framework, no build step, nothing from another server.
@@ -143,22 +150,25 @@ carries its cost in USD, with the day its prices were read. Both are in
 
 ```
 .github/workflows/  CI: ruff, the tests, cdk synth for both regions
-infra/              the CDK app (app.py) and the one stack (stacks/andur_stack.py), which
-                    wires Taug's and Svar's blocks together
+infra/              the CDK app (app.py), which builds Taug's stack and Svar's in one
+                    account and region
 scripts/            the rehearsal of a new workspace across the parts
-tests/              stack template and rehearsal
+tests/              both stack templates, the split between them, and the rehearsal
 conftest.py         the test setup every part's tests share
 docs/               architecture, operating, costs, decisions
 knowledge/          the demo corpus: two fictional companies
-taug/infra/         the knowledge base, the regions with their models and prices, the key
-                    path and the key retirer (api_keys/), shared helpers
+taug/access/        the key check and the workspace rules, packed into Svar's answer function
+taug/infra/         Taug's stack (stack.py), the knowledge base, the regions with their
+                    models and prices, the key path and the key retirer (api_keys/),
+                    shared helpers
 taug/scripts/       ingest, layout, retrieve, workspace, aws
 taug/docs/          retrieval findings, metadata convention
-taug/tests/         key retirer, ingest, retrieve, workspace
+taug/tests/         access library, key retirer, ingest, retrieve, workspace
 svar/app/           the answer function behind /ask: handler.py and one module per step
 svar/web/           the page: index.html, app.js, language.js, markdown.js, style.css
-svar/infra/         the answer function, the guardrails, the page's distribution, the
-                    deploy drain (deploy_drain/), the prompt wording per model
+svar/infra/         Svar's stack (stack.py), the answer function, the guardrails, the
+                    page's distribution, the deploy drain (deploy_drain/), the prompt
+                    wording per model
 svar/scripts/       ask, plan, and the measurements: evaluate, topic_probe,
                     topic_model_probe, grounding_probe, control_eval, with their question sets
 svar/docs/          screenshot and walkthrough of the page

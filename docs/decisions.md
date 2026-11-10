@@ -37,6 +37,32 @@ Taug's workspace script calls. What of Taug runs in Svar's function, the key
 check among it (`svar/app/keys.py`), stays there until the stack is split,
 which is a step of its own.
 
+**2026-11-10 — Taug moves into a stack of its own; Svar keeps `AndurStack`.**
+The operator decided on 09.11.2026. `infra/app.py` builds two stacks in one
+account and region: `TaugStack` (`taug/infra/stack.py`) and Svar's
+(`svar/infra/stack.py`), still deployed as `AndurStack`, which depends on it
+and imports the knowledge base's id and ARN. CloudFormation's stack
+refactoring moves a resource to another stack without replacing it, but not a
+guardrail version, a Lambda permission or a layer version (IMMUTABLE in
+`describe-type`, read in both regions on 09.11.2026), nor the budget table, an
+`AWS::DynamoDB::GlobalTable` on AWS's exclusion list. So Svar keeps the stack
+and its name, and its function, address and page stay where they are. Taug's
+seven resources, all FULLY_MUTABLE (the documents bucket and its policy, the
+vector bucket, the index, the knowledge base role, the knowledge base and its
+data source), move into `TaugStack` with their logical ids unchanged. The key
+retirer cannot move, because its provider's IAM policy is NON_PROVISIONABLE;
+it is built anew in `TaugStack` under its old ids, and its two log groups go.
+The budget table stays with Svar, whose function counts on it. Taug's key check
+and workspace rules become a library (`taug/access/`) that Svar's answer
+function packs next to its own code, not a function or layer of their own: a
+layer version is IMMUTABLE, and one deploy keeps function and library in step.
+In AWS, per region, Ireland first: deploy the commit that packs the library;
+deploy both stacks with the key retirer in `TaugStack`; run `cdk refactor
+--unstable=refactor --dry-run`, then the real `cdk refactor` for the seven
+moves. Nothing else may change in between. The operator runs every step.
+`cdk.json` sets `@aws-cdk/core:defaultCrossStackReferences` to `strong`, the
+export and import the move was planned with, so a later CDK cannot change it.
+
 ## Region
 
 **2026-09-28 — eu-west-1 (Ireland), not us-east-1.** A company asks where

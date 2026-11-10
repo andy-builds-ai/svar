@@ -66,8 +66,9 @@ runtime brings.
 python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor
 ```
 
-That is the short way: the script reads the address from the stack outputs
-and the key from Parameter Store, and never prints the key
+That is the short way: the script reads the address from the outputs of
+`AndurStack`, the key's path from those of `TaugStack` and the key from
+Parameter Store, and never prints the key
 ([svar/scripts/README.md](../scripts/README.md)). The request underneath is plain
 HTTP:
 
@@ -944,7 +945,7 @@ from files.
 
 | Variable | Set to |
 |---|---|
-| `KNOWLEDGE_BASE_ID` | The stack's knowledge base. |
+| `KNOWLEDGE_BASE_ID` | Taug's knowledge base, imported from `TaugStack`. |
 | `MODEL_ID` | The region's answer model in `REGIONS` (`taug/infra/answer_models.py`): `eu.amazon.nova-pro-v1:0`, Nova Pro through its EU inference profile, in eu-west-1; `qwen.qwen3-235b-a22b-2507-v1:0`, Qwen3 235B in the region itself, in eu-central-1. |
 | `ANSWER_PROMPT` | Optional. The wording of the system prompt (`prompts.PROMPTS`) that `prompt_of` in `svar/infra/answer_prompts.py` gives the answer model: `sentence-first` for Nova Pro in eu-west-1, `each-part` for Qwen3 235B in eu-central-1. Without it, `each-part`. An unknown name is refused. |
 | `REGION` | The stack's region, `eu-west-1` or `eu-central-1`. |

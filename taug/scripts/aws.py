@@ -99,7 +99,7 @@ def read_stack_outputs(cloudformation: Any, stack_name: str) -> dict[str, str]:
         ):
             raise AwsProblem(
                 f"Stack {stack_name} was not found in this region. Deploy it first with "
-                "`cdk deploy`, or pass --stack-name / --region."
+                "`cdk deploy --all`, or pass the stack's name / --region."
             ) from problem.__cause__
         raise
     stacks = response.get("Stacks", [])

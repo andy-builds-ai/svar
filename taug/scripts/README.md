@@ -13,16 +13,19 @@ Three commands, all run from the repository root:
 - `pip install -e ".[dev]" -c constraints.txt` — brings `boto3` with its `crt` extra. The extra
   is not optional here: without it botocore cannot read the credentials that
   `aws login` writes, and every AWS call fails with "Missing Dependency".
-- A valid AWS login for the account the stack is deployed in. When it has
+- A valid AWS login for the account the stacks are deployed in. When it has
   run out, every script stops with a message that says so; sign in with
   `aws login` and rerun.
-- The deployed stack. Bucket, knowledge base id, data source id, web address,
-  key path and budget table are read from the outputs of `AndurStack` in `eu-west-1`,
+- The deployed stacks. Bucket, knowledge base id, data source id and key path
+  are read from the outputs of Taug's stack, `TaugStack`; web address and budget
+  table from those of Svar's, `AndurStack`. Both in `eu-west-1`,
   `DEFAULT_REGION` of `taug/infra/answer_models.py`, whatever region a shell profile names;
-  `--region eu-central-1` reads the stack in Frankfurt. Each value can be passed by hand
+  `--region eu-central-1` reads the stacks in Frankfurt. Each value can be passed by hand
   instead:
   `--bucket`, `--knowledge-base-id`, `--data-source-id`, `--url`, and
-  `--stack-name` / `--region` for another stack. `--url` takes the web
+  `--region` and the stack names for other stacks: `--stack-name` is Taug's
+  stack in Taug's scripts and Svar's in `ask`; `workspace` takes Svar's as
+  `--svar-stack-name`, `ask` Taug's as `--taug-stack-name`. `--url` takes the web
   address, not the function URL — `ask` appends `/ask` to it itself.
 
 ## ingest
@@ -300,14 +303,14 @@ deleted. With `--yes` it deletes, in this order:
 When it has deleted a key, it ends with "Not quite finished": for up to 5
 minutes a question can still write a new item. Run `remove <name> --yes`
 again after that to delete it. The command it prints for that carries
-`--region` and `--stack-name` when the run had them, so it reaches the same
-stack.
+`--region`, `--stack-name` and `--svar-stack-name` when the run had them, so
+it reaches the same stacks.
 
 It never touches anything outside that one name. The prefix ends in a slash,
 so `kalv` never reaches `kalvenstett`; the listing is checked against it again
 before anything is deleted, and so is every budget item the scan returns; the
-parameter and the budget items are deleted by their exact name and hash. Bucket, table, key path and ids come from the stack
-outputs.
+parameter and the budget items are deleted by their exact name and hash. Bucket, key path and ids come from the
+outputs of `TaugStack`, the table from those of `AndurStack`.
 
 | Exit code | Meaning |
 |---|---|

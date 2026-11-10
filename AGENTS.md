@@ -4,13 +4,13 @@ Andur is meant to grow into a secretariat, stage by stage, with a person
 deciding at every stage. Its parts each have a folder: Taug (`taug/`), what
 the others stand on (documents, knowledge base, keys, regions and models);
 Svar (`svar/`), a chatbot that answers questions from a company's own
-documents; Vard (`vard/`), an agent, measured, not deployed. One stack builds
-Taug's and Svar's parts (`infra/`); it runs on AWS and is defined as code
-(CDK in Python).
+documents; Vard (`vard/`), an agent, measured, not deployed. Two stacks build
+Taug's and Svar's parts (`infra/app.py`); they run on AWS and are defined as
+code (CDK in Python).
 
 - `README.md`: the overview, and what is where.
 - `taug/README.md`, `svar/README.md`, `vard/README.md`: each part.
-- `docs/architecture.md`: how the stack is built.
+- `docs/architecture.md`: how the stacks are built.
 - `taug/scripts/README.md`, `svar/scripts/README.md`, `vard/scripts/README.md`,
   `scripts/README.md`: how the scripts work.
 
@@ -41,12 +41,22 @@ ruff format --check
 pytest -q
 ```
 
-## The stack
+## The stacks
 
 ```bash
-cdk synth    # builds the template, no AWS call
-cdk diff     # compares it with the deployed stack; needs an AWS login, changes nothing
+cdk synth         # builds both templates, no AWS call
+cdk diff --all    # compares them with the deployed stacks; needs an AWS login, changes nothing
 ```
+
+`infra/app.py` builds two stacks in one account and region: `TaugStack`
+(`taug/infra/stack.py`) and Svar's, class `SvarStack` in `svar/infra/stack.py`,
+deployed as `AndurStack`, which imports the knowledge base from `TaugStack`.
+`cdk synth` without a login writes `TaugStack.template.json` and
+`AndurStack.template.json`. Svar's answer function bundles `svar/app/` with
+Taug's library `taug/access/`, locally without Docker, so a change in
+`taug/access/` alone reaches Lambda. `cdk deploy --all` is the operator's
+(see Rules). Never pass `--exclusively`: the CLI then skips the bundling of
+the stacks not named, and the function's code key would change.
 
 With an AWS login, `cdk synth` writes the account into its output: the CLI
 reads it from the login for `CDK_DEFAULT_ACCOUNT` (`infra/app.py`). To compare
@@ -78,12 +88,12 @@ date given.
 | Script | What it calls or creates | Cost | After a change to, ask the operator for a run |
 |---|---|---|---|
 | `python -m svar.scripts.evaluate` | real models on AWS | real money, no figure given | |
-| `python -m taug.scripts.ingest`, `taug.scripts.retrieve`, `taug.scripts.workspace`, `svar.scripts.ask` | the deployed stack; see `taug/scripts/README.md` and `svar/scripts/README.md` | | |
+| `python -m taug.scripts.ingest`, `taug.scripts.retrieve`, `taug.scripts.workspace`, `svar.scripts.ask` | the deployed stacks; see `taug/scripts/README.md` and `svar/scripts/README.md` | | |
 | `python -m taug.scripts.workspace remove --yes` | deletes a workspace's key, budget and documents: never without the operator's word | | |
 | `python -m svar.scripts.topic_probe` | creates and deletes a guardrail named `andur-topic-probe` | about 0.05 USD a run | `DENIED_TOPICS` |
 | `python -m svar.scripts.topic_probe --region eu-central-1` | measures the Frankfurt topic check | three runs of 319 checks, 0.30 USD on 07.10.2026 | that prompt, and `check_topics_with_model` in `svar/app/topic_check.py` |
 | `python -m svar.scripts.grounding_probe` | creates and deletes a guardrail named `andur-grounding-probe` | 0.22 USD a run on 06.10.2026 | the grounding check or the prompt |
 | `python -m svar.scripts.control_eval` | creates and deletes up to three guardrails named `andur-control-*-probe` in eu-central-1 | 42 questions: 0.063 to 0.086 USD per Frankfurt model, 0.11 USD for Nova Pro, 0.33 USD for Claude Sonnet 4.6 on 06.10.2026 | |
 | `python -m vard.scripts.tool_probe` | models of `FRANKFURT_MODELS` | fractions of a cent per model | |
-| `python -m scripts.rehearsal` | sets up a workspace with its key on the deployed stack and runs the measurements above against it; `--list` calls nothing | 0.70 USD on 07.10.2026 (at most 0.75) | |
+| `python -m scripts.rehearsal` | sets up a workspace with its key on the deployed stacks and runs the measurements above against it; `--list` calls nothing | 0.70 USD on 07.10.2026 (at most 0.75) | |
 | `python -m vard.scripts.receiving_probe` | every model of `FRANKFURT_MODELS` checks 24 delivery notes through Vard's loop (`vard/`), `--repeat` rounds of them; no call that could take the run past `--max-usd` (2.25 USD by default) | a full run of the eleven models on the first twelve cases cost 0.488 and 0.490 USD on 20.10.2026; on 21.10.2026 the 24 cases in three rounds cost 0.599 USD for the four candidates, 0.708 USD for Claude Sonnet 4.6 (one round) and 0.382 USD for three models with `--vendor-settings` | `vard/` or its cases |
