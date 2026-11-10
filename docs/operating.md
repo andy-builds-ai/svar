@@ -16,13 +16,23 @@ python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/ac
 pip install -e ".[dev]" -c constraints.txt
 
 cdk bootstrap aws://<account>/eu-west-1   # once per account and region
-cdk deploy                                # builds or updates everything
-cdk destroy                               # removes it again
+cdk diff --all                            # what a deploy would change; changes nothing
+cdk deploy --all                          # builds or updates everything, TaugStack first
+cdk destroy --all                         # removes it again
 ```
 
-`cdk deploy` prints the knowledge base id, the data source id, the bucket
-names, the web address (`WebUrl`) and the Parameter Store path of the
-workspace keys. The scripts read them from there. It also uploads `svar/web/` into
+`infra/app.py` builds two stacks in one account and region: Taug's,
+`TaugStack`, and Svar's, `AndurStack`, which depends on it and imports the
+knowledge base's id and ARN. Every `cdk` command names both with `--all`.
+Never use `--exclusively`: the CLI then skips the bundling of the stacks not
+named, and the answer function's code key would change.
+
+`cdk deploy --all` prints the outputs of both. `TaugStack` has the knowledge
+base id, the data source id, the bucket names and the Parameter Store path of
+the workspace keys; `AndurStack` the web address (`WebUrl`) and the budget
+table. The scripts read them from there, and
+`aws cloudformation describe-stacks --stack-name TaugStack` (or `AndurStack`)
+shows them again. It also uploads `svar/web/` into
 the site bucket and clears the CloudFront caches, so the page is whatever is
 in `svar/web/` at the moment of the deploy.
 
@@ -50,7 +60,7 @@ from outside: the region from `-c region=`, the account from the AWS profile.
 
 ```bash
 cdk bootstrap aws://<account>/eu-central-1
-cdk deploy -c region=eu-central-1
+cdk deploy --all -c region=eu-central-1
 ```
 
 A new account may allow only 10 concurrent Lambda executions, all of which
@@ -101,8 +111,8 @@ In the seconds the old code reads the new environment, it would call an
 answer guardrail that no longer reads the answer's topics, without the topic
 check it does not know yet: answers unchecked for their topics, though no
 error. So the first deploy keeps the answer guardrail reading the answer's
-topics as before (`ANSWER_GUARDRAIL_READS_ANSWER_TOPICS = True` in
-`infra/stacks/andur_stack.py`, a flag since gone) and brings the topic
+topics as before (`ANSWER_GUARDRAIL_READS_ANSWER_TOPICS = True` in the
+stack module, a flag since gone) and brings the topic
 guardrail and the code that calls it; the answer is checked twice. The
 second sets it `False`: the answer guardrail gets a new version, and old and
 new code both check the answer without its citations.
@@ -146,15 +156,15 @@ response headers policy and the two origin access controls — carry the
 region. The index, the knowledge
 base and the data source carry a short digest of the settings that force a
 replacement, so a changed setting gives the replacement a new name instead
-of an "already exists" failure. Either way the stack is one instance per
-account and region: a second copy under another stack name collides with
+of an "already exists" failure. Either way each stack is one instance per
+account and region: a second copy under other stack names collides with
 the first. A copy in another region does not, because every name that holds
 for the whole account carries the region.
 
-`cdk destroy` deliberately leaves the documents bucket and its bucket policy
+`cdk destroy --all` deliberately leaves the documents bucket and its bucket policy
 behind. Vectors can be rebuilt from documents; documents cannot be rebuilt
 from anything. Because the bucket name is fixed, the bucket left behind also
-blocks the next `cdk deploy`, which stops with "already exists". Two ways
+blocks the next `cdk deploy --all`, which stops with "already exists". Two ways
 out:
 
 - **Delete it.** Empty it in the S3 console (*Empty* removes old versions
@@ -164,24 +174,24 @@ out:
   aws s3 rb s3://andur-documents-<account>-eu-west-1
   ```
 
-- **Keep it and adopt it.** Import the bucket into the new stack, then
+- **Keep it and adopt it.** Import the bucket into the new `TaugStack`, then
   deploy the rest:
 
   ```bash
-  cdk import AndurStack   # enter the bucket name for the bucket and its policy, leave the others empty
-  cdk deploy
+  cdk import TaugStack    # enter the bucket name for the bucket and its policy, leave the others empty
+  cdk deploy --all
   ```
 
-`cdk destroy` only removes the index this stack created. An index added to
-the vector bucket by hand keeps the bucket from being deleted, and the stack
+`cdk destroy --all` only removes the index `TaugStack` created. An index added to
+the vector bucket by hand keeps the bucket from being deleted, and `TaugStack`
 ends in `DELETE_FAILED`.
 
-`cdk destroy` deletes the function logs and the budget table with the stack.
-The workspace keys are not part of the stack and stay; after a rebuild they
+`cdk destroy --all` deletes the function logs and the budget table with `AndurStack`.
+The workspace keys are part of neither stack and stay; after a rebuild they
 work again, each with a fresh budget. To take a workspace away for good, use
 `python -m taug.scripts.workspace remove` before the destroy.
 
-The site bucket and the distribution go with the stack too. The bucket is
+The site bucket and the distribution go with `AndurStack` too. The bucket is
 emptied first — the file copier removes what it uploaded — so the deletion
 does not stop at a bucket that is not empty. A new distribution has a new
 address, so `WebUrl` changes with every rebuild.
@@ -189,7 +199,7 @@ address, so `WebUrl` changes with every rebuild.
 ## Filling it
 
 One command checks the local corpus, uploads it and syncs the knowledge
-base. It reads bucket and ids from the stack outputs and needs a valid AWS
+base. It reads bucket and ids from the outputs of `TaugStack` and needs a valid AWS
 login (`aws login`):
 
 ```bash
@@ -260,7 +270,7 @@ and how to get a key for curl or the page: [svar/app/README.md](../svar/app/READ
 
 ### In the browser
 
-Open the stack output `WebUrl`. The page asks once for a workspace and its
+Open the output `WebUrl` of `AndurStack`. The page asks once for a workspace and its
 key, keeps both in the browser, and shows the answer with its sources, the
 layers it rests on and what it cost. **Forget key** removes the key again.
 The key is never part of the address. The page is in German or English: the
@@ -284,8 +294,8 @@ curl -s -X POST "$WEB_URL/ask" \
 
 `$KEY` is the workspace key ([svar/app/README.md](../svar/app/README.md#getting-a-key)).
 `printf '%s'` and not `echo`: a trailing newline would go into the hash but
-not into the body, and the request would be refused. The stack output
-`FunctionUrl` is not an address to send this to — from outside the account
+not into the body, and the request would be refused. The output
+`FunctionUrl` of `AndurStack` is not an address to send this to — from outside the account
 it answers 403 to everyone but CloudFront.
 
 ## Tests
@@ -294,7 +304,7 @@ it answers 403 to everyone but CloudFront.
 pytest -q
 ```
 
-The stack tests render the stack to CloudFormation JSON and assert on it,
+The stack tests render both stacks to CloudFormation JSON and assert on them,
 including the way in: the function URL on `AWS_IAM`, both invoke permissions
 bound to this distribution alone, the private site bucket, and the `/ask`
 behaviour with its methods, its disabled cache and its response timeout. Some

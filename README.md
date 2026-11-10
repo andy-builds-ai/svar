@@ -7,7 +7,7 @@ parts, each in a folder of its own.
 
 | Part | Folder | What it does | Where it stands |
 |---|---|---|---|
-| Taug | [taug/](taug/README.md) | What the other parts stand on: each company's documents in a workspace of its own, in three layers (written by a person, produced by a machine, arrived and not sorted yet), the knowledge base over them, the workspace keys, and the regions and models with their prices. | Runs on AWS as part of the one stack. |
+| Taug | [taug/](taug/README.md) | What the other parts stand on: each company's documents in a workspace of its own, in three layers (written by a person, produced by a machine, arrived and not sorted yet), the knowledge base over them, the workspace keys, and the regions and models with their prices. | Runs on AWS. The code builds it in a stack of its own, `TaugStack`. |
 | Svar | [svar/](svar/README.md) | A chatbot. It answers questions from the documents of one workspace, and every answer shows its sources. | Runs on AWS in Frankfurt, the main stack, and in Ireland, the comparison stack; both were last deployed on 21.10.2026. |
 | Vard | [vard/](vard/README.md) | An agent. He checks a delivery note against its purchase order with tools and reports what differs to a person, who decides. | Measured, not deployed. |
 
@@ -21,21 +21,22 @@ flowchart LR
     vard -->|"models and prices"| taug
 ```
 
-- **One stack for now.** `AndurStack` ([infra/app.py](infra/app.py),
-  [infra/stacks/andur_stack.py](infra/stacks/andur_stack.py)) builds Taug's
-  and Svar's parts together. Vard is on no stack.
-- **Some of Taug runs inside Svar's function.** The function's code package
-  is the folder `svar/app/`, so what it needs of Taug lies there: the key
-  check (`svar/app/keys.py`), the workspace filter of every search
-  (`svar/app/retrieval.py`), the three layers (`svar/app/citations.py`) and
-  the rule for workspace names (`svar/app/intake.py`). They stay there until
-  the stack is split.
+- **Two stacks.** `TaugStack` ([taug/infra/stack.py](taug/infra/stack.py))
+  builds Taug's parts, `AndurStack` ([svar/infra/stack.py](svar/infra/stack.py))
+  Svar's; [infra/app.py](infra/app.py) builds both in one account and region.
+  Svar's stack keeps the name the one stack had, so its function, address and
+  page stay where they are. Vard is on no stack.
+- **Some of Taug runs inside Svar's function.** Taug's access library
+  ([taug/access/](taug/access/)) holds the key check, the workspace filter of
+  every search, the three layers and the rule for workspace names. Svar's
+  answer function packs it next to its own code
+  (`svar/infra/answer_function.py`); the library imports nothing from Svar.
 - **Taug calls Svar for a key's plan.** The plan is what Svar counts
   questions against, so the step that puts a key on a plan is Svar's
   (`svar/scripts/plan.py`); Taug's workspace script calls it.
 - **Vard reads Taug's model table** (`taug/infra/answer_models.py`) for the
   models he is measured with and their prices.
-- **The names stay Andur's.** The stack, its resources and the names a user
+- **The names stay Andur's.** Svar's stack, the resources and the names a user
   sees carry Andur's name (`AndurStack`, `X-Andur-Key`, `andur-*`).
 
 ## What is where
@@ -44,10 +45,10 @@ flowchart LR
 README.md        this overview
 AGENTS.md        rules for coding agents
 conftest.py      the test setup every part's tests share
-docs/            the one stack: architecture, operating, costs, every decision
-infra/           the CDK entry and the one stack that wires the parts together
+docs/            the stacks: architecture, operating, costs, every decision
+infra/           the CDK entry (app.py), which builds Taug's stack and Svar's
 scripts/         the rehearsal of a new workspace across the parts
-tests/           tests of the whole stack and of the rehearsal
+tests/           tests of both stacks and of the rehearsal
 knowledge/       two made-up companies, the demo documents
 taug/            Taug: stack blocks, scripts, docs, tests
 svar/            Svar: the answer function (app/), the page (web/), stack blocks, scripts, tests
@@ -68,17 +69,17 @@ Claude Code work in this repository under the rules in
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
-pytest -q                                  # 1,581 tests, no AWS needed; one is skipped without a time zone database
+pytest -q                                  # 1,597 tests, no AWS needed; one is skipped without a time zone database
 ruff check && ruff format --check
 ```
 
-How to deploy the stack and ask Svar: [svar/README.md](svar/README.md#deploy-it-and-ask).
+How to deploy the stacks and ask Svar: [svar/README.md](svar/README.md#deploy-it-and-ask).
 
 ## Further reading
 
 | Topic | Where |
 |---|---|
-| Architecture, the way in, what the stack creates | [docs/architecture.md](docs/architecture.md) |
+| Architecture, the way in, what the stacks create | [docs/architecture.md](docs/architecture.md) |
 | Deploy, fill, ask, test, tear down | [docs/operating.md](docs/operating.md) |
 | What it costs, measured and priced | [docs/costs.md](docs/costs.md) |
 | Every decision, dated | [docs/decisions.md](docs/decisions.md) |

@@ -4,8 +4,9 @@ The plan belongs to Svar: the answer function counts every question against it
 (svar/app/budget.py, svar/app/plans.py). Taug's workspace script adds the key and calls this
 step for it, `python -m taug.scripts.workspace add <workspace> --plan <plan>` and
 `python -m taug.scripts.workspace plan <workspace> <plan>`, so a new key is on its plan before
-anyone has it. Until the stack is split, Taug calls Svar here, the way the key check runs in
-Svar's function.
+anyone has it. Taug and Svar have stacks of their own, and Taug still calls Svar here, since
+the budget table is Svar's; the other way round, Taug's key check is a library packed into
+Svar's function (taug/access/).
 """
 
 import hashlib

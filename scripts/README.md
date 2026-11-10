@@ -1,10 +1,10 @@
 # scripts — the rehearsal of a new workspace across Andur's parts
 
-One command, run from the repository root. What the scripts need (install, AWS login, the deployed stack): [taug/scripts/README.md](../taug/scripts/README.md#what-they-need).
+One command, run from the repository root. What the scripts need (install, AWS login, the deployed stacks): [taug/scripts/README.md](../taug/scripts/README.md#what-they-need).
 
 | Command | Does |
 |---|---|
-| `python -m scripts.rehearsal` | Sets up a new workspace on the deployed stack with the same commands as any other, runs the measurements against it, and times every step. |
+| `python -m scripts.rehearsal` | Sets up a new workspace on the deployed stacks with the same commands as any other, runs the measurements against it, and times every step. |
 
 ## rehearsal — a new workspace, set up and measured, step by step
 
@@ -14,12 +14,13 @@ python -m scripts.rehearsal --workspace kalvenstett --source ../companies \
   --out-dir ../rehearsal --list
 ```
 
-One command for what a new workspace needs once the stack is deployed, in
+One command for what a new workspace needs once the stacks are deployed, in
 this order, each step timed on its own:
 
 1. **check** — the signed-in identity (with `--expect-role`, the run stops
-   under any other role), the stack deployed and finished, how long the
-   bootstrap and the last deploy took by their CloudFormation events, every
+   under any other role), Taug's stack and Svar's deployed and finished, how
+   long the bootstrap and the last deploy of each took by their CloudFormation
+   events, every
    address of `WebUrl` in the region and in no other by AWS's
    `ip-ranges.json`, and that plain HTTP serves nothing while HTTPS serves the
    page and answers a question without a key with 401, both with the security
@@ -54,7 +55,7 @@ this order, each step timed on its own:
    with questions of another workspace or language is refused before anything
    runs. A measurement that ends with a failed call (exit code 2) fails its
    step, since nothing was measured; wrong answers are a result and pass;
-5. **after** — where the deployed stack keeps and processes data as AWS reports
+5. **after** — where the deployed stacks keep and process data as AWS reports
    it (bucket, embedding model, vector index, function, the two models, the two
    guardrails, budget table, log group, and whether Bedrock logs the model
    calls), written to `residency.md`; and the events of the answer function's
@@ -67,7 +68,9 @@ this order, each step timed on its own:
 `--region` takes only a region whose function is its own address, today
 `eu-central-1`: behind CloudFront the address checks could never pass. The
 deploy time names when the deploy finished, since a deploy that changed nothing
-leaves no event and the last one may be older.
+leaves no event and the last one may be older. The stacks are Svar's,
+`AndurStack` (`--stack-name`), and Taug's, `TaugStack` (`--taug-stack-name`);
+the run reads the outputs of both.
 
 A step by hand stands in the plan as such. With `--manual skip`, the default,
 it is recorded as open and the run goes on; `--manual wait` stops there until

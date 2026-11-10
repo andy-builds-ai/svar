@@ -36,7 +36,7 @@ WEB_URL_OUTPUT = "WebUrl"
 #: The path on that address that reaches the answer function.
 ASK_PATH = "/ask"
 
-#: The header the workspace key travels in — ``KEY_HEADER`` in svar/app/intake.py.
+#: The header the workspace key travels in — ``KEY_HEADER`` in taug/access/workspaces.py.
 KEY_HEADER = "X-Andur-Key"
 
 BODY_HASH_HEADER = "x-amz-content-sha256"
