@@ -33,7 +33,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["infra", "infra.stacks", "taug", "taug.access", "taug.infra", "svar", "svar.app", "svar.infra"]
+packages = ["infra", "taug", "taug.access", "taug.infra", "svar", "svar.app", "svar.infra"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "taug/tests", "svar/tests", "vard/tests"]
