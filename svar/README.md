@@ -92,24 +92,24 @@ to 7. More:
 [docs/decisions.md](../docs/decisions.md). The ones that shape the system:
 
 - **Nothing with a monthly base fee**
-  ([decisions.md:111](../docs/decisions.md?plain=1#L111)):
+  ([decisions.md, 17.09.2026](../docs/decisions.md#2026-09-17-s3-vectors)):
   S3 Vectors behind a Bedrock knowledge base instead of a search cluster, so
   an idle month costs cents. The price is control over retrieval: Bedrock
   returned whole documents with Markdown tables under every chunking tried,
   so documents are split at their headings before the upload
-  ([decisions.md:124](../docs/decisions.md?plain=1#L124)).
+  ([decisions.md, 17.09.2026](../docs/decisions.md#2026-09-17-chunks-and-sections)).
 - **One installation, workspaces kept apart by a metadata filter**
-  ([decisions.md:199](../docs/decisions.md?plain=1#L199)). The price: the
+  ([decisions.md, 17.09.2026](../docs/decisions.md#2026-09-17-one-installation-metadata-filter)). The price: the
   separation rests on a filter in every query, not on separate deployments,
   so it has to be tested and measured, not assumed (see
   [Privacy](#privacy-and-separation)).
 - **A key is a budget, not a password**
-  ([decisions.md:324](../docs/decisions.md?plain=1#L324)):
+  ([decisions.md, 17.09.2026](../docs/decisions.md#2026-09-17-key-is-a-budget)):
   ten questions within 48 hours of the first for a demo key, a monthly and a
   daily quota for a key on a plan. The price: whoever holds a key can ask
   until it is spent; a leaked demo key is a leak of ten questions.
 - **In Frankfurt the function's URL is the address, without CloudFront**
-  ([decisions.md:1021](../docs/decisions.md?plain=1#L1021)): no setting keeps
+  ([decisions.md, 07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-function-url)): no setting keeps
   CloudFront's edge locations inside Germany. The price: no domain of its own
   and no WAF. What caps a flood is the number of executions Lambda allows at
   once. The stack reserves 10 executions for the function there: 5 for
@@ -117,26 +117,26 @@ to 7. More:
   take whole, and that reservation is the cap
   ([docs/operating.md](../docs/operating.md#another-region)).
 - **In Frankfurt a model in the region checks the topics**
-  ([decisions.md:736](../docs/decisions.md?plain=1#L736),
-  [:774](../docs/decisions.md?plain=1#L774)). Bedrock's topic guardrail reads
+  ([decisions.md, 06.10.2026](../docs/decisions.md#2026-10-06-frankfurt-topic-guardrail-eu-profile),
+  [07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-gpt-oss-checks-topics)). Bedrock's topic guardrail reads
   German only in its Standard tier, and that tier works only through an EU
   profile, which runs the check in six EU regions and so would carry it out
   of Germany. The older tier stays in Frankfurt but let through German advice
   questions. The price: a model call per check, 0.30 USD for 957 checks
   (below).
 - **The grounding check withholds at 0.8 in Frankfurt**
-  ([decisions.md:835](../docs/decisions.md?plain=1#L835)), the threshold that
+  ([decisions.md, 07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-grounding-0-8)), the threshold that
   withheld the most made-up answers without withholding a right answer to
   German documents. The price: it withholds right German answers to English
   documents. Checking those in English was measured and not built, because
   it also let made-up answers through
-  ([decisions.md:1067](../docs/decisions.md?plain=1#L1067)).
+  ([decisions.md, 06.10.2026](../docs/decisions.md#2026-10-06-german-answers-grounding)).
 - **Measured through the function's own code path**
-  ([decisions.md:1173](../docs/decisions.md?plain=1#L1173)), against the
+  ([decisions.md, 28.09.2026](../docs/decisions.md#2026-09-28-comparison-handlers-path)), against the
   deployed knowledge base and the deployed function's settings. The price:
   every measurement calls real models and costs real money, and one run is
   one sample, since the models do not repeat themselves even at temperature 0
-  ([decisions.md:410](../docs/decisions.md?plain=1#L410)).
+  ([decisions.md, 29.09.2026](../docs/decisions.md#2026-09-29-temperature-zero)).
 
 ## Measured
 
@@ -149,11 +149,11 @@ function's own code with the deployed function's settings and knowledge
 base, and its guardrails or copies of them that a script creates and
 deletes; `topic_probe` and `grounding_probe` are also run before a deploy,
 to measure a change before it goes live
-([decisions.md:619](../docs/decisions.md?plain=1#L619)). The numbers below were
+([decisions.md, 02.10.2026](../docs/decisions.md#2026-10-02-topics-measured-before-deploy)). The numbers below were
 measured after the deploy of 14.10.2026 in Frankfurt and of 16.10.2026 in
 Ireland, against the deployed stack. Frankfurt's deploy of 16.10.2026 gave
 each model its own prompt wording and kept Qwen3 235B's as it was
-([decisions.md:995](../docs/decisions.md?plain=1#L995)). The deploy of
+([decisions.md, 14.10.2026](../docs/decisions.md#2026-10-14-prompt-wording-per-model)). The deploy of
 21.10.2026 changed no model, search, prompt or check on either stack. It
 changed names, descriptions, the page's text and the sentence a reader gets
 when a key's quota is full. How each script works:
@@ -168,7 +168,7 @@ when a key's quota is full. How each script works:
 | German questions on German documents | 26 of 26 right; all 20 answerable ones cite the expected document |
 | Questions built to tempt the model | 36 of 42 right; 0 of 34 answers added a figure of their own; 29 of 29 German questions answered in German; 8 of 8 advice questions refused |
 | Denied topics, three runs, 957 checks | every one of 45 denied questions, 32 denied answers and 11 advice questions refused; none of 87 harmless questions, 87 harmless answers and 57 questions of the evaluation sets refused |
-| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md:850](../docs/decisions.md?plain=1#L850); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
+| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md, 07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-grounding-0-8); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
 | Median time per question, retrieval to cost line, from a laptop in Germany | 3.0 s (English), 2.3 s (German on English documents), 2.8 s (German on German documents) |
 
 **Setting up a new workspace**, measured on 07.10.2026 with a fictional craft
@@ -203,7 +203,7 @@ not broken down. The whole rehearsal with all measurements took 11 minutes
 
 Each answer model now has the prompt it was measured with: Nova Pro the one
 of 06.10.2026, Qwen3 235B in Frankfurt its own, unchanged
-([decisions.md, 14.10.2026](../docs/decisions.md?plain=1#L942)). After the deploy of
+([decisions.md, 14.10.2026](../docs/decisions.md#2026-10-14-prompt-wording-per-model)). After the deploy of
 14.10.2026 Ireland had the prompt measured with Qwen3 235B and got 27 of 30
 in two runs: it made Nova Pro write "The sources do not answer this
 question." where the sources do. One question (q20) was right only 2 of 10

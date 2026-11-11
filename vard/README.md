@@ -9,13 +9,13 @@ each with tools, and a person decides what happens. His first is the
 receiving check: he fetches a delivery note that has come in, fetches the
 purchase order it names, compares them and reports what differs. His second
 build picked his model on 24 cases instead of twelve, the new ones harder
-([decisions.md:1296](../docs/decisions.md?plain=1#L1296)). It started from the
+([decisions.md, 21.10.2026](../docs/decisions.md#2026-10-21-vard-second-build)). It started from the
 four candidates below; MiniMax M2.1 dropped out, and MiniMax M2.5, the newer
 model of the same maker, took its place. The operator chose M2.5: it passed
 the most cases of the models measured with their makers' settings, and his
 rule puts the fewest missed discrepancies next, because a missed shortfall
 costs money and nobody notices it
-([decisions.md:1329](../docs/decisions.md?plain=1#L1329)). Running him in
+([decisions.md, 21.10.2026](../docs/decisions.md#2026-10-21-minimax-m2-5)). Running him in
 Frankfurt, with a trigger for new delivery notes, memory of corrections and
 pausing, follows as a stage of its own. A support inbox, to be tried on the
 made-up software company Quillmoor, is planned after that.
@@ -31,7 +31,7 @@ text, the tools and the step limit (`vard/receiving.py`). The receiving check
 has six tools, all allowed, and none of them books.
 
 **Measured on 20.10.2026 in Frankfurt**, twelve made-up cases, two runs of
-every model ([decisions.md:1260](../docs/decisions.md?plain=1#L1260)):
+every model ([decisions.md, 20.10.2026](../docs/decisions.md#2026-10-20-vard-first-build)):
 
 | Model | Passed, of 24 | USD, both runs | Median seconds per case |
 |---|---|---|---|
@@ -51,7 +51,7 @@ Nova Pro run behind the EU profile, which routes to every EU region, and
 stand as a comparison only.
 
 **Measured on 21.10.2026 in Frankfurt**, 24 made-up cases, three rounds, so 72
-cases a model ([decisions.md:1329](../docs/decisions.md?plain=1#L1329)). The
+cases a model ([decisions.md, 21.10.2026](../docs/decisions.md#2026-10-21-minimax-m2-5)). The
 four candidates ran first with the settings of the first build: MiniMax M2.1
 passed 69, Nemotron 3 Super 64, Devstral 2 123B 58 and gpt-oss-20b 49. 19 of
 gpt-oss-20b's cases ended in an error of Vard's loop, which is fixed. MiniMax
