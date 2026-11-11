@@ -5,12 +5,14 @@ Measurements behind them are in the READMEs.
 
 ## What it is
 
+<a name="2026-10-16-portfolio-piece"></a>
 **2026-10-16 — Nothing is sold; the repository is a portfolio piece.** The
 operator decided. Until this day Svar was to be sold, and the entries dated
 before it speak of customers and paying customers. They stay as they were
 written. The plans stay in the code: a plan is a quota on a key, whoever
 holds it.
 
+<a name="2026-10-20-andur-svar-vard"></a>
 **2026-10-20 — Andur is the larger system; Svar and Vard are its parts.** The
 operator decided. Andur is the larger system, meant to grow into a secretariat,
 stage by stage, with a person deciding at every stage. Svar is a chatbot: it
@@ -21,6 +23,7 @@ and a company's documents stay in Germany; the stack in Ireland is the
 comparison stack. Until 02.10.2026 the chatbot was called Ask Andur, which is
 why older entries let Andur answer where Svar answers today; they stay as written.
 
+<a name="2026-11-08-one-folder-per-part"></a>
 **2026-11-08 — The code moves into one folder per part; the stack stays one.**
 The operator decided. Taug (`taug/`), Svar (`svar/`) and Vard (`vard/`) each
 have a folder of their own, and `README.md` shows how they hang together. AWS
@@ -37,6 +40,7 @@ Taug's workspace script calls. What of Taug runs in Svar's function, the key
 check among it (`svar/app/keys.py`), stays there until the stack is split,
 which is a step of its own.
 
+<a name="2026-11-10-taug-stack-of-its-own"></a>
 **2026-11-10 — Taug moves into a stack of its own; Svar keeps `AndurStack`.**
 The operator decided on 09.11.2026. `infra/app.py` builds two stacks in one
 account and region: `TaugStack` (`taug/infra/stack.py`) and Svar's
@@ -67,6 +71,7 @@ moves. Nothing else may change in between. The operator runs every step.
 `cdk.json` sets `@aws-cdk/core:defaultCrossStackReferences` to `strong`, the
 export and import the move was planned with, so a later CDK cannot change it.
 
+<a name="2026-11-11-move-ran-in-frankfurt"></a>
 **2026-11-11 — The move ran in Frankfurt; Ireland stays as it was.** The
 operator decided on 10.11.2026. In Frankfurt the seven resources moved in the
 night of 10 to 11.11.2026 and the rehearsal passed. Ireland was not moved: it
@@ -120,6 +125,7 @@ the run went, in order:
 
 ## Region
 
+<a name="2026-09-28-ireland-not-us-east-1"></a>
 **2026-09-28 — eu-west-1 (Ireland), not us-east-1.** A company asks where
 its documents go. In Ireland the documents, the vectors, the question and the
 answer stay in the EU. S3 Vectors, Bedrock Knowledge Bases, Titan Text
@@ -127,6 +133,7 @@ Embeddings V2, Guardrails and Nemotron 3 Super are all offered there (the
 Bedrock model list of eu-west-1, 28.09.2026). The stack in us-east-1 is left
 standing; removing it is a decision of its own.
 
+<a name="2026-10-06-region-is-a-setting"></a>
 **2026-10-06 — The region is a setting, Ireland stays the default.** A
 company in Germany asks that its data stay in Germany. Frankfurt offers every
 part Andur uses in the region itself but the German topic tier (measured
@@ -142,12 +149,14 @@ of the function's code, which now can check the topics with a model. As of
 carry a `DEFAULT_REGION` of their own, `eu-central-1`, the rehearsal because it
 takes only a region whose function is its own address (`scripts/README.md`).
 
+<a name="2026-09-28-account-wide-names-carry-region"></a>
 **2026-09-28 — Names that hold for the whole account carry the region.**
 IAM role names and CloudFront policy and origin access control names are
 account-wide. Without the region, the stack in eu-west-1 would have collided
 with the one in us-east-1 at four names: the knowledge base role, the
 response headers policy and both origin access controls.
 
+<a name="2026-09-28-region-or-eu-profile"></a>
 **2026-09-28 — A model runs in the region or behind an EU profile, never a
 global one.** An EU inference profile routes only to EU regions; a global
 profile may route anywhere. For an EU profile the answer role may invoke the
@@ -156,6 +165,7 @@ through that profile (`bedrock:InferenceProfileArn`). Checked in the IAM
 policy simulator on 28.09.2026: the model in us-east-1, a direct call and a
 global profile are all denied.
 
+<a name="2026-09-28-price-list-api"></a>
 **2026-09-28 — Prices from the AWS Price List API.** It is the
 machine-readable source of the pricing pages, one row per model, region and
 tier. An EU profile is billed at the regional price, which for Claude is a
@@ -163,25 +173,30 @@ tenth above the global one.
 
 ## Storage and retrieval
 
+<a name="2026-09-17-s3-vectors"></a>
 **2026-09-17 — S3 Vectors behind a Bedrock knowledge base, not OpenSearch.**
 Nothing with a monthly base fee: an idle month costs cents of storage, and
 chunking, embedding and search are managed, so there is no index code to keep.
 
+<a name="2026-09-17-titan-embeddings"></a>
 **2026-09-17 — Titan Text Embeddings V2 at 1,024 dimensions, cosine.**
 The largest size for retrieval quality; cosine matches how Titan normalises.
 The index must use the same numbers, so they are one constant each.
 
+<a name="2026-09-17-filterable-metadata"></a>
 **2026-09-17 — Only `workspace` and `layer` are filterable metadata.**
 Bedrock's own keys and our `source` and `license` are declared
 non-filterable; otherwise they count against the filterable-metadata budget
 of S3 Vectors and ingestion fails.
 
+<a name="2026-09-17-chunks-and-sections"></a>
 **2026-09-17 — Fixed-size chunks of 300 tokens with 13 % overlap, and
 documents uploaded as sections.** For documents with Markdown tables Bedrock
 returned whole documents under every chunking tried, and the
 foundation-model parser changed nothing. Splitting at headings before the
 upload does not depend on why: a file returned whole is a section.
 
+<a name="2026-09-28-ten-passages"></a>
 **2026-09-28 — Ten passages per question, not six.** Every model answered
 "the sources do not say" to q07, how long an invitation link is valid,
 because retrieval ranked the right section seventh (score 0.7255; the eighth
@@ -210,15 +225,18 @@ only on Amazon RDS, OpenSearch Serverless and MongoDB (Amazon S3 Vectors and
 Bedrock user guides, *Querying vectors* and *Configure and customize
 queries*, read 28.09.2026).
 
+<a name="2026-09-17-names-carry-digest"></a>
 **2026-09-17 — Resource names carry a digest of their create-only
 settings.** A changed create-only setting replaces the resource, and
 CloudFormation creates the replacement before deleting the old one; under a
 fixed name the two collide.
 
+<a name="2026-09-17-documents-bucket-retained"></a>
 **2026-09-17 — The documents bucket is retained and versioned, old versions
 expire after 30 days.** Documents are the one thing that cannot be rebuilt;
 vectors, the index and the knowledge base are derived and go with the stack.
 
+<a name="2026-09-23-fill-script-prunes"></a>
 **2026-09-23 — The fill script prunes what the folder no longer has, as a
 dry run unless told `--delete`.** Upload only adds and replaces, so a
 document removed from the corpus would stay in the bucket, and every sync
@@ -227,6 +245,7 @@ would keep it in the index. Listing first shows what would go; with
 takes the others for stale. A deleted object stays recoverable for 30 days
 as a noncurrent version.
 
+<a name="2026-09-30-pruning-own-workspaces"></a>
 **2026-09-30 — Pruning compares only the workspaces the folder holds.** Until
 then, a folder without `--workspace` was compared with every workspace in the
 bucket. A dry run with one customer's own folder listed all 294 objects of
@@ -236,6 +255,7 @@ one case it cannot prune — a workspace emptied locally — is left to a
 deliberate `aws s3 rm`. The all-clear names the workspaces it compared,
 because the bucket may hold others that were not looked at.
 
+<a name="2026-10-02-section-names-umlauts"></a>
 **2026-10-02 — Section names spell out umlauts.** A section's file name is
 what the page lists as its source, and it kept only a–z and 0–9: a German
 customer read `b-rozeiten` for *Bürozeiten*. Now `ä`, `ö`, `ü`, `ß` are `ae`,
@@ -251,21 +271,25 @@ sections.
 
 ## Workspaces and keys
 
+<a name="2026-09-17-one-installation-metadata-filter"></a>
 **2026-09-17 — One installation, workspaces separated by a metadata filter,
 with a second check in the handler.** The filter keeps a query inside one
 workspace; the handler drops any passage of another workspace before the
 prompt is built, so a filter mistake cannot reach the model.
 
+<a name="2026-09-17-one-key-per-workspace"></a>
 **2026-09-17 — One key per workspace, generated inside AWS during the
 deploy, stored as a SecureString.** CloudFormation cannot create a
 SecureString parameter, and a key written into the template would sit in
 `cdk.out` and in CloudFormation. A small function inside the stack generates
 and stores each key instead.
 
+<a name="2026-09-22-key-resources-every-deploy"></a>
 **2026-09-22 — The key resources run on every deploy.** A property that
 changes with every synthesis makes CloudFormation call them each time, so
 deleting a key's parameter and deploying gives a new key instead of none.
 
+<a name="2026-10-01-keys-from-a-command"></a>
 **2026-10-01 — Keys come from a command, not from the deploy; the two entries
 above are replaced.** The stack created one key per name in `WORKSPACES`, so
 every customer stood by name in the public repository, every new one needed a
@@ -303,6 +327,7 @@ resource before. In eu-west-1 and eu-central-1 that deploy is a step before
 the split. The stack in us-east-1 cannot take this code: that region has no
 models (`region_models`).
 
+<a name="2026-10-01-remove-shows-first"></a>
 **2026-10-01 — Removing a workspace shows before it deletes.** Without
 `--yes`, `remove` lists what it would delete and deletes nothing, because a
 typo must not take a customer away. Everything it deletes is found under that
@@ -320,12 +345,14 @@ reporting the workspace gone. Deleted documents leave a
 delete marker in the versioned bucket, and their old versions expire after
 30 days like every other's; within that time they can be restored.
 
+<a name="2026-09-17-keys-read-every-5-minutes"></a>
 **2026-09-17 — Keys are read at most every 5 minutes, and again at once for
 an unknown key, no more than every 10 seconds.** A new key works at once, a
 deleted one stops within 5 minutes, and a flood of wrong keys is not a flood
 of Parameter Store reads. Keys that cannot be reread keep working; a key
 path that reads empty ends them.
 
+<a name="2026-10-02-read-only-the-named-key"></a>
 **2026-10-02 — The function reads only the key of the workspace a request
 names.** One `GetParameter` on `<path>/<workspace>` instead of every key under
 the path. Parameter Store hands out the path ten keys to a page, so from the
@@ -349,6 +376,7 @@ is no longer a 500: a deleted key is `ParameterNotFound`, the key stops within
 its 5 minutes, and the request is a 401. The role may
 `ssm:GetParameter` on `<path>/*` and nothing else in Parameter Store.
 
+<a name="2026-10-02-old-key-15-minutes"></a>
 **2026-10-02 — An old key decides for at most 15 minutes, and invented names
 have a cap.** A key that cannot be read again goes on deciding, as decided
 on 2026-09-17, but only until 15 minutes after its last good read
@@ -378,26 +406,32 @@ Five instances are Ireland's cap. The Frankfurt stack reserves 10 executions
 (2026-10-07), so there up to 10 instances may each read 10 times in 10 seconds:
 10 reads a second, a quarter of the 40.
 
+<a name="2026-09-18-key-in-x-andur-key"></a>
 **2026-09-18 — The key travels in `X-Andur-Key`.** CloudFront signs every
 request to the function URL and overwrites `Authorization` with its own
 signature.
 
 ## Budgets
 
+<a name="2026-09-17-key-is-a-budget"></a>
 **2026-09-17 — A key is a budget: 10 questions and 48 hours from the first.**
 A leaked key is a leak of ten questions, not an open tap.
 
+<a name="2026-09-17-counted-in-dynamodb"></a>
 **2026-09-17 — Counted in DynamoDB with one conditional write, found by the
 key's SHA-256.** The write counts and checks in one step, so two parallel
 questions cannot both take the last one. The table holds no key, only its
 hash. On demand, because a public URL has no rate to provision for.
 
+<a name="2026-09-17-spent-key-402"></a>
 **2026-09-17 — A spent key gets 402.** Not 401 (the key is valid), not 403
 (it opens this workspace), not 429 (waiting does not help).
 
+<a name="2026-09-17-item-kept-365-days"></a>
 **2026-09-17 — An item is kept 365 days.** The item is what keeps a spent key
 spent; once it is gone, the key starts over.
 
+<a name="2026-10-01-key-carries-a-plan"></a>
 **2026-10-01 — A paying customer's key carries a plan, and the plans live in
 one table.** Until now every key ended after 48 hours, and a customer would
 have been locked out on day three. `betrieb` allows 6,000 questions a
@@ -409,6 +443,7 @@ read, so a change is one line and a deploy. The item names its plan; an item
 without one is the demo, exactly as before, so the demo keys in use go on
 unchanged.
 
+<a name="2026-10-01-german-calendar"></a>
 **2026-10-01 — German calendar months and days, worked out in the code.**
 The quota renews at midnight in Germany, where the customers are. `zoneinfo`
 needs a time zone database that nothing promises the Lambda runtime brings
@@ -417,6 +452,7 @@ for summer time itself; a test compares it with the database every half hour
 from 2026 to 2030 where one is installed. Should the EU ever drop the clock
 change, this is the line to change.
 
+<a name="2026-10-01-count-per-month-and-day"></a>
 **2026-10-01 — One count per month and per day, named by the period.** A key
 on a plan counts in `month_2026-10` and `day_2026-10-01`. A new day is a new
 attribute, so nothing is reset and nothing races at midnight, and a question
@@ -426,6 +462,7 @@ write whenever two questions meet at the change, and more writes than the
 worst case of the timeouts allows for. Each write clears the counts older
 than last month and yesterday.
 
+<a name="2026-10-01-demo-write-first"></a>
 **2026-10-01 — The demo write comes first and hands over the plan.** Its
 condition refuses an item with a plan, and DynamoDB returns the refused item;
 the second write counts against the plan. No read, and two writes per
@@ -433,6 +470,7 @@ question on a plan, which the worst case already counts for a demo key (the
 count and the TTL repair). A plan item has no TTL: losing the item would turn
 the key back into a demo key.
 
+<a name="2026-10-01-full-quota-429"></a>
 **2026-10-01 — A full quota is a 429, a spent demo key still a 402.** 402 says
 nothing comes back and a new key is needed, which the page adds in a line of
 its own. A quota does come back, and 429 says to come back later; its body
@@ -440,6 +478,7 @@ carries a sentence, which Lambda's own 429 does not, so the page shows it
 alone. The sentence asks the customer to get in touch with their contact
 person, in German or English like every other.
 
+<a name="2026-10-20-full-quota-reader-sentence"></a>
 **2026-10-20 — A full quota sends the reader to whoever gave the key.** The
 operator decided. The sentence of the entry above named a contact person;
 from the next deploy on it reads "Please ask whoever gave you this key for
@@ -448,6 +487,7 @@ weitere Fragen."), as the page's line for a spent demo key sends the reader
 to whoever sent the link. Nothing is sold, so
 there is no contact person to name.
 
+<a name="2026-10-01-uncountable-plan-item"></a>
 **2026-10-01 — A plan item that cannot be counted answers nothing.** An
 unknown plan and a count that is not a number are a 500 with a log line,
 never a question that nothing counted. A missing count is the start of its
@@ -455,21 +495,25 @@ period.
 
 ## The answer
 
+<a name="2026-09-15-nemotron-answers"></a>
 **2026-09-15 — Nemotron 3 Super answers.** The model id lives in the stack,
 never in the handler, so a change of model is a deploy, not a code change.
 
+<a name="2026-09-28-nova-pro-answers"></a>
 **2026-09-28 — Nova Pro answers, through its EU profile.** Nemotron 3
 Super gave no response in eu-west-1 on 28.09.2026. Of the four models that
 did, Nova Pro was right as often as Claude Haiku 4.5 and Sonnet 4.6 (29 of
 30), cost less per answered question (0.0028 USD against 0.0034 and 0.0077)
 and was never turned away (scripts/README.md, *evaluate*).
 
+<a name="2026-09-28-model-and-price-one-table"></a>
 **2026-09-28 — A model and its price live in one table.**
 `infra/answer_models.py` holds each model id with its token prices; the
 stack looks the price up by the id it deploys, and the evaluation reads the
 same table. A model without a row fails at synthesis, so a change of model
 cannot carry the last model's prices.
 
+<a name="2026-09-29-temperature-zero"></a>
 **2026-09-29 — Temperature 0, and what it did not fix.** The function set
 only `maxTokens`, so Nova Pro sampled at its default (0.7). It now sends
 `temperature` 0 (`ANSWER_TEMPERATURE` in `app/llm.py`). The Nova user
@@ -492,6 +536,7 @@ wrote a different answer or the guardrail's check judged the same one
 differently. Not tried: `topK` (Nova takes it in `additionalModelRequestFields`).
 Two runs cannot say how often the answers differ.
 
+<a name="2026-10-03-answer-is-a-sentence"></a>
 **2026-10-03 — An answer is a sentence, not numbers in brackets.** The open
 question from 29.09. is answered for q16: rebuilt outside the function with
 the same sources, prompt and temperature, Nova Pro wrote only citation marks
@@ -506,10 +551,12 @@ and a difference small enough to be the model's own spread. In both runs
 which the topic probe did not measure then (see 05.10.2026 under *Guardrails
 and cost*).
 
+<a name="2026-09-17-layers-from-citations"></a>
 **2026-09-17 — The layers of an answer come from its citations, not from the
 model.** Asked to flag unconfirmed sources, the model ignored the rule or
 applied it everywhere.
 
+<a name="2026-09-17-model-call-tried-once"></a>
 **2026-09-17 — The model call is tried once, everything else twice.** A
 converse that timed out may have produced its answer; a second attempt pays
 for the input again. Two more calls are made once as well: the budget refund,
@@ -517,6 +564,7 @@ since a refund whose answer got lost would take the question back twice, and the
 topic model, which the handler asks again itself (both 2026-10-07; `CLIENT_LIMITS`
 in `app/aws.py`).
 
+<a name="2026-09-28-model-call-retried"></a>
 **2026-09-28 — A model call AWS turns away is made once more, if it can still
 end before CloudFront gives up.** Claude Haiku 4.5 was turned away with
 `ServiceUnavailableException` on 20 of 30 calls one afternoon, each a 502 and
@@ -544,12 +592,14 @@ time, twenty with ten seconds between them twice. It sits in the handler,
 not in botocore's retry setting, which would repeat timeouts too, and the
 first rejection is a log line of its own.
 
+<a name="2026-09-28-unparsable-body-400"></a>
 **2026-09-28 — A body Python cannot parse is a 400, whatever the reason.**
 `json.loads` refuses an integer of more than 4,300 digits with `ValueError`
 and nesting past the recursion limit with `RecursionError`. Both used to end
 as a 500 with a traceback in the log, and the body is read before the key is
 checked, so anyone could cause them.
 
+<a name="2026-09-17-timeouts"></a>
 **2026-09-17 — Every AWS call has a connect and a read timeout, and the sum
 of all of them stays under the function's timeout.** A hanging call ends as a
 502 with a reason, not as a bare Lambda timeout. Today 189 of 195 seconds,
@@ -560,14 +610,17 @@ with the check of the question, which made the sum 189. That sum is the one
 behind CloudFront (`aws.worst_case_seconds`); without it, in Frankfurt since
 07.10.2026, it is 190 (the entry of 2026-10-07 on the function's URL).
 
+<a name="2026-09-17-five-requests-at-a-time"></a>
 **2026-09-17 — At most 5 requests at a time.** The cap on the bill matters
 more than keeping a demo reachable; a stranger with five parallel calls can
 hold it up, and a WAF on the distribution is the answer if that happens.
 
+<a name="2026-09-17-log-without-question"></a>
 **2026-09-17 — The log never carries the question, the key or its hash, and
 a Bedrock failure is logged by its code only.** A service message quotes
 what it choked on, and for converse that is the prompt.
 
+<a name="2026-10-01-visitors-language"></a>
 **2026-10-01 — Andur speaks the visitor's language, not the company's.** Two
 languages, German and English. The page starts in German when the browser's
 language begins with `de`, offers a DE/EN switch and sends its language in the
@@ -578,6 +631,7 @@ language a request names decides nothing about which documents are read, and
 nothing is checked against it: a missing or unknown one is English, not an
 error, so a client written before the field existed keeps working unchanged.
 
+<a name="2026-10-01-answer-follows-question"></a>
 **2026-10-01 — The answer follows the question, the fixed sentences follow
 the request.** The prompt still says "answer in the language of the question",
 as before: an English question about English documents is answered in
@@ -590,6 +644,7 @@ the answer to the page language as well would have removed that, and would
 have taken away the ability to ask an English document in English from a
 German browser.
 
+<a name="2026-10-01-block-in-handlers-words"></a>
 **2026-10-01 — A block by the guardrail is told in the handler's words.**
 Bedrock replaces a blocked text with the one English sentence set on the
 guardrail, whatever the language of the question; that was the one sentence a
@@ -603,6 +658,7 @@ keeps them equal to the handler's English ones. Two sentences are not
 three: only the topic filter reads the question, so a topic blocked in the
 input assessment means "refused", every other block means "withheld".
 
+<a name="2026-10-01-english-before-body"></a>
 **2026-10-01 — What is found before the body is read is English.** The
 method and the shape of the body are checked first, and the language is in the
 body. Reading the language from the `Accept-Language` header instead would
@@ -610,6 +666,7 @@ have given a second source that can disagree with the switch on the page, for
 errors the page cannot cause. It never sends a wrong method or a body that is
 not JSON; whoever does is a script, and `scripts.ask` reads English.
 
+<a name="2026-10-01-page-keeps-sentences-once"></a>
 **2026-10-01 — The page keeps every sentence once.** `web/language.js` holds
 the English and the German text as two tables with the same keys; `index.html`
 is empty where text goes and `app.js` has no sentence of its own. Under Node
@@ -621,15 +678,18 @@ customers of a company.
 
 ## The way in
 
+<a name="2026-09-18-one-distribution"></a>
 **2026-09-18 — One CloudFront distribution for the page and `/ask`.** The
 page calls a relative path, so it needs no configuration and no CORS; and
 there is one place in front of everything.
 
+<a name="2026-09-18-function-url-aws-iam"></a>
 **2026-09-18 — The function URL is `AWS_IAM`, reached through an origin
 access control; the site bucket is private.** Neither origin answers from
 outside on its own. Every request carries the SHA-256 of its body, because a
 signed request to a function URL may not have an unsigned payload.
 
+<a name="2026-09-17-cloudfront-waits-120"></a>
 **2026-09-17 — CloudFront waits 120 seconds, the function may run 180.** 120
 is the quota without an approved increase. A slower answer reaches the
 browser as a 504 while the function finishes it; cutting the function under
@@ -637,29 +697,35 @@ browser as a 504 while the function finishes it; cutting the function under
 run 195 seconds (`ANSWER_TIMEOUT_SECONDS`); the 120 apply only in Ireland, where
 CloudFront stands in front of it.
 
+<a name="2026-09-22-security-headers"></a>
 **2026-09-22 — Security headers on the distribution, with a strict CSP.**
 The page loads its own script and stylesheet and posts to its own origin,
 nothing else; `frame-ancestors 'none'` keeps it out of other pages' frames.
 
 ## Guardrails and cost
 
+<a name="2026-09-23-guardrail-on-converse"></a>
 **2026-09-23 — The guardrail rides on the converse call.** Nemotron 3 Super
 supports Guardrails on `bedrock-runtime` (its model card), so no separate
 `ApplyGuardrail` call for the answer.
 
+<a name="2026-09-23-grounding-source"></a>
 **2026-09-23 — Passages go in as `grounding_source`, the question as
 `query` and `guard_content`.** The topic and PII filters read the question
 and the answer, not the documents; the model sees the documents unmasked.
 
+<a name="2026-09-23-thresholds-0-7"></a>
 **2026-09-23 — Grounding and relevance thresholds of 0.7.** AWS names no
 default; the user guide works its example with 0.7, and a higher threshold
 withholds more correct answers. Both scores are logged for tuning.
 
+<a name="2026-09-23-people-outside-documents"></a>
 **2026-09-23 — "People outside the documents" is approximated.** The topic
 filter cannot see the documents; it refuses public figures and private
 lives, and the grounding check withholds answers about people the passages
 do not name.
 
+<a name="2026-10-01-standard-tier-eu-profile"></a>
 **2026-10-01 — Denied topics in the Standard tier, through the EU guardrail
 profile.** The first customers are German, and a German tax question went
 through: measured with `ApplyGuardrail` against the deployed guardrail, which
@@ -679,6 +745,7 @@ nothing extra, so a question costs what it did. Not done: German examples in
 made the measurement after the deploy a test of the examples, not of the
 tier; they stay the next step if German refusals still pass.
 
+<a name="2026-10-02-topics-measured-before-deploy"></a>
 **2026-10-02 — Every change to the denied topics is measured before the
 deploy, with `python -m scripts.topic_probe`.** After the Standard tier was
 deployed, 15 of 16 German refusals were refused, and 4 of 14 harmless German
@@ -702,6 +769,7 @@ in two runs, so a question counts as right only if it is right in every run.
 The probe read the question only then; since 04.10.2026 it reads answers
 too.
 
+<a name="2026-10-05-answer-checked-without-citations"></a>
 **2026-10-05 — The answer is checked for the denied topics without its
 citations, by a guardrail of its own.** `Private lives` withheld q15 and de11
 in the evaluation of 03.10, on the answer. Rebuilt outside the
@@ -752,6 +820,7 @@ only, scored its German answers to English passages 0.25 to 0.54 and withheld
 31 of 35 in the rebuilds; the four that passed read "Die Garantie gilt für 5
 Jahre [4]." (0.85).
 
+<a name="2026-10-06-question-checked-after-frame"></a>
 **2026-10-06 — The question is checked for the denied topics by the topic
 guardrail, after a frame; so is the answer.** Read alone, harmless questions
 about the business's own invoice were refused as `Tax returns`: "Wie viel
@@ -796,6 +865,7 @@ question, so the units stay what they were. The call comes before the model
 call and adds its time; a call of the answer check took 0.44 seconds from
 outside AWS (05.10.2026).
 
+<a name="2026-10-06-frankfurt-topic-guardrail-eu-profile"></a>
 **2026-10-06 — In Frankfurt the topic guardrail checks through the EU
 profile; a model as the check is built and measured, not used.** Replaced on
 2026-10-07 by gpt-oss-120b (next entry). The Standard
@@ -834,6 +904,7 @@ the model's own effort, each one attempt of 2 + 5 seconds, so a check ends
 within the 20 seconds of the guardrail call it replaces; an error, a timeout,
 an empty reply or one without exactly one verdict refuses.
 
+<a name="2026-10-07-frankfurt-gpt-oss-checks-topics"></a>
 **2026-10-07 — In Frankfurt gpt-oss-120b checks the topics, and a topic
 stands unless two more calls at once both name none.** gpt-oss-safeguard, made
 for such checks, is listed on `bedrock-mantle` in eu-central-1 but gave no
@@ -895,6 +966,7 @@ refuses a harmless text only when a call fails and the next one errs.
 CloudFront, the one address of page and `/ask`, was then the one part not
 bound to the region (next entry).
 
+<a name="2026-10-07-frankfurt-grounding-0-8"></a>
 **2026-10-07 — Frankfurt checks grounding at 0.8, Ireland stays at 0.7.**
 Measured in eu-central-1 on 07.10.2026 through a copy of the Frankfurt answer
 guardrail (`andur-grounding-threshold-probe`, left standing): the 142 answers
@@ -919,6 +991,7 @@ customer does not have. Only `REGIONS` gives Frankfurt the number
 (`grounding_threshold`); the stack and the probes copying its guardrail ask
 `grounding_threshold_for`.
 
+<a name="2026-10-07-not-in-the-sources-sentence"></a>
 **2026-10-07 — The "not in the sources" sentence is for a question the
 sources answer no part of, and the reader gets it when the grounding check
 withholds it.** The prompt said: if the sources do not answer the question,
@@ -970,6 +1043,7 @@ guardrails (0.21 USD):
 
 Ireland's Nova Pro needs the same before its next deploy.
 
+<a name="2026-10-07-prompt-asks-each-part"></a>
 **2026-10-07 — The prompt asks for each part of the question first.** With the
 wording above c32 was still only the sentence in the control run. Qwen3 235B
 does not write the same text twice at temperature 0: asked c32 16 times with
@@ -1002,6 +1076,7 @@ grounding check does with an answer that holds a sentence the sources do not
 carry, such as "required for jobs over 1,000 pounds", which Qwen wrote in several
 c32 answers with the old wording and the new one; the check let it pass.
 
+<a name="2026-10-14-prompt-wording-per-model"></a>
 **2026-10-14 — The prompt's wording is a column of the model's row.** The
 wording of 07.10. ("Look at each part of the question ...") was measured
 with Qwen3 235B in Frankfurt only, and went to Ireland with the deploy of
@@ -1062,6 +1137,7 @@ model call. The templates of both regions differ from those of fcac888 in two
 places: the new variable, and the hash of the function's code. Ireland answers
 with `sentence-first` from the next deploy on; the README figures follow it.
 
+<a name="2026-10-07-failed-question-given-back"></a>
 **2026-10-07 — A question that fails on AWS's side is given back, never
 after a timeout.** Until now a question counted once it passed the budget,
 whatever happened after it. For a customer that means paying for an outage
@@ -1081,6 +1157,7 @@ budget table, and the time sums count two. Not after a crash, which is a bug.
 The 28.09.2026 report proposed this (the answer to the budget question), as
 one update with a condition that keeps the count from going below zero.
 
+<a name="2026-10-07-frankfurt-function-url"></a>
 **2026-10-07 — In Frankfurt the function's URL is the address, without
 CloudFront.** CloudFront takes a request at the edge location DNS picks, and
 no setting keeps its edges to Germany: the smallest price class covers the
@@ -1127,6 +1204,7 @@ is the cap (`docs/operating.md`). A page that inlines its files would need
 one call, but the content security policy, shared with Ireland, allows no
 inline script.
 
+<a name="2026-10-06-german-answers-grounding"></a>
 **2026-10-06 — German answers keep the grounding check as it is; checking
 them in English is measured, not built.** Measured with `python -m
 scripts.grounding_probe` (`scripts/README.md`) on 142 fixed answers, two runs:
@@ -1156,11 +1234,13 @@ from outside AWS) and 0.0013 USD, and a client of its own with short limits:
 under the answer call's 3 + 40 seconds, a request's worst case with the check
 would end past CloudFront's 120 (`app/aws.py`).
 
+<a name="2026-09-23-deployed-guardrail-version-only"></a>
 **2026-09-23 — The model may only be invoked with the deployed guardrail
 version.** An IAM condition on `bedrock:GuardrailIdentifier`: a call that
 drops the guardrail fails instead of answering unguarded. Since 05.10.2026
 any numbered version of that guardrail (next entry).
 
+<a name="2026-10-05-new-guardrail-version-drain"></a>
 **2026-10-05 — A new guardrail version leaves the answer role alone, and the
 deploy waits for the answers on the old one.** The role allowed the model
 only with `<answer guardrail arn>:<deployed number>`. A deploy with a new
@@ -1196,30 +1276,37 @@ function's timeout plus 30; 210 until then), about four minutes per such
 deploy. It follows two versions in Frankfurt, which has no topic guardrail,
 and three in Ireland.
 
+<a name="2026-09-23-at-most-30-passages"></a>
 **2026-09-23 — At most 30 passages.** The grounding source takes at most
 100,000 characters.
 
+<a name="2026-09-23-excerpt-guardrail"></a>
 **2026-09-23 — A second guardrail for the excerpts, PII masking only.** The
 answer's guardrail never sees an excerpt. With topics an excerpt about VAT
 would be refused as tax advice, and each question would pay for topic units.
 
+<a name="2026-09-23-excerpts-one-block"></a>
 **2026-09-23 — Excerpts in one text block, one per line; anything unexpected
 drops them.** Six blocks would be six text units, one block is two. Only
 `NONE` and `GUARDRAIL_INTERVENED` with a text that splits back keep the
 excerpts; an unmasked excerpt is what this is there to stop.
 
+<a name="2026-09-23-excerpt-guardrail-client"></a>
 **2026-09-23 — The excerpt guardrail has its own client, 2 + 5 seconds, two
 attempts.** Under the model's 40 seconds the worst case would pass the
 function's timeout.
 
+<a name="2026-09-23-guardrail-version-digest"></a>
 **2026-09-23 — Guardrail versions follow a digest of the resolved
 properties.** A version's description is create-only, so a digest in it
 replaces the version on every change. Taken over the properties themselves,
 not a summary, so a changed action or flag cannot be missed.
 
+<a name="2026-09-23-refused-question-no-sources"></a>
 **2026-09-23 — A refused question returns no sources.** Nothing was answered
 from them, and their excerpts would put document text next to a refusal.
 
+<a name="2026-09-23-cost-in-handler"></a>
 **2026-09-23 — The cost of every answer is computed in the handler, with the
 date of its prices.** Prices sit in the stack as environment variables with
 their source; the log line carries tokens and units as well, so an old line
@@ -1227,12 +1314,14 @@ can be priced again. Earlier the code had no prices at all; a number per
 answer was worth more than the risk of an old price, as long as the date
 travels with it.
 
+<a name="2026-09-23-masking-is-a-filter"></a>
 **2026-09-23 — The PII masking is a filter, not a guarantee.** It is
 statistical; a first name without a surname slipped through in the browser
 acceptance. What a reader must never see must not be in the documents.
 
 ## Evaluation
 
+<a name="2026-09-28-comparison-handlers-path"></a>
 **2026-09-28 — The model comparison runs the handler's own path, not a
 deploy per model.** `scripts/evaluate.py` calls `answer_question` with the
 deployed function's settings and changes only the model id and its token
@@ -1243,6 +1332,7 @@ take minutes per model and switch the page each time. The run uses the
 developer's credentials, not the function's role, so it proves the models
 and the guardrail, not the role's IAM.
 
+<a name="2026-09-28-right-means-expected-facts"></a>
 **2026-09-28 — An answer is right when it contains the expected facts.** Each
 question names its facts with their usual spellings, and the first spelling
 is checked against the document in the tests. A text check is repeatable and
@@ -1256,11 +1346,13 @@ bound. A question that must be refused or cannot be answered is right when
 Andur declines: the guardrail blocks, or the model says the sources do not
 answer.
 
+<a name="2026-09-28-busy-service-asked-again"></a>
 **2026-09-28 — A busy service is asked again, anything else is counted as
 wrong.** Bedrock answered some calls with `ServiceUnavailableException`; a run
 that counts those measures the day's capacity, not the model. A timeout is
 not retried: it is what the page would show.
 
+<a name="2026-10-18-fails-on-failed-call"></a>
 **2026-10-18 — A measurement fails on a failed call, not on wrong answers.**
 The operator decided: the rehearsal's steps `answers-*` and `sources` fail as
 soon as a call failed (`errors` above 0), and pass however many answers are
@@ -1268,6 +1360,7 @@ wrong. A failed call means there was no measurement; a wrong answer is a
 result. `evaluate` and `control_eval` end with 2 after a failed call since
 11.10.2026, which fails the step; this entry is the rule behind it.
 
+<a name="2026-10-18-rehearsal-german-questions"></a>
 **2026-10-18 — The rehearsal measures the new workspace's own German
 questions, or says it did not.** The operator decided: `answers-de-de` and
 `sources` follow `--workspace` instead of always asking Kalvenstett's
@@ -1276,6 +1369,7 @@ named as skipped in the summary, not as passed; otherwise a run for a new
 workspace would measure another one without a word. `sources` no longer asks
 Pellwick's half of the set beside it, which `control_eval` alone still does.
 
+<a name="2026-10-18-port-80-open"></a>
 **2026-10-18 — Port 80 that takes the connection is open, even without an
 answer.** The operator decided: an address that takes the connection on port
 80 and then closes, resets or breaks it off without an answer fails
@@ -1288,6 +1382,7 @@ summary, since a block on this computer's side looks the same.
 
 ## Vard
 
+<a name="2026-10-20-measurement-picks-vards-model"></a>
 **2026-10-20 — A measurement picks Vard's model, and his loop is built the way
 Claude Code's is.** The operator decided on 01.10.2026 that a test of the EU
 models picks Vard's model, not a fixed choice. Vard works
@@ -1311,6 +1406,7 @@ brings a trigger for new delivery notes, memory of corrections and pausing,
 and picks the model, with more and harder cases, among the four candidates
 of the entry "The first build of Vard closes with four candidates".
 
+<a name="2026-10-20-wrong-article-two-halves"></a>
 **2026-10-20 — A wrong article may be reported as its two halves.** The
 operator decided after the first paid run: the ordered article reported as
 missing and the delivered one as extra meet an expected wrong article, the
@@ -1320,6 +1416,7 @@ washbasins so. The documents of the case say which number was ordered and
 which delivered; one half alone, or both with their kinds swapped, misses
 the wrong article and counts as made up.
 
+<a name="2026-10-20-vard-first-build"></a>
 **2026-10-20 — The first build of Vard closes with four candidates; the next picks the model.**
 The operator decided after two paid runs of `scripts/receiving_probe.py` in
 eu-central-1, both with every model of `FRANKFURT_MODELS`: the first at
@@ -1356,6 +1453,7 @@ among them with more and harder cases and brings the trigger, the memory of
 corrections and pausing of the entry "A measurement picks Vard's model"; the
 loop takes any of them, the model being one argument of `vard.engine.run`.
 
+<a name="2026-10-21-vard-second-build"></a>
 **2026-10-21 — The second build of Vard only picks his model; running him is a
 stage of its own.** The operator decided. The next build that the two entries
 above name is split in two: this one picks the model among the four
@@ -1389,6 +1487,7 @@ of the case file fails the run, since it says nothing about the model.
 all 24 cases against those twelve on a run against a stub; reckoned, not
 measured.
 
+<a name="2026-10-21-minimax-m2-5"></a>
 **2026-10-21 — MiniMax M2.5 is Vard's model.** The operator decided after
 the paid runs of `scripts/receiving_probe.py` in eu-central-1 on the 24 cases:
 the four candidates, Claude Sonnet 4.6 once, and three of the candidates
@@ -1517,6 +1616,7 @@ probe: 0.599, 0.708, 0.382 and 0.006.
 
 ## Code
 
+<a name="2026-10-07-files-over-500-lines"></a>
 **2026-09-23, replaced 2026-10-07 — Files over 500 lines stayed whole.**
 Until 07.10.2026 the function, the stack, `scripts/ingest.py`,
 `scripts/control_eval.py` and `scripts/rehearsal.py` were one file each, on
@@ -1524,6 +1624,7 @@ the grounds that a split is a step of its own and not part of a change that
 must not change behaviour. `app/handler.py` had grown to 2,227 lines by then.
 That step is the entry below.
 
+<a name="2026-10-07-one-job-per-module"></a>
 **2026-10-07 — One job per module, and the files that stay over 500 lines.**
 Counted with `wc -l` on 07.10.2026.
 
@@ -1562,5 +1663,6 @@ Counted with `wc -l` on 07.10.2026.
   import, and its sections already follow the new modules: cut along them,
   with the fakes in a module of their own, it is the next split.
 
+<a name="2026-09-23-comments-say-what-code-cannot"></a>
 **2026-09-23 — Comments say what the code cannot.** Docstrings are one
 sentence; reasons live here, measurements in the READMEs.
