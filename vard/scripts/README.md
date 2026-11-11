@@ -29,7 +29,10 @@ a tool definition Bedrock does not accept: the row stands in the table with
 the error's text, under *Failed*, and that text says which it was. A call
 that fails any other way — throttled, a service error, a timeout — says
 nothing about the model, is named under the table and fails the run with
-exit code 2. A missing login or permission stops it at once.
+exit code 2. A missing login or permission stops it at once. A case file it
+cannot read or an `--out` it cannot write ends the run with exit code 2 before
+the first call; should `--out` fail later, the table of the models measured so
+far is printed, no further model is asked, and the run ends with 2.
 
 ## receiving_probe — which model Vard checks deliveries with
 
@@ -110,7 +113,9 @@ so the cheaper models are measured first. A missing login or permission stops
 the run the same way, with the cases measured so far kept. A request Bedrock
 refuses as sent fails its case and is a result; any other failed call fails the
 run with exit code 2, as in `tool_probe`, and so does a tool of the case file
-that fails, since neither says anything about the model. `--region` takes the
+that fails, since neither says anything about the model. A case file or an
+`--out` that fails ends the run with exit code 2 the same way as in
+`tool_probe`. `--region` takes the
 models and prices
 `taug/infra/answer_models.py` gives that region: Frankfurt by default, Ireland with
 `--region eu-west-1`; a region without a table there is refused.

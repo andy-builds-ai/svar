@@ -155,6 +155,67 @@ def test_an_earlier_result_stays_when_a_run_fails_before_it_pays(
     assert out.read_text(encoding="utf-8") == '{"summaries": ["paid for"]}'
 
 
+@pytest.mark.parametrize(
+    "content",
+    [None, "", "[{}]", json.dumps([{"id": "x", "messages": ["a"], "expect": "maybe"}])],
+    ids=["missing", "no-json", "no-keys", "broken-case"],
+)
+def test_a_broken_case_file_ends_with_exit_2_before_anything_is_paid(
+    content: str | None, monkeypatch: pytest.MonkeyPatch, capsys: Any, tmp_path: Path
+) -> None:
+    def paid(region: str) -> None:
+        raise AssertionError("the run reached AWS")
+
+    monkeypatch.setattr(tool_probe, "model_client", paid)
+    path = tmp_path / "cases.json"
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+    assert tool_probe.main(["--cases", str(path)]) == 2
+    assert capsys.readouterr().err.startswith(f"error: {path} is no case file: ")
+
+
+def test_a_bad_out_path_ends_with_exit_2_before_anything_is_paid(
+    monkeypatch: pytest.MonkeyPatch, capsys: Any, tmp_path: Path
+) -> None:
+    def paid(region: str) -> None:
+        raise AssertionError("the run reached AWS")
+
+    monkeypatch.setattr(tool_probe, "model_client", paid)
+    out = tmp_path / "missing" / "tools.json"
+    assert tool_probe.main(["--out", str(out)]) == 2
+    assert capsys.readouterr().err.startswith(f"error: {out} cannot be written: ")
+
+
+def test_an_out_file_that_goes_bad_during_the_run_keeps_the_table_and_pays_no_more(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The first model was paid for and its result could not be saved: the table still
+    appears, the second model is not asked, exit 2."""
+    first, second = tool_probe.MODELS[0], tool_probe.MODELS[1]
+    asked: list[str] = []
+
+    class Refusing:
+        def converse(self, **request: Any) -> None:
+            asked.append(request["modelId"])
+            raise converse_error("ValidationException")
+
+    def locked(*_: Any) -> None:
+        raise PermissionError("[Errno 13] Permission denied")
+
+    monkeypatch.setattr(tool_probe, "model_client", lambda region: Refusing())
+    monkeypatch.setattr(tool_probe, "save", locked)
+    out = tmp_path / "tools.json"
+    argv = ["--model", first.name, "--model", second.name, "--out", str(out)]
+    assert tool_probe.main(argv) == 2
+    captured = capsys.readouterr()
+    assert f"| {first.name} | 0/6 |" in captured.out
+    assert f"| {second.name} |" not in captured.out
+    assert captured.err.strip().endswith(
+        f"error: {out} cannot be written: [Errno 13] Permission denied"
+    )
+    assert asked and set(asked) == {first.model_id}
+
+
 def test_a_region_outside_the_eu_is_refused(capsys: Any) -> None:
     assert tool_probe.main(["--region", "us-east-1"]) == 2
     assert "not an EU region" in capsys.readouterr().err

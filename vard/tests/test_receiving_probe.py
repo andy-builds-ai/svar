@@ -326,6 +326,73 @@ def test_an_earlier_result_stays_when_a_run_fails_before_it_pays(
     assert out.read_text(encoding="utf-8") == '{"summaries": ["paid for"]}'
 
 
+@pytest.mark.parametrize(
+    "content",
+    [None, "", "{}", '{"companies": {}, "cases": []}'],
+    ids=["missing", "no-json", "no-keys", "no-cases"],
+)
+def test_a_broken_case_file_ends_with_exit_2_before_anything_is_paid(
+    content: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    clerk = Clerk(loaded[1])
+    path = tmp_path / "cases.json"
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+    assert run_main(monkeypatch, clerk, "--cases", str(path)) == 2
+    assert capsys.readouterr().err.startswith(f"error: {path} is no case file: ")
+    assert clerk.request_bytes == []
+
+
+def test_a_bad_out_path_ends_with_exit_2_before_anything_is_paid(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    clerk = Clerk(loaded[1])
+    out = tmp_path / "missing" / "receiving.json"
+    assert run_main(monkeypatch, clerk, "--out", str(out)) == 2
+    assert capsys.readouterr().err.startswith(f"error: {out} cannot be written: ")
+    assert clerk.request_bytes == []
+
+
+def test_an_out_file_that_goes_bad_during_the_run_keeps_the_tables_and_pays_no_more(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    loaded: tuple[dict[str, str], list[dict[str, Any]]],
+) -> None:
+    """The first model was paid for and its result could not be saved: its tables still
+    appear, the second model is not asked, exit 2."""
+    first, second = probe.MODELS[0], probe.MODELS[1]
+    asked: list[str] = []
+
+    class Counting(Clerk):
+        def converse(self, **request: Any) -> dict[str, Any]:
+            asked.append(request["modelId"])
+            return super().converse(**request)
+
+    def locked(*_: Any) -> None:
+        raise PermissionError("[Errno 13] Permission denied")
+
+    monkeypatch.setattr(probe, "model_client", lambda region, read_seconds: Counting(loaded[1]))
+    monkeypatch.setattr(probe, "save", locked)
+    out = tmp_path / "receiving.json"
+    argv = ["--model", first.name, "--model", second.name, "--out", str(out)]
+    assert probe.main(argv) == 2
+    captured = capsys.readouterr()
+    assert f"| {first.name} | 24/24 |" in captured.out and f"### {first.name}" in captured.out
+    assert f"| {second.name} |" not in captured.out
+    assert captured.err.strip().endswith(
+        f"error: {out} cannot be written: [Errno 13] Permission denied"
+    )
+    assert asked and set(asked) == {first.model_id}
+
+
 def test_a_region_outside_the_eu_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
     assert probe.main(["--region", "us-east-1"]) == 2
     assert "not an EU region" in capsys.readouterr().err

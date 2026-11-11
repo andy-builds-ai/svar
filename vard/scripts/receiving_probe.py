@@ -578,11 +578,19 @@ def main(argv: list[str] | None = None) -> int:
     if outside:
         print(f"error: these would leave the EU: {outside}", file=sys.stderr)
         return 2
-    companies, cases = load_cases(args.cases)
+    try:
+        companies, cases = load_cases(args.cases)
+    except (OSError, ValueError, KeyError, TypeError) as problem:
+        print(f"error: {args.cases} is no case file: {problem!r}", file=sys.stderr)
+        return 2
     if args.out:
         # A bad path fails now, not after paying; an earlier result there stays as it is.
-        with args.out.open("a", encoding="utf-8"):
-            pass
+        try:
+            with args.out.open("a", encoding="utf-8"):
+                pass
+        except OSError as problem:
+            print(f"error: {args.out} cannot be written: {problem}", file=sys.stderr)
+            return 2
     runs: dict[str, list[dict[str, Any]]] = {}
     summaries: list[dict[str, Any]] = []
     meter = Meter(None, args.max_usd)
@@ -601,6 +609,7 @@ def main(argv: list[str] | None = None) -> int:
             runs[model.name] = rows
             summary = summarise(model, rows, stopped is not None)
             summaries.append({**summary, "settings": called(settings, origin)})
+            unsaved = None
             if args.out:
                 result = {
                     "max_usd": str(args.max_usd),
@@ -611,15 +620,17 @@ def main(argv: list[str] | None = None) -> int:
                     "summaries": ranked(summaries),
                     "runs": runs,
                 }
-                # A lone surrogate is written as its JSON escape, so the file stays readable.
-                args.out.write_text(
-                    json.dumps(result, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                    errors="backslashreplace",
-                )
-            if stopped:
+                try:
+                    save(args.out, result)
+                except OSError as problem:
+                    unsaved = f"{args.out} cannot be written: {problem}"
+            if stopped or unsaved:
+                # What is paid for stays in the tables; no further model is paid for when its
+                # result could not be saved either.
                 print_tables(summaries, runs)
-                print(f"error: {stopped}", file=sys.stderr)
+                for problem in (stopped, unsaved):
+                    if problem:
+                        print(f"error: {problem}", file=sys.stderr)
                 return 2
     except AwsProblem as problem:
         print(f"error: {problem}", file=sys.stderr)
@@ -633,6 +644,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: failed calls, counted as failed: {', '.join(failed_calls)}", file=sys.stderr)
         return 2
     return 0
+
+
+def save(path: Path, result: Mapping[str, Any]) -> None:
+    """Write the run so far to ``path`` as JSON; a lone surrogate goes in as its JSON escape,
+    so the file stays readable."""
+    path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+        errors="backslashreplace",
+    )
 
 
 def called(settings: Settings, origin: str) -> dict[str, Any]:

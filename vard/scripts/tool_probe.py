@@ -290,11 +290,19 @@ def main(argv: list[str] | None = None) -> int:
     if not args.region.startswith("eu-"):
         print(f"error: {args.region} is not an EU region", file=sys.stderr)
         return 2
-    cases = load_cases(args.cases)
+    try:
+        cases = load_cases(args.cases)
+    except (OSError, ValueError, KeyError, TypeError) as problem:
+        print(f"error: {args.cases} is no case file: {problem!r}", file=sys.stderr)
+        return 2
     if args.out:
         # A bad path fails now, not after paying; an earlier result there stays as it is.
-        with args.out.open("a", encoding="utf-8"):
-            pass
+        try:
+            with args.out.open("a", encoding="utf-8"):
+                pass
+        except OSError as problem:
+            print(f"error: {args.out} cannot be written: {problem}", file=sys.stderr)
+            return 2
     runs, summaries = {}, []
     try:
         runtime = model_client(args.region)
@@ -302,12 +310,14 @@ def main(argv: list[str] | None = None) -> int:
             runs[model.name] = run_model(runtime, model, cases)
             summaries.append(summarise(model, runs[model.name]))
             if args.out:
-                args.out.write_text(
-                    json.dumps(
-                        {"summaries": summaries, "runs": runs}, ensure_ascii=False, indent=2
-                    ),
-                    encoding="utf-8",
-                )
+                try:
+                    save(args.out, {"summaries": summaries, "runs": runs})
+                except OSError as problem:
+                    # What is paid for stays in the table; no further model is paid for when
+                    # its result could not be saved either.
+                    print_table(summaries)
+                    print(f"error: {args.out} cannot be written: {problem}", file=sys.stderr)
+                    return 2
     except AwsProblem as problem:
         print(f"error: {problem}", file=sys.stderr)
         print_table(summaries)
@@ -319,6 +329,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: failed calls, counted as failed: {', '.join(failed_calls)}", file=sys.stderr)
         return 2
     return 0
+
+
+def save(path: Path, result: Mapping[str, Any]) -> None:
+    """Write the run so far to ``path`` as JSON."""
+    path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def print_table(summaries: Sequence[Mapping[str, Any]]) -> None:
