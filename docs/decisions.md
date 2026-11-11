@@ -1666,3 +1666,40 @@ Counted with `wc -l` on 07.10.2026.
 <a name="2026-09-23-comments-say-what-code-cannot"></a>
 **2026-09-23 — Comments say what the code cannot.** Docstrings are one
 sentence; reasons live here, measurements in the READMEs.
+
+<a name="2026-11-11-status-in-one-place"></a>
+**2026-11-11 — What changes with a deploy is written in one place.** The
+operator decided. On 11.11.2026 two READMEs still named the deploy of
+21.10.2026 as the last, called Ireland the comparison stack after it had
+stopped being carried on, counted 101 decisions where there were 102, and
+named 1,598 tests, a count every new test changes. Each such fact stood in several places, and each deploy left some
+behind. `docs/status.md` now holds what runs where, at which commit, since
+when, the date of the last measurement and what waits for the next deploy;
+every other document links there. A measured number keeps its date and stays
+where it is explained, since a dated number does not go stale. Counts that
+move with every commit are left out of the prose.
+
+<a name="2026-11-11-anchors-not-lines"></a>
+**2026-11-11 — A decision is linked by its anchor, never by its line.** The
+operator decided. The READMEs linked 19 entries here by line number
+(`?plain=1#L…`); three entries added at the top moved all 19 by 63 lines,
+into other entries. Every entry now has an `<a name>` on the line above it,
+its date and a few words, fixed once written; GitHub documents such anchors
+("Custom anchors" in its Markdown syntax guide). Headings for the entries were
+the other way: their anchors would change with every word of a title, and the
+entries would change their form. `tests/test_docs_links.py` reads every
+Markdown file git tracks and fails on a link to a missing file or anchor, on
+a link to a line number, and on an entry without its own anchor.
+
+<a name="2026-11-11-docstrings-checked"></a>
+**2026-11-11 — Every public definition has a docstring, and ruff checks it.**
+The operator decided. On 11.11.2026 ruff found 89 public functions, classes
+and methods outside the tests without one (D101 to D103). All but the five in
+`svar/app/` have one now, written to the rule above, and ruff's D100 to D104
+and D106 keep it so. Not the whole `D` set: its style rules
+would rewrite hundreds of docstrings without explaining anything. `__init__`
+and protocol methods such as `__eq__` are left out (D105, D107); the class says
+what they do. The tests are left out; their names say what they check.
+`svar/app/` is left out until the next deploy of the answer function: a
+docstring there changes the function's code package and so the template, and
+its five missing ones are listed in `docs/status.md`.

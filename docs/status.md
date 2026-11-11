@@ -39,4 +39,5 @@ template anyway.
 - `svar/app/sentences.py`: the comment above `QUESTION_REFUSED_ANSWERS` names
   `infra/stacks/guardrails.py`, now `svar/infra/guardrails.py`.
 - Five public definitions in `svar/app/` without a docstring: three in `errors.py`, one each
-  in `budget.py` and `plans.py`.
+  in `budget.py` and `plans.py`. `pyproject.toml` exempts `svar/app/` from ruff's docstring
+  rules until then; the exemption goes with that deploy.

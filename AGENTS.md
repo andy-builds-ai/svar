@@ -10,6 +10,8 @@ code (CDK in Python).
 
 - `README.md`: the overview, and what is where.
 - `taug/README.md`, `svar/README.md`, `vard/README.md`: each part.
+- `docs/status.md`: what runs where, since when, and what waits for the next
+  deploy.
 - `docs/architecture.md`: how the stacks are built.
 - `taug/scripts/README.md`, `svar/scripts/README.md`, `vard/scripts/README.md`,
   `scripts/README.md`: how the scripts work.
@@ -44,8 +46,8 @@ pytest -q
 ## The stacks
 
 ```bash
-cdk synth         # builds both templates, no AWS call
-cdk diff --all    # compares them with the deployed stacks; needs an AWS login, changes nothing
+cdk synth                         # builds both templates, no AWS call
+cdk diff -c region=eu-central-1   # compares both with the running stacks; needs an AWS login, changes nothing
 ```
 
 `infra/app.py` builds two stacks in one account and region: `TaugStack`
@@ -70,7 +72,11 @@ templates, synthesize without a login, as CI does; then no account appears.
   script's `--region` pick Frankfurt. Frankfurt has its own models, checks
   the denied topics with gpt-oss-120b in the region (`svar/app/topic_model.py`),
   keeps masking and grounding off the EU profile, and has no CloudFront: the
-  function's URL serves page and `/ask` (`svar/app/page.py`).
+  function's URL serves page and `/ask` (`svar/app/page.py`). Svar runs in
+  Frankfurt; Ireland's stack stands at older code and is not carried on
+  (`docs/status.md`), so a command against the running stacks names
+  `eu-central-1`. `cdk diff` compares both stacks without `--all`, which it
+  does not know.
 - **Use EU inference profiles, never a global one.**
 - **Model IDs and prices live only in `taug/infra/answer_models.py`.** Add a model
   there first; do not copy an ID or a price anywhere else.
@@ -79,6 +85,30 @@ templates, synthesize without a login, as CI does; then no account appears.
   output of `cdk diff` names the account; do not paste it.
 - **Commit only when asked,** as Conventional Commits (`feat:`, `fix:`,
   `docs:`).
+
+## Documentation
+
+- **What changes with a deploy lives only in `docs/status.md`:** which stacks
+  run where, at which commit, since when, the date of the last measurement in
+  each region, and what waits for the next deploy. Update it with every deploy
+  and every measurement run; other documents link there and do not repeat it.
+- **Every measured number carries its date.** No counts of tests or decisions
+  in prose; they change with every commit.
+- **Link a decision by its anchor, never by a line number.** Every entry in
+  `docs/decisions.md` has `<a name="YYYY-MM-DD-a-few-words"></a>` on the line
+  above it. A new entry gets one; an anchor, once written, never changes.
+  `tests/test_docs_links.py` checks every relative link in every tracked
+  Markdown file.
+- **Every module and every public class, function and method outside the
+  tests has a docstring:** one sentence on what it does, a second only for a
+  why the name does not give, longer reasons in `docs/decisions.md`. ruff
+  checks it (D100 to D104, D106 in `pyproject.toml`).
+- **A changed byte in a code package changes the template.** `svar/app/`,
+  `taug/__init__.py`, `taug/access/`, `taug/infra/api_keys/`,
+  `svar/infra/deploy_drain/` and `svar/web/` (each `README.md` aside) go into
+  Lambda or the page as they are. A change there, even a comment, waits for
+  the next deploy of what it changes; list it in `docs/status.md` meanwhile.
+  `svar/app/` is exempt from ruff's docstring rules until then.
 
 ## Scripts that call AWS
 

@@ -42,7 +42,18 @@ testpaths = ["tests", "taug/tests", "svar/tests", "vard/tests"]
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+# D100 to D104 and D106: every module, package and public class, function and method has a
+# docstring (docs/decisions.md#2026-11-11-docstrings-checked). Not the rest of D: its style
+# rules would rewrite docstrings without explaining anything.
+select = ["E", "F", "I", "B", "UP", "D100", "D101", "D102", "D103", "D104", "D106"]
+
+[tool.ruff.lint.per-file-ignores]
+# A test's name says what it checks.
+"**/tests/**" = ["D1"]
+"conftest.py" = ["D1"]
+# Until the next deploy of the answer function: a docstring in its code package changes the
+# template (docs/status.md#waiting-for-the-next-deploy).
+"svar/app/**" = ["D1"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
