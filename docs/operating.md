@@ -11,6 +11,18 @@ unless `-c region=` names another region of `REGIONS` in
 `taug/infra/answer_models.py`; the main stack is the one in `eu-central-1`
 ([Another region](#another-region)).
 
+Ireland has not been moved. Taug's seven resources (the documents bucket and
+its policy, the vector bucket, the index, the knowledge base role, the
+knowledge base and its data source) are still in `AndurStack` there, and the
+stack is to be deleted later (the entry of 2026-11-11 in
+[decisions.md](decisions.md)). `DEFAULT_REGION` is `eu-west-1`, so `cdk deploy
+--all` without `-c region=` aims at Ireland. Deployed from this code, CDK
+would build the seven again in `TaugStack` and remove them from `AndurStack`.
+The build is expected to fail at the documents bucket's fixed name and roll
+back; that has not been tried. `cdk diff --all` shows the change first. Do not
+deploy Ireland from here without moving first
+([Moving resources between stacks](#moving-resources-between-stacks)).
+
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
@@ -214,6 +226,47 @@ The site bucket and the distribution go with `AndurStack` too. The bucket is
 emptied first — the file copier removes what it uploaded — so the deletion
 does not stop at a bucket that is not empty. A new distribution has a new
 address, so `WebUrl` changes with every rebuild.
+
+### Moving resources between stacks
+
+`cdk refactor --unstable=refactor` moves resources from one stack to another
+without replacing them; it did so for the seven of Taug in Frankfurt on
+10./11.11.2026. Run `--dry-run` first: the moves it lists must be exactly the
+ones planned, and nothing may be added or removed. Compare the old templates
+with `?` in place of every character from U+0080 on, as CloudFormation returns
+them (*The move ran in Frankfurt; Ireland stays as it was*, 2026-11-11 in
+[decisions.md](decisions.md)).
+
+Without `--role-arn` the CLI moves with the bootstrap's deploy role. In
+bootstrap version 32 that role has only `cloudformation:CreateStackRefactor`
+and `cloudformation:ExecuteStackRefactor` for refactoring
+(`bootstrap-template.yaml` of aws-cdk 2.1146.0), and the move failed with it
+on `iam:GetRole`. A role for this one move, passed with `--role-arn`, needs
+more than that, because the move reads values from the whole stack (the second
+try stopped at `lambda:GetFunctionUrlConfig` of the answer function) and
+tags the moved resources again. The third try went through with a role that
+held `ReadOnlyAccess`, `AWSCloudFormationReadOnlyAccess` and one inline
+policy: start, describe and list stack refactors, and the tagging actions of
+IAM (`TagRole`, `UntagRole`), S3, S3 Vectors and Bedrock. That was enough, not
+proven to be the least. Only the operator's own identity may assume the role.
+
+```bash
+cdk refactor --unstable=refactor --dry-run -c region=eu-central-1
+cdk refactor --unstable=refactor -c region=eu-central-1 --role-arn arn:aws:iam::<account>:role/<role>
+```
+
+If the CLI cannot assume the role but the credentials are for the right
+account, it goes on with them and prints only a warning ("could not be used to
+assume"; `index.js` of aws-cdk 2.1146.0). So assume the role by hand first
+(`aws sts assume-role`), before the move.
+The move is followed by a deploy of both stacks, in the same command. A try
+that fails is rolled back whole: the refactor ends in `ROLLBACK_COMPLETE` and
+no resource has changed (twice in Frankfurt). When the move is done, delete the
+role: detach its managed policies, delete the inline policy, delete the role,
+and check that `aws iam get-role --role-name <role>` answers `NoSuchEntity`.
+Afterwards `cdk diff` must show no difference in either stack. The commands
+that created and deleted the role are not in the repository; they are a few
+lines of the AWS CLI around the policy above.
 
 ## Filling it
 

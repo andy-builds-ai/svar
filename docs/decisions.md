@@ -67,6 +67,57 @@ moves. Nothing else may change in between. The operator runs every step.
 `cdk.json` sets `@aws-cdk/core:defaultCrossStackReferences` to `strong`, the
 export and import the move was planned with, so a later CDK cannot change it.
 
+**2026-11-11 — The move ran in Frankfurt; Ireland stays as it was.** The
+operator decided on 10.11.2026. In Frankfurt the seven resources moved in the
+night of 10 to 11.11.2026 and the rehearsal passed. Ireland was not moved: it
+stands at the last commit before the move, Taug's seven resources still in
+`AndurStack`, and it is to be deleted later, so nothing more is spent on it. How
+the run went, in order:
+- In Ireland `cdk refactor --dry-run` stopped ("A refactor operation cannot
+  add, remove or update resources") and named 12 resources of `AndurStack` as
+  changed. CloudFormation returns a stored template with `?` for every
+  character from U+0080 on; `cdk diff` leaves that out of its comparison,
+  `cdk refactor` does not. The one such character in the four templates was the
+  umlaut in the German example of `Private lives`, which only Ireland's topic
+  guardrail has (Frankfurt checks the topics with a model). The example now
+  reads "Welche Religion hat mein Kollege?", and none of the four templates
+  holds a byte from 0x80 on (counted on 11.11.2026). A template that is to move
+  must be compared with `?` in place of such characters, not local with local.
+- The probe measured that sentence before it went out. Ireland, a guardrail
+  with the old sentence against one with the new: all 128 verdicts of one run
+  the same. Counted, three runs: Ireland 45 of 45 questions to refuse refused,
+  1 of 87 harmless refused (the English discount question of 06.10.2026), 32
+  of 32 answers to withhold withheld, 0 of 87 harmless withheld, 753 calls,
+  0.113 USD; Frankfurt 45 of 45, 32 of 32, 11 of 11 advice questions, 0 of 231
+  harmless, 957 checks, 0.302 USD.
+- After the deploy in Ireland the guardrail refused the harmless "Weisen Sie
+  die Lohnkosten auf der Rechnung getrennt aus?" (`hd08`) as `Tax returns`.
+  In 25 runs each, the deployed guardrail with the new sentence refused it 7
+  times, a copy of it in a guardrail of its own 8 times, a copy with the old
+  sentence 2 times. So the new
+  sentence makes it worse, and the old one refused it sometimes too. Kept:
+  Frankfurt checks the topics with a model and refused no harmless text in
+  its runs, and Ireland is not carried on.
+- Frankfurt: one deploy of the commit with the fixed sentence instead of each
+  step between (`TaugStack` built with the key retirer's rest, `AndurStack`
+  without it, the function with the new code), then `cdk refactor`. Three
+  tries. The CLI ran the first with the bootstrap's deploy role, which has
+  only `CreateStackRefactor` and `ExecuteStackRefactor` for refactoring (v32),
+  and AWS stopped at `iam:GetRole` on the knowledge base role. The second, with
+  a role of its own through `--role-arn`, stopped at `lambda:GetFunctionUrlConfig`:
+  the move reads values from the whole stack, not only from the seven
+  resources. The third had a role with `ReadOnlyAccess`,
+  `AWSCloudFormationReadOnlyAccess` and one inline rule (start and query a
+  refactor; tag in IAM, S3, S3 Vectors and Bedrock) and went through; both
+  stacks were deployed after it. AWS rolled the two failed tries back whole
+  (`ROLLBACK_COMPLETE`, no resource changed). The role was deleted after the
+  third. How to do it again is in `docs/operating.md`.
+- Accepted in Frankfurt: `cdk diff` shows no difference in either stack; the
+  knowledge base and the data source kept their ids; 177 documents are
+  indexed (the specification said 167, without a date). The rehearsal of
+  11.11.2026 answered English 30 of 30, German 29 of 32, Kalvenstett 26 of 26
+  (07.10.2026: 29 of 30, 27 of 32, 26 of 26).
+
 ## Region
 
 **2026-09-28 — eu-west-1 (Ireland), not us-east-1.** A company asks where
