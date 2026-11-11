@@ -34,10 +34,10 @@ Three commands, all run from the repository root:
 ## ingest
 
 ```bash
-python -m taug.scripts.ingest                        # everything under knowledge/
-python -m taug.scripts.ingest --workspace pellwick   # one workspace
-python -m taug.scripts.ingest --check                # check only, no AWS at all
-python -m taug.scripts.ingest --source path/to/folder
+python -m taug.scripts.ingest --region eu-central-1                        # everything under knowledge/
+python -m taug.scripts.ingest --region eu-central-1 --workspace pellwick   # one workspace
+python -m taug.scripts.ingest --region eu-central-1 --check                # check only, no AWS at all
+python -m taug.scripts.ingest --region eu-central-1 --source path/to/folder
 ```
 
 It runs four steps and stops at the first that fails.
@@ -202,9 +202,9 @@ ingestion job always covers the whole data source.
 ## retrieve — the proof that workspaces stay apart
 
 ```bash
-python -m taug.scripts.retrieve "How do I export project data?" --workspace quillmoor
-python -m taug.scripts.retrieve "How do I export project data?" --workspace pellwick
-python -m taug.scripts.retrieve "What changed in the recent releases?" --workspace quillmoor --layer agent
+python -m taug.scripts.retrieve "How do I export project data?" --workspace quillmoor --region eu-central-1
+python -m taug.scripts.retrieve "How do I export project data?" --workspace pellwick --region eu-central-1
+python -m taug.scripts.retrieve "What changed in the recent releases?" --workspace quillmoor --layer agent --region eu-central-1
 ```
 
 `--workspace` is required: there is no way to search across companies from
@@ -233,11 +233,11 @@ This is retrieval only; no model writes an answer. For an answer, use `ask`.
 ## workspace — adding and removing a workspace
 
 ```bash
-python -m taug.scripts.workspace add kalvenstett                # create the key, print it once
-python -m taug.scripts.workspace add kalvenstett --plan firma   # the same, on the plan firma
-python -m taug.scripts.workspace plan kalvenstett betrieb       # put the key on another plan
-python -m taug.scripts.workspace remove kalvenstett             # show what belongs to it
-python -m taug.scripts.workspace remove kalvenstett --yes       # delete it
+python -m taug.scripts.workspace --region eu-central-1 add kalvenstett                # create the key, print it once
+python -m taug.scripts.workspace --region eu-central-1 add kalvenstett --plan firma   # the same, on the plan firma
+python -m taug.scripts.workspace --region eu-central-1 plan kalvenstett betrieb       # put the key on another plan
+python -m taug.scripts.workspace --region eu-central-1 remove kalvenstett             # show what belongs to it
+python -m taug.scripts.workspace --region eu-central-1 remove kalvenstett --yes       # delete it
 ```
 
 No workspace is named in the stack's code, and a new one needs no deploy. A
@@ -259,7 +259,7 @@ first one stored; `add` reads it, and if it is the key it generated, that is
 success. The new key works at once with the default budget; to set
 another before its first question, see
 [svar/app/README.md](../../svar/app/README.md#setting-a-budget-for-one-key). Its documents
-go in with `python -m taug.scripts.ingest --source <folder> --workspace <name>`.
+go in with `python -m taug.scripts.ingest --region eu-central-1 --source <folder> --workspace <name>`.
 
 **add --plan** `betrieb` or `firma` puts the new key on that plan in the
 same run: it writes the key's budget item with the plan and the workspace,

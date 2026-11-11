@@ -6,9 +6,12 @@ Deploy, fill, ask, test and tear down.
 
 Needs Python 3.11+ (tested on 3.14), Node.js 22, the AWS CDK CLI
 (`npm install -g aws-cdk@2.1146.0`) and AWS credentials for the target
-account. Svar runs in `eu-central-1` (Frankfurt), so every command here
-names it ([Another region](#another-region); what runs where:
-[status.md](status.md)). Without `-c region=`, which picks a region of
+account. Svar runs in `eu-central-1` (Frankfurt), so every command line here
+names it, and a command the text only names, such as `cdk deploy --all`,
+means it with `-c region=eu-central-1` ([Another region](#another-region);
+what runs where: [status.md](status.md)). The one exception is the
+measurement of the topic guardrail, which only Ireland's stack has; it names
+`eu-west-1`. Without `-c region=`, which picks a region of
 `REGIONS` in `taug/infra/answer_models.py`, everything goes to `eu-west-1`
 (Ireland), the default region.
 
@@ -20,7 +23,8 @@ stack is to be deleted later
 --all` without `-c region=` aims at Ireland. Deployed from this code, CDK
 would build the seven again in `TaugStack` and remove them from `AndurStack`.
 The build is expected to fail at the documents bucket's fixed name and roll
-back; that has not been tried. `cdk diff --all` shows the change first. Do not
+back; that has not been tried. `cdk diff` without `-c region=` shows the
+change first. Do not
 deploy Ireland from here without moving first
 ([Moving resources between stacks](#moving-resources-between-stacks)).
 
@@ -46,7 +50,7 @@ named, and the answer function's code key would change.
 base id, the data source id, the bucket names and the Parameter Store path of
 the workspace keys; `AndurStack` the web address (`WebUrl`) and the budget
 table. The scripts read them from there, and
-`aws cloudformation describe-stacks --stack-name TaugStack` (or `AndurStack`)
+`aws cloudformation describe-stacks --region eu-central-1 --stack-name TaugStack` (or `AndurStack`)
 shows them again. It also uploads `svar/web/` into
 the site bucket and clears the CloudFront caches, so the page is whatever is
 in `svar/web/` at the moment of the deploy.
@@ -106,8 +110,8 @@ deploy without a new version does not wait, unless the wait itself changes
 the function calls, such as the topic guardrail of 05.10.2026, adds nothing:
 CloudFormation creates it, and widens the role for it, before it updates the
 function, and the old code never calls it. After a deploy that touches the
-topics, `python -m svar.scripts.topic_probe --deployed` measures the deployed
-versions.
+topics, `python -m svar.scripts.topic_probe --deployed --region eu-central-1`
+measures the topic model the deployed function names.
 
 Two other changes still open a window, and need two deploys. A right taken
 from the answer role or moved to another resource: CloudFormation updates the
@@ -145,7 +149,8 @@ second sets it `False`: the answer guardrail and the topic guardrail get new
 versions (the topic guardrail's description changes with the flag), the
 deploy waits in `Custom::AndurDeployDrain`, and old and new code both check
 the question with the topic guardrail. After the second, measure with
-`python -m svar.scripts.topic_probe --deployed`.
+`python -m svar.scripts.topic_probe --deployed --region eu-west-1`; only
+Ireland's stack has a topic guardrail.
 
 The deploy creates no workspace key, and no workspace is named in the stack's
 code. A workspace exists only in AWS: its key under
@@ -205,15 +210,15 @@ out:
   too; `aws s3 rm` does not on a versioned bucket), then:
 
   ```bash
-  aws s3 rb s3://andur-documents-<account>-eu-west-1
+  aws s3 rb s3://andur-documents-<account>-eu-central-1
   ```
 
 - **Keep it and adopt it.** Import the bucket into the new `TaugStack`, then
   deploy the rest:
 
   ```bash
-  cdk import TaugStack    # enter the bucket name for the bucket and its policy, leave the others empty
-  cdk deploy --all
+  cdk import TaugStack -c region=eu-central-1   # enter the bucket name for the bucket and its policy, leave the others empty
+  cdk deploy --all -c region=eu-central-1
   ```
 
 `cdk destroy --all` only removes the index `TaugStack` created. An index added to
@@ -223,7 +228,7 @@ ends in `DELETE_FAILED`.
 `cdk destroy --all` deletes the function logs and the budget table with `AndurStack`.
 The workspace keys are part of neither stack and stay; after a rebuild they
 work again, each with a fresh budget. To take a workspace away for good, use
-`python -m taug.scripts.workspace remove` before the destroy.
+`python -m taug.scripts.workspace --region eu-central-1 remove` before the destroy.
 
 The site bucket and the distribution go with `AndurStack` too. The bucket is
 emptied first — the file copier removes what it uploaded — so the deletion
@@ -323,7 +328,7 @@ lists the key, the budget items and every document under
 ingestion job, which removes their vectors. Nothing outside that one name is
 touched: the documents prefix ends in a slash, so `kalv` never reaches
 `kalvenstett`. The documents of a new workspace go in with
-`python -m taug.scripts.ingest --source <folder> --workspace <name>`; text files
+`python -m taug.scripts.ingest --region eu-central-1 --source <folder> --workspace <name>`; text files
 stored in Windows-1252 or UTF-16 go up converted to UTF-8, and `--check`
 names each one ([Encodings](../taug/scripts/README.md#encodings)). Details,
 output and exit codes: [taug/scripts/README.md](../taug/scripts/README.md#workspace--adding-and-removing-a-workspace).
