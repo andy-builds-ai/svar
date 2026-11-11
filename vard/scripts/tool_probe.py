@@ -144,6 +144,7 @@ def tool_calls(response: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def reply_text(response: Mapping[str, Any]) -> str:
+    """The text blocks of the reply, one per line."""
     blocks = response.get("output", {}).get("message", {}).get("content", [])
     return "\n".join(block["text"] for block in blocks if "text" in block)
 
@@ -198,6 +199,7 @@ def judge(case: Mapping[str, Any], response: Mapping[str, Any]) -> dict[str, Any
 def run_model(
     runtime: Any, model: AnswerModel, cases: Sequence[Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
+    """The rows of one model, one per case; a missing login or permission stops the run."""
     rows = []
     for case in cases:
         started = time.perf_counter()
@@ -252,6 +254,7 @@ def run_model(
 
 
 def summarise(model: AnswerModel, rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """One model's line of the table: cases passed, which failed and why, cost and median time."""
     timed = [r["seconds"] for r in rows if "seconds" in r]
     return {
         "model": model.name,
@@ -264,6 +267,7 @@ def summarise(model: AnswerModel, rows: Sequence[Mapping[str, Any]]) -> dict[str
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the cases through each chosen model and print the table; 2 when it fails or stops."""
     utf8_output()
     parser = argparse.ArgumentParser(
         prog="python -m vard.scripts.tool_probe",

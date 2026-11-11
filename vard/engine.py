@@ -30,6 +30,8 @@ STAND_IN = "invalid_tool_name"
 
 
 class Level(StrEnum):
+    """A tool's permission level: whether the loop runs a call to it."""
+
     #: Runs without asking.
     ALLOWED = "allowed"
     #: Runs only when `approve` says yes.
@@ -40,6 +42,8 @@ class Level(StrEnum):
 
 @dataclass(frozen=True)
 class Tool:
+    """A tool the model may call: what Bedrock is told of it, its level and what runs it."""
+
     name: str
     description: str
     #: The input's JSON schema; its top-level `required` fields are checked before the tool runs.
@@ -50,6 +54,7 @@ class Tool:
     closes: bool = False
 
     def spec(self) -> dict[str, Any]:
+        """The tool as Bedrock's `toolConfig` lists it."""
         return {
             "toolSpec": {
                 "name": self.name,
@@ -61,6 +66,8 @@ class Tool:
 
 @dataclass(frozen=True)
 class Responsibility:
+    """A task Vard takes on: its text, the tools he may use and the step limit."""
+
     task: str
     tools: tuple[Tool, ...]
     #: The most model calls a run may take.
@@ -81,6 +88,8 @@ class Responsibility:
 
 @dataclass
 class Call:
+    """One tool call of the model as the loop handled it: what was sent and what came of it."""
+
     name: str
     input: Any
     #: Why the loop did not run the call; None when it ran.
@@ -97,6 +106,8 @@ CLOSED, ANSWERED, STEP_LIMIT = "closed", "answered", "step_limit"
 
 @dataclass
 class Outcome:
+    """How a run ended, with every call, the last reply and the usage of each model call."""
+
     ended: str = STEP_LIMIT
     steps: int = 0
     calls: list[Call] = field(default_factory=list)
@@ -113,10 +124,12 @@ class Outcome:
 
     @property
     def invalid(self) -> list[Call]:
+        """The calls the loop refused to run."""
         return [call for call in self.calls if call.refused is not None]
 
     @property
     def failed(self) -> list[Call]:
+        """The calls whose tool failed while it ran."""
         return [call for call in self.calls if call.failed is not None]
 
 
@@ -149,6 +162,7 @@ def refusal(
 
 
 def handle(tools: Mapping[str, Tool], use: Mapping[str, Any], approve: Approve | None) -> Call:
+    """One tool call, refused or run; an error of the tool stays in the `Call`, the loop goes on."""
     name: Any = use.get("name")
     given: Any = use.get("input")
     reason = refusal(tools, name, given, approve)

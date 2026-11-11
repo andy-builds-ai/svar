@@ -49,6 +49,7 @@ FindEarlier = Callable[[str], Sequence[Mapping[str, Any]]]
 
 
 def text_input(**fields: str) -> dict[str, Any]:
+    """A tool's input schema of text fields, each with its description, all of them required."""
     return {
         "type": "object",
         "properties": {
@@ -96,6 +97,8 @@ FINDINGS = {
 
 
 def lookup(find: Find, key: str, what: str) -> Callable[[dict[str, Any]], Any]:
+    """A tool's run that fetches a document by the number under `key`, or says there is none."""
+
     def run(given: dict[str, Any]) -> Any:
         number = str(given[key])
         found = find(number)
@@ -105,6 +108,8 @@ def lookup(find: Find, key: str, what: str) -> Callable[[dict[str, Any]], Any]:
 
 
 def earlier(find: FindEarlier) -> Callable[[dict[str, Any]], Any]:
+    """A tool's run that fetches the delivery notes that came in earlier for a purchase order."""
+
     def run(given: dict[str, Any]) -> Any:
         number = str(given["order_number"])
         return {"order_number": number, "deliveries": [dict(note) for note in find(number)]}
@@ -113,6 +118,7 @@ def earlier(find: FindEarlier) -> Callable[[dict[str, Any]], Any]:
 
 
 def recorded(given: dict[str, Any]) -> dict[str, bool]:
+    """The run of every closing tool; what the model reported stays in the call's input."""
     return {"recorded": True}
 
 

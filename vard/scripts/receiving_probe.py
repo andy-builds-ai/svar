@@ -100,6 +100,7 @@ def settings_for(model: AnswerModel, vendor: bool, keep_reasoning: bool) -> tupl
 
 
 def settings_text(settings: Mapping[str, Any]) -> str:
+    """The settings a model ran with, in one line for the log and the tables."""
     top_p = "no top_p" if settings["top_p"] is None else f"top_p {settings['top_p']}"
     reasoning = "reasoning given back" if settings["keep_reasoning"] else "reasoning left out"
     return (
@@ -127,6 +128,7 @@ def number(text: Any) -> str:
 
 
 def texts(value: Any) -> bool:
+    """Whether the value is a list of texts, neither it nor any of them empty."""
     return isinstance(value, list) and bool(value) and all(isinstance(v, str) and v for v in value)
 
 
@@ -193,6 +195,7 @@ def load_cases(path: Path) -> tuple[dict[str, str], list[dict[str, Any]]]:
 
 
 def finder(documents: Sequence[Mapping[str, Any]], key: str) -> receiving.Find:
+    """A `Find` over the documents by the number under `key`, spaces and case aside."""
     index = {number(document[key]): document for document in documents}
     return lambda wanted: index.get(number(wanted))
 
@@ -214,6 +217,7 @@ def case_responsibility(
 
 
 def tokens_cost(model: AnswerModel, usage: Mapping[str, Any]) -> Decimal:
+    """What a model call cost, from its usage and the model's prices."""
     return (
         Decimal(usage.get("inputTokens", 0)) * Decimal(model.input_per_1k)
         + Decimal(usage.get("outputTokens", 0)) * Decimal(model.output_per_1k)
@@ -250,6 +254,7 @@ class Meter:
         self.model: AnswerModel = MODELS[0]
 
     def converse(self, **request: Any) -> Any:
+        """Pass the call to Bedrock, or raise `CostLimitReached` if it could break the limit."""
         ceiling = call_ceiling(self.model, request)
         if self.spent + self.reserved + ceiling > self.limit:
             raise CostLimitReached(
@@ -286,6 +291,7 @@ def reported(closing: Sequence[engine.Call]) -> set[tuple[str, str]]:
 
 
 def matches(expected: Mapping[str, Any], given: tuple[str, str]) -> bool:
+    """Whether a reported discrepancy has one of the expected article numbers and kinds."""
     return (
         given[0] in {number(item) for item in expected["items"]} and given[1] in expected["kinds"]
     )
@@ -473,6 +479,8 @@ def run_model(
 def summarise(
     model: AnswerModel, rows: Sequence[Mapping[str, Any]], stopped: bool
 ) -> dict[str, Any]:
+    """One model's line of the tables: its counts, its cost, its times and what failed."""
+
     def count(key: str) -> str:
         return f"{sum(bool(r.get(key)) for r in rows)}/{len(rows)}"
 
@@ -504,6 +512,7 @@ def ranked(summaries: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
 
 
 def rounds_count(text: str) -> int:
+    """The value of --repeat: a whole number of 1 or more."""
     try:
         value = int(text)
     except ValueError:
@@ -514,6 +523,7 @@ def rounds_count(text: str) -> int:
 
 
 def usd(text: str) -> Decimal:
+    """The value of --max-usd: an amount above 0."""
     try:
         value = Decimal(text)
     except InvalidOperation:
@@ -524,6 +534,7 @@ def usd(text: str) -> Decimal:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the cases through each chosen model and print the tables; 2 when it fails or stops."""
     utf8_output()
     parser = argparse.ArgumentParser(
         prog="python -m vard.scripts.receiving_probe",
@@ -630,6 +641,7 @@ def called(settings: Settings, origin: str) -> dict[str, Any]:
 
 
 def seconds_text(value: float | None) -> str:
+    """Seconds as the tables show them: one decimal, or - when there are none."""
     return "-" if value is None else f"{value:.1f}"
 
 
