@@ -2,9 +2,10 @@
 
 A link to a line number drifts as soon as a line is added above it, and a renamed heading
 breaks every link to it without a sound. These tests read every Markdown file git tracks and
-check each relative link: the file is there, and so is the anchor, a heading by GitHub's rules
-or an ``<a name>``. Each entry of docs/decisions.md carries a fixed anchor of its own, so a link
-to it holds when the entry's title changes (docs/decisions.md#2026-11-11-anchors-not-lines).
+check each inline link with a relative target: the file is there, and so is the anchor, a
+heading by GitHub's rules or an ``<a name>``. Each entry of docs/decisions.md carries a fixed
+anchor of its own, so a link to it holds when the entry's title changes
+(docs/decisions.md#2026-11-11-anchors-not-lines).
 """
 
 import re
@@ -17,8 +18,8 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 DECISIONS = REPOSITORY_ROOT / "docs" / "decisions.md"
 
-#: An opening or closing code fence; nothing inside a fenced block is a link.
-FENCE = re.compile(r"^\s*(```|~~~)")
+#: A code fence and what follows it; nothing inside a fenced block is a link.
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 #: Inline code, which may show link syntax without being a link.
 CODE_SPAN = re.compile(r"`[^`]*`")
 #: The target of an inline link or image: ``](target)``, optionally ``](target "title")``.
@@ -45,15 +46,31 @@ def markdown_files() -> list[Path]:
     return [REPOSITORY_ROOT / name for name in listed.split("\0") if name]
 
 
+def outside_fences(path: Path) -> Iterator[tuple[int, str]]:
+    """Each line outside fenced code blocks, numbered from 1. A block ends only at a fence of
+    its own character, at least as long and with nothing but spaces after it (GFM 4.5), so a
+    fence shown inside a longer one stays code."""
+    opened = ""
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        fence = FENCE.match(line)
+        if not opened:
+            if fence:
+                opened = fence.group(1)
+            else:
+                yield number, line
+        elif (
+            fence
+            and fence.group(1)[0] == opened[0]
+            and len(fence.group(1)) >= len(opened)
+            and not fence.group(2).strip(" ")
+        ):
+            opened = ""
+
+
 def prose_lines(path: Path) -> Iterator[tuple[int, str]]:
     """Each line outside fenced code blocks, numbered from 1, with its inline code removed."""
-    in_fence = False
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if not in_fence:
-            yield number, CODE_SPAN.sub("", line)
+    for number, line in outside_fences(path):
+        yield number, CODE_SPAN.sub("", line)
 
 
 def heading_slug(text: str) -> str:
@@ -70,14 +87,9 @@ def anchors(path: Path) -> frozenset[str]:
     repeated ones (``-1``, ``-2``), and its ``<a name>`` anchors."""
     found: set[str] = set()
     seen: dict[str, int] = {}
-    in_fence = False
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            continue
-        found.update(NAMED_ANCHOR.findall(line))
+    for _, line in outside_fences(path):
+        # An anchor shown as inline code is text on GitHub, not an anchor.
+        found.update(NAMED_ANCHOR.findall(CODE_SPAN.sub("", line)))
         heading = HEADING.match(line)
         if heading:
             slug = heading_slug(heading.group(1))
@@ -108,6 +120,37 @@ def broken(target: str, source: Path) -> str | None:
     if anchor and destination.suffix == ".md" and anchor not in anchors(destination):
         return f"no anchor {anchor!r} in {destination.name}"
     return None
+
+
+def test_a_fence_closes_only_at_a_fence_of_its_own_kind(tmp_path: Path) -> None:
+    path = tmp_path / "fences.md"
+    path.write_text(
+        "\n".join(
+            [
+                "````markdown",
+                "```",
+                "[in code](missing-1.md)",
+                "```",
+                "````",
+                "~~~",
+                "```",
+                "[in code](missing-2.md)",
+                "~~~ not a closing fence",
+                "~~~~",
+                "[prose](here.md)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert [line for _, line in prose_lines(path)] == ["[prose](here.md)"]
+
+
+def test_an_anchor_shown_as_inline_code_is_no_anchor(tmp_path: Path) -> None:
+    path = tmp_path / "anchors.md"
+    path.write_text(
+        'Write `<a name="shown"></a>` above it.\n<a name="real"></a>\n', encoding="utf-8"
+    )
+    assert anchors(path) == {"real"}
 
 
 def test_the_repository_has_markdown_links_to_check() -> None:

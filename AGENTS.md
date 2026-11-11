@@ -97,7 +97,7 @@ templates, synthesize without a login, as CI does; then no account appears.
 - **Link a decision by its anchor, never by a line number.** Every entry in
   `docs/decisions.md` has `<a name="YYYY-MM-DD-a-few-words"></a>` on the line
   above it. A new entry gets one; an anchor, once written, never changes.
-  `tests/test_docs_links.py` checks every relative link in every tracked
+  `tests/test_docs_links.py` checks every inline link in every tracked
   Markdown file.
 - **Every module and every public class, function and method outside the
   tests has a docstring:** one sentence on what it does, a second only for a
