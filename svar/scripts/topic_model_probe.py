@@ -133,6 +133,7 @@ def measure(
     stop = threading.Event()
 
     def ask(row: Mapping[str, Any]) -> dict[str, Any] | None:
+        """One text through the topic model, or None once an earlier call failed."""
         if stop.is_set():
             return None
         return check(app, runtime, settings, source, row["text"], sleep)

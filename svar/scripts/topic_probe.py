@@ -308,6 +308,7 @@ def measure(
     stop = threading.Event()
 
     def ask(row: Mapping[str, Any]) -> tuple[dict[str, Any], int] | None:
+        """One text through ApplyGuardrail, or None once an earlier call failed."""
         if stop.is_set():  # an earlier call failed: do not start another
             return None
         return apply_guardrail(runtime, guardrail_id, version, source, row, sleep)
@@ -348,10 +349,12 @@ def measure(
 
 
 def always_blocked(row: Mapping[str, Any]) -> bool:
+    """Blocked in every run."""
     return row["blocked_runs"] == row["runs"]
 
 
 def ever_blocked(row: Mapping[str, Any]) -> bool:
+    """Blocked in at least one run."""
     return row["blocked_runs"] > 0
 
 
@@ -514,6 +517,7 @@ def deployed_guardrails(environment: Mapping[str, str]) -> dict[str, tuple[str, 
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """The command line: what to measure, how often, how many calls at once and the region."""
     parser = argparse.ArgumentParser(
         prog="python -m svar.scripts.topic_probe",
         description="Measure DENIED_TOPICS against the topic question set.",
@@ -570,6 +574,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Measure the denied topics on the questions and answers and print the report; a topic
+    model check goes to `topic_model_probe`."""
     utf8_output()
     args = parse_args(argv)
     try:

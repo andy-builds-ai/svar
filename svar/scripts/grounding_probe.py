@@ -527,6 +527,7 @@ def report(summary: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> lis
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """The command line: the answer set, where to write, how many at once and the region."""
     parser = argparse.ArgumentParser(
         prog="python -m svar.scripts.grounding_probe",
         description="Measure the grounding check on the answer set, and German answers in English.",
@@ -547,6 +548,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Create the probe guardrail, measure every answer through it, delete it and print the
+    report."""
     utf8_output()
     args = parse_args(argv)
     try:

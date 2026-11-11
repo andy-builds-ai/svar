@@ -159,6 +159,8 @@ def probe_requests(
     }
 
     def topics(on_answer: bool) -> dict[str, Any]:
+        """`DENIED_TOPICS` in this tier, read in the question and, if ``on_answer``, in the
+        answer too."""
         policy = topic_policy()
         policy["tierConfig"] = {"tierName": tier.upper()}
         for topic in policy["topicsConfig"]:
@@ -288,6 +290,8 @@ def run_model(
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """The command line; the topic tier defaults to the way the stack in the region checks
+    the topics."""
     parser = argparse.ArgumentParser(
         prog="python -m svar.scripts.control_eval",
         description="Measure how well answer models stay with their sources.",
@@ -362,6 +366,8 @@ def regrade(path: Path, questions_file: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the chosen models through the questions with probe guardrails and print the
+    table; with ``--regrade``, mark a saved run again instead."""
     utf8_output()
     args = parse_args(argv)
     if args.regrade:
@@ -479,6 +485,7 @@ def write(
     runs: Mapping[str, Any],
     passages: Passages,
 ) -> None:
+    """Save the run so far as JSON, with the passages ``--regrade`` needs."""
     path.write_text(
         json.dumps(
             {

@@ -153,6 +153,7 @@ def format_answer(workspace: str, body: dict[str, Any]) -> list[str]:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """The command line: the question, its workspace and where to send it."""
     parser = argparse.ArgumentParser(
         prog="python -m svar.scripts.ask",
         description="Ask Svar's deployed answer function a question in one workspace.",
@@ -179,6 +180,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Ask the question and print the answer with its sources, or the raw JSON."""
     utf8_output()
     args = parse_args(argv)
     given_key = os.environ.get(API_KEY_ENVIRONMENT_VARIABLE, "").strip()

@@ -307,6 +307,7 @@ def deployed_environment(region: str) -> dict[str, str]:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """The command line: the models, the question set, where to write and the region."""
     parser = argparse.ArgumentParser(
         prog="python -m svar.scripts.evaluate",
         description="Compare answer models on the evaluation questions, the way Svar answers.",
@@ -325,6 +326,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Ask every chosen model every question and print the comparison table."""
     utf8_output()
     args = parse_args(argv)
     try:

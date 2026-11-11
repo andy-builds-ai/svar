@@ -87,6 +87,8 @@ def numbers_in(text: str) -> list[tuple[str, set[str]]]:
     found: list[tuple[str, set[str]]] = []
 
     def take_date(match: re.Match[str]) -> str:
+        """Take a real date's day, month and year as numbers and blank the date out; leave
+        anything else as it is."""
         day, month, year = match.groups()
         if not (1 <= int(day) <= 31 and 1 <= int(month) <= 12):
             return match.group(0)
@@ -218,11 +220,14 @@ class Passages:
 
     @staticmethod
     def key(workspace: str, question: str) -> str:
+        """The key a question's passages are kept and saved under."""
         return f"{workspace}\n{question}"
 
     def __call__(
         self, _client: Any, knowledge_base_id: str, question: str, workspace: str, number: int
     ) -> list[dict[str, Any]]:
+        """The question's passages, retrieved on the first call and kept for every later
+        model."""
         key = self.key(workspace, question)
         if key not in self.found:
             results = self.retrieve(
@@ -259,6 +264,7 @@ class ModelTexts:
         self.last: str | None = None
 
     def __call__(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Ask the model as the function does and keep its own text in ``last``."""
         self.last = None
         response = self.ask_model(*args, **kwargs)
         self.last = written_by_model(response, self.app)
@@ -305,6 +311,7 @@ def passage_texts(app: Any, results: Sequence[Mapping[str, Any]], workspace: str
 
 
 def ratio(hits: int, total: int) -> str:
+    """A count written as ``hits/total``."""
     return f"{hits}/{total}"
 
 

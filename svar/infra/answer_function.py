@@ -298,6 +298,7 @@ class AnswerPackage:
         self.root = root
 
     def try_bundle(self, output_dir: str, *options: Any, **named: Any) -> bool:
+        """Copy the package into ``output_dir``; True tells CDK that no Docker is needed."""
         # jsii hands the bundling options over as one positional argument; nothing here
         # needs them.
         copy_answer_package(Path(output_dir), self.root)

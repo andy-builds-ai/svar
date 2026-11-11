@@ -38,6 +38,7 @@ def key_hash(key: str) -> str:
 
 
 def budget_key(key: str) -> dict[str, dict[str, str]]:
+    """The budget item's DynamoDB key for ``key``, as GetItem and UpdateItem take it."""
     return {BUDGET_KEY_ATTRIBUTE: {"S": key_hash(key)}}
 
 
