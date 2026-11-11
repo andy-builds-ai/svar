@@ -248,6 +248,7 @@ def plan_line(item: Mapping[str, Any]) -> str:
 
 
 def budget_line(item: Mapping[str, Any]) -> str:
+    """A budget item in one line: its plan and latest counts, or a demo key's questions used."""
     if PLAN_ATTRIBUTE in item:
         return plan_line(item)
     used = item.get("questions_used", {}).get("N", "0")
@@ -325,6 +326,7 @@ KEY_CACHE_MINUTES = 5
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """The command line of ``python -m taug.scripts.workspace`` and its three commands."""
     parser = argparse.ArgumentParser(
         prog="python -m taug.scripts.workspace",
         description="Add a workspace's key, change its plan, or remove a workspace from Andur.",
@@ -366,6 +368,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def run_add(args: argparse.Namespace, settings: Mapping[str, str], connect: Any) -> int:
+    """Store a new key for the workspace, put it on its plan, and print it this one time."""
     name = key_parameter(settings["ApiKeyParameterPath"], args.workspace)
     key = add_key(connect("ssm", args.region), name)
     # Nobody has the key yet, so no question can arrive before its plan does. Should the
@@ -421,6 +424,7 @@ def command(args: argparse.Namespace, *words: str) -> str:
 
 
 def run_plan(args: argparse.Namespace, settings: Mapping[str, str], connect: Any) -> int:
+    """Put the workspace's existing key on another plan; the key itself stays."""
     name = key_parameter(settings["ApiKeyParameterPath"], args.workspace)
     key = read_key(connect("ssm", args.region), name)
     if key is None:
@@ -445,6 +449,7 @@ def run_plan(args: argparse.Namespace, settings: Mapping[str, str], connect: Any
 
 
 def run_remove(args: argparse.Namespace, settings: Mapping[str, str], connect: Any) -> int:
+    """Show what belongs to the workspace; with ``--yes`` delete it and sync its vectors away."""
     ssm, dynamodb, s3 = (connect(name, args.region) for name in ("ssm", "dynamodb", "s3"))
     removal = find_removal(args.workspace, settings, ssm, dynamodb, s3)
     for line in format_removal(removal):
@@ -476,6 +481,7 @@ def run_remove(args: argparse.Namespace, settings: Mapping[str, str], connect: A
 
 
 def main(argv: list[str] | None = None, connect: Callable[[str, str], Any] = client) -> int:
+    """Check the name, read the outputs the command needs from both stacks, and run it."""
     utf8_output()
     args = parse_args(argv)
     problem = name_problem(args.workspace)

@@ -65,6 +65,7 @@ class Document:
 
     @property
     def sidecar(self) -> Path:
+        """The metadata file next to the document, named after it with `SIDECAR_SUFFIX`."""
         return self.path.with_name(self.path.name + SIDECAR_SUFFIX)
 
 
@@ -206,6 +207,7 @@ def split_markdown(text: str) -> list[tuple[str, str]]:
 
 
 def section_filename(stem: str, number: int, slug: str) -> str:
+    """The file name of a Markdown document's section, in the form `document_of` reads back."""
     return f"{stem}{SECTION_SEPARATOR}{number:02d}-{slug}.md"
 
 
@@ -235,6 +237,7 @@ _UTF8_MULTIBYTE = re.compile(
 
 
 def _line(data: bytes, position: int) -> int:
+    """The number, counted from 1, of the line that byte ``position`` lies in."""
     return data.count(b"\n", 0, position) + 1
 
 

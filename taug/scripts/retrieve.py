@@ -50,6 +50,7 @@ def retrieve(
     search_filter: dict[str, Any],
     results: int,
 ) -> list[dict[str, Any]]:
+    """The knowledge base's hits for a question, at most ``results``, inside ``search_filter``."""
     with explained("Retrieving from the knowledge base"):
         response = agent_runtime.retrieve(
             knowledgeBaseId=knowledge_base_id,
@@ -62,6 +63,7 @@ def retrieve(
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """The command line of ``python -m taug.scripts.retrieve``."""
     parser = argparse.ArgumentParser(
         prog="python -m taug.scripts.retrieve",
         description="Retrieve chunks for a question from one Andur workspace.",
@@ -80,6 +82,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Ask the knowledge base a question inside one workspace and print every hit."""
     utf8_output()
     args = parse_args(argv)
     search_filter = build_filter(args.workspace, args.layer)

@@ -8,6 +8,8 @@ from typing import NamedTuple
 
 
 class AnswerModel(NamedTuple):
+    """A model Andur may answer with: its name in reports, its Bedrock id, and its prices."""
+
     name: str
     model_id: str
     #: USD per 1,000 tokens, standard tier: in `ANSWER_MODELS` for eu-west-1, read on

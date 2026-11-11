@@ -97,6 +97,7 @@ def _visible(entries: Iterable[Path]) -> list[Path]:
 def _check_layer_folder(
     folder: Path, workspace: str, layer: str
 ) -> tuple[list[Document], list[str]]:
+    """The valid documents in one layer folder, and every problem with its files."""
     documents: list[Document] = []
     problems: list[str] = []
     entries = _visible(folder.iterdir())
@@ -214,6 +215,8 @@ def format_counts(
 
 @dataclass
 class UploadCounts:
+    """How many files an upload put into the bucket, and how many it skipped as unchanged."""
+
     uploaded: int = 0
     unchanged: int = 0
 
@@ -393,6 +396,7 @@ JOB_STATISTICS = (
 
 
 def job_succeeded(job: dict[str, Any]) -> bool:
+    """Whether the job completed with no failed document; a COMPLETE job may still count some."""
     return (
         job["status"] == "COMPLETE"
         and job.get("statistics", {}).get("numberOfDocumentsFailed", 0) == 0
@@ -400,6 +404,7 @@ def job_succeeded(job: dict[str, Any]) -> bool:
 
 
 def format_job(job: dict[str, Any]) -> list[str]:
+    """The job's status, then each statistic and each failure reason on a line of its own."""
     statistics = job.get("statistics", {})
     lines = [f"Ingestion job {job['ingestionJobId']}: {job['status']}"]
     lines += [f"  {label}: {statistics.get(key, 0)}" for key, label in JOB_STATISTICS]
@@ -411,6 +416,7 @@ def format_job(job: dict[str, Any]) -> list[str]:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """The command line of ``python -m taug.scripts.ingest``."""
     parser = argparse.ArgumentParser(
         prog="python -m taug.scripts.ingest",
         description="Upload a local knowledge folder to Andur and sync the knowledge base.",
@@ -441,6 +447,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Check the folder, then upload, prune and sync; ``--check`` stops after the check."""
     utf8_output()
     args = parse_args(argv)
 
