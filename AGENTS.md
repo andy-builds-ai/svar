@@ -90,8 +90,8 @@ date given.
 | `python -m svar.scripts.evaluate` | real models on AWS | real money, no figure given | |
 | `python -m taug.scripts.ingest`, `taug.scripts.retrieve`, `taug.scripts.workspace`, `svar.scripts.ask` | the deployed stacks; see `taug/scripts/README.md` and `svar/scripts/README.md` | | |
 | `python -m taug.scripts.workspace remove --yes` | deletes a workspace's key, budget and documents: never without the operator's word | | |
-| `python -m svar.scripts.topic_probe` | creates and deletes a guardrail named `andur-topic-probe` | about 0.05 USD a run | `DENIED_TOPICS` |
-| `python -m svar.scripts.topic_probe --region eu-central-1` | measures the Frankfurt topic check | three runs of 319 checks, 0.30 USD on 07.10.2026 | that prompt, and `check_topics_with_model` in `svar/app/topic_check.py` |
+| `python -m svar.scripts.topic_probe` | creates and deletes a guardrail named `andur-topic-probe` | 0.113 USD a run on 10.11.2026 | `DENIED_TOPICS` |
+| `python -m svar.scripts.topic_probe --region eu-central-1` | measures the Frankfurt topic check | three runs of 319 checks, 0.30 USD on 07.10.2026, 0.302 USD on 10.11.2026 | that prompt, and `check_topics_with_model` in `svar/app/topic_check.py` |
 | `python -m svar.scripts.grounding_probe` | creates and deletes a guardrail named `andur-grounding-probe` | 0.22 USD a run on 06.10.2026 | the grounding check or the prompt |
 | `python -m svar.scripts.control_eval` | creates and deletes up to three guardrails named `andur-control-*-probe` in eu-central-1 | 42 questions: 0.063 to 0.086 USD per Frankfurt model, 0.11 USD for Nova Pro, 0.33 USD for Claude Sonnet 4.6 on 06.10.2026 | |
 | `python -m vard.scripts.tool_probe` | models of `FRANKFURT_MODELS` | fractions of a cent per model | |
