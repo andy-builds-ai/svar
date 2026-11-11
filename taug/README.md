@@ -43,11 +43,13 @@ Some of Taug runs where Svar needs it:
 ## Commands
 
 ```bash
-python -m taug.scripts.ingest --check               # validate layout and sidecars, no AWS
-python -m taug.scripts.ingest                       # upload the demo corpus and sync
-python -m taug.scripts.retrieve "How do I export project data?" --workspace quillmoor
-python -m taug.scripts.workspace add quillmoor > /dev/null   # store the workspace's key
+python -m taug.scripts.ingest --check                        # validate layout and sidecars, no AWS
+python -m taug.scripts.ingest --region eu-central-1          # upload the demo corpus and sync
+python -m taug.scripts.retrieve "How do I export project data?" --workspace quillmoor --region eu-central-1
+python -m taug.scripts.workspace --region eu-central-1 add quillmoor > /dev/null   # store the workspace's key
 ```
 
-All of them call the deployed stacks except `ingest --check`; options, output
-and exit codes: [scripts/README.md](scripts/README.md).
+All of them call the deployed stacks except `ingest --check`. Without
+`--region` they aim at Ireland, the default region, whose stack is not carried
+on ([docs/status.md](../docs/status.md)). Options, output and exit codes:
+[scripts/README.md](scripts/README.md).

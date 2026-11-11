@@ -6,16 +6,17 @@ Deploy, fill, ask, test and tear down.
 
 Needs Python 3.11+ (tested on 3.14), Node.js 22, the AWS CDK CLI
 (`npm install -g aws-cdk@2.1146.0`) and AWS credentials for the target
-account. Everything goes to `eu-west-1` (Ireland), the comparison stack,
-unless `-c region=` names another region of `REGIONS` in
-`taug/infra/answer_models.py`; the main stack is the one in `eu-central-1`
-([Another region](#another-region)).
+account. Svar runs in `eu-central-1` (Frankfurt), so every command here
+names it ([Another region](#another-region); what runs where:
+[status.md](status.md)). Without `-c region=`, which picks a region of
+`REGIONS` in `taug/infra/answer_models.py`, everything goes to `eu-west-1`
+(Ireland), the default region.
 
 Ireland has not been moved. Taug's seven resources (the documents bucket and
 its policy, the vector bucket, the index, the knowledge base role, the
 knowledge base and its data source) are still in `AndurStack` there, and the
-stack is to be deleted later (the entry of 2026-11-11 in
-[decisions.md](decisions.md)). `DEFAULT_REGION` is `eu-west-1`, so `cdk deploy
+stack is to be deleted later
+([decisions.md, 11.11.2026](decisions.md#2026-11-11-move-ran-in-frankfurt)). `DEFAULT_REGION` is `eu-west-1`, so `cdk deploy
 --all` without `-c region=` aims at Ireland. Deployed from this code, CDK
 would build the seven again in `TaugStack` and remove them from `AndurStack`.
 The build is expected to fail at the documents bucket's fixed name and roll
@@ -27,15 +28,17 @@ deploy Ireland from here without moving first
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: . .venv/bin/activate
 pip install -e ".[dev]" -c constraints.txt
 
-cdk bootstrap aws://<account>/eu-west-1   # once per account and region
-cdk diff --all                            # what a deploy would change; changes nothing
-cdk deploy --all                          # builds or updates everything, TaugStack first
-cdk destroy --all                         # removes it again
+cdk bootstrap aws://<account>/eu-central-1   # once per account and region
+cdk diff -c region=eu-central-1              # what a deploy would change in both stacks; changes nothing
+cdk deploy --all -c region=eu-central-1      # builds or updates everything, TaugStack first
+cdk destroy --all -c region=eu-central-1     # removes it again
 ```
 
 `infra/app.py` builds two stacks in one account and region: Taug's,
 `TaugStack`, and Svar's, `AndurStack`, which depends on it and imports the
-knowledge base's id and ARN. Every `cdk` command names both with `--all`.
+knowledge base's id and ARN. `cdk deploy` and `cdk destroy` name both with
+`--all`; `cdk diff` compares both without it and has no such option (the CLI
+answers "Unknown option(s): --all" and ignores it).
 Never use `--exclusively`: the CLI then skips the bundling of the stacks not
 named, and the answer function's code key would change.
 
@@ -152,8 +155,8 @@ without a deploy (see *Workspaces* below). After a first deploy, give the two
 demo workspaces their keys:
 
 ```bash
-python -m taug.scripts.workspace add quillmoor > /dev/null
-python -m taug.scripts.workspace add pellwick > /dev/null
+python -m taug.scripts.workspace --region eu-central-1 add quillmoor > /dev/null
+python -m taug.scripts.workspace --region eu-central-1 add pellwick > /dev/null
 ```
 
 `> /dev/null` keeps the key off the screen; `svar.scripts.ask` reads it from
@@ -275,7 +278,7 @@ base. It reads bucket and ids from the outputs of `TaugStack` and needs a valid 
 login (`aws login`):
 
 ```bash
-python -m taug.scripts.ingest
+python -m taug.scripts.ingest --region eu-central-1
 ```
 
 The corpus in `knowledge/` belongs to two **fictional** companies invented
@@ -294,8 +297,8 @@ rerun uploads only what changed. Options, output and exit codes:
 The proof that workspaces stay apart:
 
 ```bash
-python -m taug.scripts.retrieve "How do I export project data?" --workspace quillmoor
-python -m taug.scripts.retrieve "How do I export project data?" --workspace pellwick
+python -m taug.scripts.retrieve "How do I export project data?" --workspace quillmoor --region eu-central-1
+python -m taug.scripts.retrieve "How do I export project data?" --workspace pellwick --region eu-central-1
 ```
 
 The first returns Quillmoor sections only — every hit prints
@@ -307,11 +310,11 @@ documents.
 ## Workspaces
 
 ```bash
-python -m taug.scripts.workspace add <name>             # create the key, print it once
-python -m taug.scripts.workspace add <name> --plan firma   # the same, on a plan
-python -m taug.scripts.workspace plan <name> betrieb    # change the plan; the key stays
-python -m taug.scripts.workspace remove <name>          # show what belongs to it, delete nothing
-python -m taug.scripts.workspace remove <name> --yes    # delete key, budget items and documents
+python -m taug.scripts.workspace --region eu-central-1 add <name>             # create the key, print it once
+python -m taug.scripts.workspace --region eu-central-1 add <name> --plan firma   # the same, on a plan
+python -m taug.scripts.workspace --region eu-central-1 plan <name> betrieb    # change the plan; the key stays
+python -m taug.scripts.workspace --region eu-central-1 remove <name>          # show what belongs to it, delete nothing
+python -m taug.scripts.workspace --region eu-central-1 remove <name> --yes    # delete key, budget items and documents
 ```
 
 `add` refuses to overwrite an existing key. `remove` without `--yes` only
@@ -328,8 +331,8 @@ output and exit codes: [taug/scripts/README.md](../taug/scripts/README.md#worksp
 ## Asking Svar
 
 ```bash
-python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor
-python -m svar.scripts.ask "How do I export project data?" --workspace pellwick
+python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor --region eu-central-1
+python -m svar.scripts.ask "How do I export project data?" --workspace pellwick --region eu-central-1
 ```
 
 The first prints Quillmoor's answer, the layers it rests on, every source
@@ -353,7 +356,7 @@ and why it has no configuration file: [svar/web/README.md](../svar/web/README.md
 ### With curl
 
 ```bash
-WEB_URL=$(aws cloudformation describe-stacks --region eu-west-1 --stack-name AndurStack \
+WEB_URL=$(aws cloudformation describe-stacks --region eu-central-1 --stack-name AndurStack \
   --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text)
 BODY='{"question": "How do I export project data?", "workspace": "quillmoor"}'
 
@@ -365,10 +368,12 @@ curl -s -X POST "$WEB_URL/ask" \
 ```
 
 `$KEY` is the workspace key ([svar/app/README.md](../svar/app/README.md#getting-a-key)).
-`printf '%s'` and not `echo`: a trailing newline would go into the hash but
-not into the body, and the request would be refused. The output
-`FunctionUrl` of `AndurStack` is not an address to send this to — from outside the account
-it answers 403 to everyone but CloudFront.
+In Frankfurt `WebUrl` is the function's own URL. The hash header is for the
+way in through CloudFront, as in Ireland, where every request is signed;
+there `printf '%s'` and not `echo` matters: a trailing newline would go into
+the hash but not into the body, and the request would be refused. In Ireland
+the output `FunctionUrl` of `AndurStack` is not an address to send this to —
+from outside the account it answers 403 to everyone but CloudFront.
 
 ## Tests
 

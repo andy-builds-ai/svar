@@ -199,9 +199,10 @@ vard/tests/         loop, cases, probes
 6. **Guardrails:** topic, masking and grounding checks, and the cost of every
    answer in its log line. In Frankfurt gpt-oss-120b in the region checks the
    denied topics. *(done)*
-7. **Two stacks:** Frankfurt (`eu-central-1`) is the main stack, Ireland
-   (`eu-west-1`) the comparison stack where models and checks are measured
-   against each other. Both were deployed on 21.10.2026. *(done)*
+7. **Two regions:** Frankfurt (`eu-central-1`), where Svar runs, and Ireland
+   (`eu-west-1`), where models and checks were measured against each other.
+   Ireland's stack is not carried on; what runs where is in
+   [status.md](status.md). *(done)*
 8. **Measurements:** `evaluate`, `control_eval`, `topic_probe`,
    `grounding_probe` and `rehearsal` against the deployed stacks, in
    Frankfurt on 14.10.2026 and in Ireland on 16.10.2026
@@ -213,3 +214,7 @@ vard/tests/         loop, cases, probes
    deployed)*
 10. **Release:** screenshots and a walkthrough *(done)*. There is no tagged
     version.
+11. **Taug's stack of its own:** `TaugStack` holds the documents, the vectors
+    and the knowledge base, and Svar's `AndurStack` imports the knowledge base
+    from it ([decisions.md, 10.11.2026](decisions.md#2026-11-10-taug-stack-of-its-own)).
+    *(done in Frankfurt, [status.md](status.md))*

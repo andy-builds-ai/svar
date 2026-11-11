@@ -18,13 +18,13 @@ answers from them. Svar's stack is `AndurStack` (class `SvarStack` in
 stacks, their resources and the code carry Andur's name (`AndurStack`,
 `X-Andur-Key`, `andur-*`).
 
-The same code runs in two regions. Andur's main stack runs on AWS in
-Frankfurt (`eu-central-1`): a company's documents, the vectors, models,
-questions and answers stay in Germany. The second stack, in Ireland
-(`eu-west-1`) behind CloudFront, is the comparison stack; it holds only the
-two fictional demo companies of `knowledge/` and is where models and checks
-are measured against each other.
-Both were last deployed on 21.10.2026.
+Svar runs on AWS in Frankfurt (`eu-central-1`): a company's documents, the
+vectors, models, questions and answers stay in Germany. The same code also
+builds for Ireland (`eu-west-1`), behind CloudFront. A stack there, with only
+the two fictional demo companies of `knowledge/`, is where models and checks
+were measured against each other; it stands at older code, is not carried on
+and is to be deleted. What is deployed where, and since when:
+[docs/status.md](../docs/status.md).
 
 ![An answer on Svar's page in Frankfurt, in German: the question, the answer citing [1], and the sources it rests on, each marked as written by a person](docs/screenshot-answer.png)
 
@@ -88,7 +88,7 @@ to 7. More:
 
 ## Decisions and what each one costs
 
-101 decisions are written down with their dates and reasons in
+Every decision is written down with its date and reason in
 [docs/decisions.md](../docs/decisions.md). The ones that shape the system:
 
 - **Nothing with a monthly base fee**
@@ -284,10 +284,11 @@ How to set up the repository and run the checks, which need no AWS:
 [the overview](../README.md#build-and-test-it). Deploying needs AWS
 credentials as well.
 
-The commands below build the main stack, in Frankfurt. Without
-`-c region=eu-central-1` and `--region eu-central-1`, and with `eu-west-1` in
-the `cdk bootstrap` line, the same commands build the comparison stack in
-Ireland.
+The commands below build both stacks in Frankfurt. Without
+`-c region=eu-central-1` and `--region eu-central-1` they aim at Ireland, the
+default region, whose stack stands at older code and is not to be deployed
+from here ([docs/status.md](../docs/status.md),
+[docs/operating.md](../docs/operating.md#deploy)).
 
 ```bash
 cdk bootstrap aws://<account>/eu-central-1          # once per account and region
