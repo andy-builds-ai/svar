@@ -51,6 +51,7 @@ class Context:
     started: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def client(self, service: str) -> Any:
+        """A client for the AWS service, made by the run's `clients`."""
         return self.clients(service)
 
     def output(self, name: str) -> str:
@@ -68,6 +69,8 @@ class Context:
 
 @dataclass(frozen=True)
 class Step:
+    """One step of the plan: a command, a check in this process, or a task done by hand."""
+
     id: str
     phase: str
     title: str
@@ -94,11 +97,14 @@ class Step:
 
     @property
     def kind(self) -> str:
+        """Whether the step is done by hand, checked in this process, or a command."""
         return "manual" if self.manual else "check" if self.check else "command"
 
 
 @dataclass
 class Result:
+    """How one step ended, as the run's JSON file and its summary record it."""
+
     number: int
     id: str
     phase: str
@@ -138,15 +144,19 @@ def run_command(
 
 
 def now_text() -> str:
+    """The local time now, to the second and with its UTC offset."""
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def say(line: str) -> None:
+    """Print a progress line to stderr, flushed at once."""
     print(line, file=sys.stderr, flush=True)
 
 
 @dataclass
 class Runner:
+    """Runs the chosen steps, times each and keeps their results."""
+
     ctx: Context
     manual_mode: str = "skip"
     run: Callable[..., tuple[int, str]] = run_command
@@ -162,9 +172,11 @@ class Runner:
         return text.replace(account, ACCOUNT_PLACEHOLDER) if account else text
 
     def tell(self, line: str) -> None:
+        """Say a line with the account id replaced."""
         self.say(self.clean(line))
 
     def step(self, number: int, step: Step) -> Result:
+        """Run one step and time it; a failure is recorded in the result, not raised."""
         log = self.ctx.out_dir / f"{number:02d}-{step.id}.log"
         started, begin = now_text(), self.clock()
         result = Result(
@@ -202,6 +214,7 @@ class Runner:
         return result
 
     def lane(self, entries: Sequence[tuple[int, Step]]) -> list[Result]:
+        """Run a lane's steps one after the other; stop after the first that fails."""
         done: list[Result] = []
         for number, step in entries:
             done.append(self.step(number, step))
@@ -263,6 +276,7 @@ def select(
 
 
 def format_seconds(seconds: float) -> str:
+    """Seconds as "2 min 05 s", or as "45 s" under a minute."""
     minutes, rest = divmod(round(seconds), 60)
     return f"{minutes} min {rest:02d} s" if minutes else f"{rest} s"
 
@@ -310,5 +324,6 @@ def scrub(folder: Path, account: str | None) -> int:
 
 
 def inside_repository(folder: Path) -> bool:
+    """Whether the folder is the repository or lies inside it."""
     resolved = folder.resolve()
     return resolved == REPOSITORY or REPOSITORY in resolved.parents

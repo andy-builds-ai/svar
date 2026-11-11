@@ -141,6 +141,7 @@ def check_deploy_time(ctx: Context) -> str:
 
 
 def host_of(url: str) -> str:
+    """The host of a URL: what stands between its scheme and its path."""
     return url.split("://", 1)[-1].split("/", 1)[0]
 
 
@@ -162,10 +163,12 @@ def address_regions(addresses: Iterable[str], ranges: Mapping[str, Any]) -> dict
 
 
 def resolve_host(host: str) -> list[str]:
+    """Every address the host resolves to for HTTPS, sorted and each once."""
     return sorted({str(info[4][0]) for info in socket.getaddrinfo(host, 443)})
 
 
 def fetch_ip_ranges() -> dict[str, Any]:
+    """AWS's list of its address ranges, fetched from `IP_RANGES_URL`."""
     with urllib.request.urlopen(IP_RANGES_URL, timeout=30) as response:
         return json.load(response)
 
@@ -329,6 +332,7 @@ _REGION_IN_ARN = re.compile(r"^arn:aws[\w-]*:[\w-]+:([a-z0-9-]*):")
 
 
 def arn_region(arn: str) -> str:
+    """The region an ARN names, empty for a global resource; "?" when the text is no ARN."""
     match = _REGION_IN_ARN.match(arn)
     return match.group(1) if match else "?"
 

@@ -173,6 +173,7 @@ def refused_with_401(output: str, ctx: Context) -> str:
 
 
 def python(*arguments: str) -> tuple[str, ...]:
+    """A command line that runs a module with the Python this run uses."""
     return (sys.executable, "-m", *arguments)
 
 
@@ -406,6 +407,7 @@ def build_plan(args: argparse.Namespace) -> list[Step]:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """The run's settings, with both folders resolved and the region's own model as default."""
     parser = argparse.ArgumentParser(
         prog="python -m scripts.rehearsal",
         description="Set up a new workspace on the deployed stack, measure it, time every step.",
@@ -487,6 +489,7 @@ def uploaded_names(source: Path, workspace: str) -> frozenset[str]:
 
 
 def plan_lines(chosen: Sequence[tuple[int, Step]]) -> list[str]:
+    """The plan as `--list` prints it, one line per step with what it runs."""
     lines = []
     for number, step in chosen:
         lane = f" [at once: {step.lane}]" if step.group else ""
@@ -501,6 +504,7 @@ def plan_lines(chosen: Sequence[tuple[int, Step]]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the rehearsal; the exit code is 1 when a step failed, 2 on a wrong step or folder."""
     utf8_output()
     args = parse_args(argv)
     try:
