@@ -13,7 +13,7 @@ source says which layer it came from: written by a person, produced by a
 machine, or merely arrived and not yet sorted. One deployment serves several
 companies. Every search is filtered to the asking workspace, and the handler
 drops any passage of another workspace before the prompt is built. A test on
-14.10.2026 found none in the search results of another workspace
+11.11.2026 found none in the search results of another workspace
 ([README](../svar/README.md#privacy-and-separation)).
 
 Runs entirely on AWS, defined as code. `cdk deploy --all` builds two stacks,
@@ -84,8 +84,7 @@ reading the curl examples in [operating.md](operating.md#with-curl):
 One more consequence, in the [app README](../svar/app/README.md): CloudFront waits
 120 seconds for the function, which may run 195. An answer between the two
 arrives as a 504 while the function finishes it anyway. The median time per
-question was 2.8 and 2.9 seconds in eu-west-1 and 2.3 to 3.0 seconds in
-eu-central-1, measured from a laptop in Germany
+question, measured from a laptop in Germany, is a few seconds
 ([README](../svar/README.md#measured)).
 
 ## What the stacks create
@@ -204,9 +203,9 @@ vard/tests/         loop, cases, probes
    Ireland's stack is not carried on; what runs where is in
    [status.md](status.md). *(done)*
 8. **Measurements:** `evaluate`, `control_eval`, `topic_probe`,
-   `grounding_probe` and `rehearsal` against the deployed stacks, in
-   Frankfurt on 14.10.2026 and in Ireland on 16.10.2026
-   ([README](../svar/README.md#measured)). *(done)*
+   `grounding_probe` and `rehearsal` against the deployed stacks
+   ([README](../svar/README.md#measured); the dates in
+   [status.md](status.md#last-measured)). *(done)*
 9. **Vard:** his loop and the receiving check, measured with eleven models on
    twelve made-up cases on 20.10.2026. Not deployed
    ([README](../vard/README.md)). *(first build done; the second picked his

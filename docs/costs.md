@@ -57,6 +57,15 @@ cost 0.30 USD again. In `eu-west-1` the same day, Nova Pro at ten passages,
 two runs of the English set: 0.0037 USD per question on average, 6 of the 30
 withheld in each run and not counted.
 
+In `eu-central-1` on 11.11.2026, the rehearsal after Taug's resources moved
+into a stack of their own, the same three sets with Qwen3 235B: 0.0024 USD
+per question on average for the English set, 0.0014 for German questions on
+English documents and 0.0021 for German questions on German documents,
+counting the questions with a known cost; 11 of the 88 (3, 7 and 1) carry
+`cost_usd: null`. Three runs of the topic check by gpt-oss-120b, 957 checks,
+0.30 USD. The craft firm's 21 questions of `control_eval`: 0.0021 USD per
+question, 0.033 USD in all.
+
 **Ten passages since 28.09.2026** (`NUMBER_OF_RESULTS`, was 6; see
 [decisions](decisions.md)). Nova Pro, the 22 answerable questions, two runs
 through the function's own path: 0.0043 USD per answered question on average

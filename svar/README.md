@@ -6,7 +6,7 @@ as written by a person, produced by a machine, or merely arrived and not
 sorted yet. It is shown with made-up companies. Only whoever holds a
 workspace's key can ask. Every search is filtered to that workspace, and the
 handler drops any passage of another workspace before the model sees it; a
-test on 14.10.2026 found none in the search results of another workspace
+test on 11.11.2026 found none in the search results of another workspace
 ([Privacy and separation](#privacy-and-separation)). It runs on AWS, defined
 as code (CDK in Python), and nothing in it bills a monthly base fee.
 
@@ -149,27 +149,35 @@ function's own code with the deployed function's settings and knowledge
 base, and its guardrails or copies of them that a script creates and
 deletes; `topic_probe` and `grounding_probe` are also run before a deploy,
 to measure a change before it goes live
-([decisions.md, 02.10.2026](../docs/decisions.md#2026-10-02-topics-measured-before-deploy)). The numbers below were
-measured after the deploy of 14.10.2026 in Frankfurt and of 16.10.2026 in
-Ireland, against the deployed stack. Frankfurt's deploy of 16.10.2026 gave
-each model its own prompt wording and kept Qwen3 235B's as it was
-([decisions.md, 14.10.2026](../docs/decisions.md#2026-10-14-prompt-wording-per-model)). The deploy of
-21.10.2026 changed no model, search, prompt or check on either stack. It
-changed names, descriptions, the page's text and the sentence a reader gets
-when a key's quota is full. How each script works:
+([decisions.md, 02.10.2026](../docs/decisions.md#2026-10-02-topics-measured-before-deploy)).
+
+The Frankfurt numbers below come from the rehearsal of 11.11.2026, run
+against the stacks deployed that night ([docs/status.md](../docs/status.md)).
+It ran every measurement except the 42 questions of `control_eval`, of which
+it asked the craft firm's 21; the 42 stand as measured on 14.10.2026. Between
+the two dates Frankfurt's deploy of 16.10.2026 gave each model its own prompt
+wording and kept Qwen3 235B's as it was
+([decisions.md, 14.10.2026](../docs/decisions.md#2026-10-14-prompt-wording-per-model)),
+the deploy of 21.10.2026 changed names, descriptions, the page's text and the
+sentence a reader gets when a key's quota is full, and the deploys of 10. and
+11.11.2026 moved Taug's resources into a stack of their own and changed one
+German example sentence of the denied topics
+([decisions.md, 11.11.2026](../docs/decisions.md#2026-11-11-move-ran-in-frankfurt)).
+The Ireland numbers were measured on 16.10.2026. How each script works:
 [svar/scripts/README.md](scripts/README.md).
 
-### Frankfurt, 14.10.2026, Qwen3 235B
+### Frankfurt, 11.11.2026, Qwen3 235B
 
 | What | Result |
 |---|---|
 | English questions on English documents | 30 of 30 right; all 22 answerable ones cite the expected document |
-| German questions on English documents | 28 of 32 right; the 4 wrong ones are answers the grounding check withheld |
+| German questions on English documents | 29 of 32 right (28 on 14.10.2026); the 3 wrong ones are answers the grounding check withheld |
 | German questions on German documents | 26 of 26 right; all 20 answerable ones cite the expected document |
-| Questions built to tempt the model | 36 of 42 right; 0 of 34 answers added a figure of their own; 29 of 29 German questions answered in German; 8 of 8 advice questions refused |
+| Questions built to tempt the model, the craft firm's 21 | 21 of 21 right; 0 of 17 answers added a figure of their own; 17 of 17 German questions answered in German; 4 of 4 advice questions refused |
+| Questions built to tempt the model, all 42, measured on 14.10.2026 | 36 of 42 right; 0 of 34 answers added a figure of their own; 29 of 29 German questions answered in German; 8 of 8 advice questions refused |
 | Denied topics, three runs, 957 checks | every one of 45 denied questions, 32 denied answers and 11 advice questions refused; none of 87 harmless questions, 87 harmless answers and 57 questions of the evaluation sets refused |
-| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run (75 of 104 in the run the threshold was chosen on, [decisions.md, 07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-grounding-0-8); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
-| Median time per question, retrieval to cost line, from a laptop in Germany | 3.0 s (English), 2.3 s (German on English documents), 2.8 s (German on German documents) |
+| Grounding check at 0.8 | withheld 71 of 104 made-up answers in this run, as on 14.10.2026 (75 of 104 in the run the threshold was chosen on, [decisions.md, 07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-grounding-0-8); one run is a sample); let through 19 of 19 right German answers to German documents and 16 of 19 to English documents |
+| Median time per question, retrieval to cost line, from a laptop in Germany | 2.9 s (English), 2.7 s (German on English documents), 3.3 s (German on German documents) |
 
 **Setting up a new workspace**, measured on 07.10.2026 with a fictional craft
 firm and seven German documents: 31 seconds of machine time from checking
@@ -177,12 +185,13 @@ its folder to the first right answer. Of these, 3 went to its workspace and
 key, 16 to uploading and indexing its documents and 8 to the first question,
 answered with the right figure and the right document cited; the other 4 are
 not broken down. The whole rehearsal with all measurements took 11 minutes
-12 seconds.
+12 seconds. The rehearsal of 11.11.2026 ran in two parts, because the craft
+firm's key was already there, so it gives no such time.
 
 **Where the weak spots are:**
 
-- In the three evaluation sets above, all 4 wrong answers were withheld by a
-  check; none reached the reader with a wrong figure. All 4 are German
+- In the three evaluation sets above, all 3 wrong answers were withheld by a
+  check; none reached the reader with a wrong figure. All 3 are German
   answers to English documents. A withheld answer's text is not kept, so
   whether each was right is not known; that the check withholds right ones
   there is measured (3 of 19 in the grounding row above).
@@ -212,15 +221,15 @@ runs here, which is one sample and does not show a fix.
 
 ## Privacy and separation
 
-- **Where the data is.** In Frankfurt, all 10 places AWS reports for the
-  stack are in `eu-central-1`: documents bucket, embedding model, vector
+- **Where the data is.** In Frankfurt on 11.11.2026, all 10 places AWS
+  reports for the stacks are in `eu-central-1`: documents bucket, embedding model, vector
   index, answer function, answer model, topic model, answer guardrail,
   excerpt guardrail, budget table and the function's log. Bedrock's model
   invocation log is off. Every address the URL's host name resolved to (12
-  on 14.10.2026) lies in `eu-central-1` by AWS's `ip-ranges.json`; plain HTTP got no
+  on 11.11.2026) lies in `eu-central-1` by AWS's `ip-ranges.json`; plain HTTP got no
   connection on any of them, HTTPS served the page and refused a question
   without a key with 401.
-- **Companies kept apart.** On 14.10.2026 the craft firm's key was refused in
+- **Companies kept apart.** On 11.11.2026 the craft firm's key was refused in
   another workspace with 401, and a search in that workspace returned five
   passages, none of them from the craft firm's documents.
 - **Keys.** A key is stored as a SecureString parameter, and the budget table
@@ -231,9 +240,9 @@ runs here, which is one sample and does not show a fix.
   on ([svar/app/README.md](app/README.md#logs)).
 - **Masking.** Names, e-mail addresses, phone numbers and addresses are
   masked in the answer and in the excerpts of its sources, and the page shows
-  the excerpts as the function returns them. In the Frankfurt runs of
-  14.10.2026, 50 of the 231 excerpts returned for the English questions
-  carried a masked detail. The masking is statistical: a first name standing
+  the excerpts as the function returns them. In the Frankfurt run of
+  11.11.2026, as on 14.10.2026, 50 of the 231 excerpts returned for the
+  English questions carried a masked detail. The masking is statistical: a first name standing
   alone stayed readable in two excerpts in a browser test on 23.09.2026, and
   it also masks what is no person, such as a company name in "{NAME}
   Customer Support". Documents that must not show a name to a reader must not
@@ -243,16 +252,17 @@ runs here, which is one sample and does not show a fix.
 
 - **Idle:** cents per month. S3 Vectors storage and a few megabytes of
   documents; nothing else runs while nobody asks.
-- **Per question in Frankfurt, 14.10.2026:** 0.0024 USD on average for the
+- **Per question in Frankfurt, 11.11.2026:** 0.0024 USD on average for the
   English questions, 0.0014 for German questions on English documents and
-  0.0021 for German questions on German documents.
+  0.0021 for German questions on German documents, as on 14.10.2026.
 - **Per question in Ireland, 16.10.2026:** 0.0038 USD on average, Nova Pro.
 - **These averages are too low.** An answer the answer guardrail withheld
   carries `cost_usd: null`, because Bedrock reports no tokens for it although
   it charges the model call ([docs/costs.md](../docs/costs.md)). The averages
-  count only the questions with a known cost: 3 of 30, 8 of 32 and 1 of 26
-  questions in Frankfurt and 3 of 30 in each Ireland run had none.
-- **The topic check in Frankfurt:** 0.30 USD for 957 checks.
+  count only the questions with a known cost: 3 of 30, 7 of 32 and 1 of 26
+  questions in Frankfurt on 11.11.2026 and 3 of 30 in each Ireland run had
+  none.
+- **The topic check in Frankfurt:** 0.30 USD for 957 checks on 11.11.2026.
 - **Setting up the craft firm** with all its measurements on 07.10.2026: 0.70
   USD, at most 0.75.
 
