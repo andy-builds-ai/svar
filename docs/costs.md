@@ -63,8 +63,9 @@ per question on average for the English set, 0.0014 for German questions on
 English documents and 0.0021 for German questions on German documents,
 counting the questions with a known cost; 11 of the 88 (3, 7 and 1) carry
 `cost_usd: null`. Three runs of the topic check by gpt-oss-120b, 957 checks,
-0.30 USD. The craft firm's 21 questions of `control_eval`: 0.0021 USD per
-question, 0.033 USD in all.
+0.30 USD. The craft firm's 21 questions of `control_eval`: 0.033 USD in all
+for the 16 with a known cost, 0.0021 USD per question; the grounding check
+withheld the other 5, which carry `cost_usd: null`.
 
 **Ten passages since 28.09.2026** (`NUMBER_OF_RESULTS`, was 6; see
 [decisions](decisions.md)). Nova Pro, the 22 answerable questions, two runs

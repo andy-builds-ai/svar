@@ -33,7 +33,13 @@ template anyway.
 - `taug/infra/keys.py`: the key retirer's description, "Answers the Delete of retired Andur
   key resources", is in `TaugStack`'s template; in `TaugStack` no resource sends it a Delete.
 - `taug/infra/api_keys/handler.py`: its module docstring still speaks of the one stack that
-  held the key resources.
+  held the key resources, and it names `scripts.workspace` and `scripts/workspace.py` in its
+  docstring and in two messages, now `taug.scripts.workspace`
+  (`taug/tests/test_api_keys_resource.py` matches the message and changes with it).
+- `svar/app/__init__.py`: its docstring names `scripts/workspace.py`, now
+  `taug/scripts/workspace.py`.
+- `svar/app/plans.py`: its docstring and one comment name `python -m scripts.workspace`, now
+  `python -m taug.scripts.workspace`.
 - `svar/app/clocks.py`: the comment on `clock` names the age of a cached key; the key cache
   reads its own clock in `taug/access/keys.py`.
 - `svar/app/sentences.py`: the comment above `QUESTION_REFUSED_ANSWERS` names
