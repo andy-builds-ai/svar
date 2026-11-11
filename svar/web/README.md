@@ -13,7 +13,8 @@ This README stays behind: the deploy leaves it out, like every other
 In eu-central-1 the answer function serves these files itself, at its own URL,
 with the security headers below set by the function (`svar/app/page.py`); there is
 no CloudFront and no site bucket there, and the deploy puts the files into a
-layer of the function. The rest of this section describes eu-west-1.
+layer of the function. The rest of this section describes eu-west-1, whose
+stack is not carried on ([docs/status.md](../../docs/status.md)).
 
 The page and the answer function sit behind the same CloudFront distribution.
 The page is served from a private S3 bucket; the single path `/ask` goes to

@@ -69,8 +69,8 @@ one address. It is open (`AuthType NONE`); the workspace key in `X-Andur-Key`
 is the gate, as it is behind CloudFront. The function serves the page itself,
 from a layer with the files of `svar/web/`, and sets the security headers
 CloudFront's policy sets in Ireland (`svar/app/page.py`). `WebUrl` among the
-outputs is that URL, `https://<id>.lambda-url.eu-central-1.on.aws/`; there is
-no own domain and no WAF in front of it. The region and the account come
+outputs is that URL, `https://<id>.lambda-url.eu-central-1.on.aws/`; the stacks put
+no domain of its own and no WAF in front of it. The region and the account come
 from outside: the region from `-c region=`, the account from the AWS profile.
 
 ```bash

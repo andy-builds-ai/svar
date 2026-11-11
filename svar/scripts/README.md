@@ -10,19 +10,26 @@ Five commands, all run from the repository root. What the scripts need (install,
 | `python -m svar.scripts.grounding_probe` | Measures the grounding check against 142 fixed answers, right and made up, German and English, on English and German documents: which right ones it withholds and which made-up ones it lets through. |
 | `python -m svar.scripts.control_eval` | Asks 42 fixed questions of every model of `FRANKFURT_MODELS` the way the function does, with probe guardrails in the model's region: whether it declines what the documents do not say, adds figures of its own, cites the right document, answers German in German. |
 
+Svar runs in `eu-central-1` (Frankfurt). `ask`, `evaluate`, `topic_probe` and
+`grounding_probe` take `--region` and without it aim at `eu-west-1` (Ireland),
+the code's default region, whose stack stands at older code and is not carried
+on ([docs/status.md](../../docs/status.md)); add `--region eu-central-1` to
+measure what runs. `control_eval` defaults to `eu-central-1`.
+
 ## ask — the proof that answering works
 
 ```bash
-python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor
-python -m svar.scripts.ask "How do I export project data?" --workspace pellwick
-python -m svar.scripts.ask "How will the bulk export of all projects work?" --workspace quillmoor --json
+python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor --region eu-central-1
+python -m svar.scripts.ask "How do I export project data?" --workspace pellwick --region eu-central-1
+python -m svar.scripts.ask "How will the bulk export of all projects work?" --workspace quillmoor --json --region eu-central-1
 ```
 
 It sends what any client sends, the page included: a `POST` to
 `<WebUrl>/ask` with the workspace key in `X-Andur-Key` and the SHA-256 of the
 body in `x-amz-content-sha256`. Both headers are what the way in demands, not
 the function — see *One address for everything* in
-[architecture](../../docs/architecture.md#one-address-for-everything). The output
+[architecture](../../docs/architecture.md#one-address-for-everything). In
+Frankfurt the function's URL is `WebUrl` itself. In Ireland the output
 `FunctionUrl` of `AndurStack` is not an address to send to: from outside the account it
 answers 403 to everyone but CloudFront.
 

@@ -6,6 +6,15 @@ asked, retrieves passages from the knowledge base with a `workspace` filter,
 asks the answering model to answer from those passages only, and returns the
 answer with its sources and the layer of each source.
 
+The code builds this function for two regions, and they differ in the way in
+and the topic check. Svar runs in `eu-central-1` (Frankfurt): no CloudFront,
+the function's URL serves the page and `/ask`, and gpt-oss-120b in the region
+checks the denied topics. `eu-west-1` (Ireland) puts CloudFront in front and
+checks the topics with a guardrail; its stack stands at older code and is not
+carried on ([docs/status.md](../../docs/status.md)). A passage below that names
+CloudFront, the topic guardrail or the EU profile describes Ireland. The
+commands name `eu-central-1`.
+
 It has a Function URL, but that is not a way in from outside: the URL is set
 to `AWS_IAM`, and its resource policy names CloudFront alone, only for this
 stack's distribution. Inside the account a role with
@@ -63,7 +72,7 @@ runtime brings.
 ## Asking
 
 ```bash
-python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor
+python -m svar.scripts.ask "How do I export project data?" --workspace quillmoor --region eu-central-1
 ```
 
 That is the short way: the script reads the address from the outputs of
@@ -114,7 +123,7 @@ It is not in the repository, the template or any log. To copy it to the
 clipboard later without it showing up on screen:
 
 ```bash
-printf '%s' "$(aws ssm get-parameter --region eu-west-1 --name /andur/api-keys/quillmoor \
+printf '%s' "$(aws ssm get-parameter --region eu-central-1 --name /andur/api-keys/quillmoor \
   --with-decryption --query Parameter.Value --output text)" | clip   # macOS: pbcopy
 ```
 
@@ -128,8 +137,8 @@ No deploy touches a key. To replace one, delete the parameter and add it
 again; `add` refuses to overwrite a key that is there:
 
 ```bash
-MSYS_NO_PATHCONV=1 aws ssm delete-parameter --region eu-west-1 --name /andur/api-keys/quillmoor
-python -m taug.scripts.workspace add quillmoor
+MSYS_NO_PATHCONV=1 aws ssm delete-parameter --region eu-central-1 --name /andur/api-keys/quillmoor
+python -m taug.scripts.workspace --region eu-central-1 add quillmoor
 ```
 
 The function reads only the key of the workspace a request names: one
@@ -153,7 +162,7 @@ To revoke a key at once, change the function after deleting it — every
 running instance is replaced, and the new ones read the keys fresh:
 
 ```bash
-aws lambda update-function-configuration --region eu-west-1 --function-name andur-answer --description "keys rotated"
+aws lambda update-function-configuration --region eu-central-1 --function-name andur-answer --description "keys rotated"
 ```
 
 A new key works at once: a key that is not the one the function holds for
@@ -293,7 +302,7 @@ reaching the screen. Set `WORKSPACE` first; on macOS use `shasum -a 256` in
 place of `sha256sum`:
 
 ```bash
-HASH=$(MSYS_NO_PATHCONV=1 aws ssm get-parameter --region eu-west-1 \
+HASH=$(MSYS_NO_PATHCONV=1 aws ssm get-parameter --region eu-central-1 \
   --name "/andur/api-keys/$WORKSPACE" --with-decryption \
   --query Parameter.Value --output text | tr -d '\r\n' | sha256sum | cut -d' ' -f1)
 ```
@@ -311,7 +320,7 @@ numbers, and the condition refuses this write rather than resetting a
 counter that is already running:
 
 ```bash
-aws dynamodb put-item --region eu-west-1 --table-name andur-key-budgets \
+aws dynamodb put-item --region eu-central-1 --table-name andur-key-budgets \
   --condition-expression 'attribute_not_exists(first_used_at)' \
   --item "{\"key_hash\":{\"S\":\"$HASH\"},\"question_limit\":{\"N\":\"2\"},\"window_seconds\":{\"N\":\"21600\"},\"keep_seconds\":{\"N\":\"604800\"}}"
 ```
@@ -320,7 +329,7 @@ aws dynamodb put-item --region eu-west-1 --table-name andur-key-budgets \
 defaults:
 
 ```bash
-aws dynamodb delete-item --region eu-west-1 --table-name andur-key-budgets \
+aws dynamodb delete-item --region eu-central-1 --table-name andur-key-budgets \
   --key "{\"key_hash\":{\"S\":\"$HASH\"}}"
 ```
 
@@ -395,7 +404,7 @@ plan, when it adds the key or later, and takes it off again
 ([taug/scripts/README.md](../../taug/scripts/README.md#workspace--adding-and-removing-a-workspace)).
 The quota is there for a key in the wrong hands, not for the bill: at the
 measured mean of 0.0043 USD per answered question with Nova Pro at ten
-passages ([docs/costs.md](../../docs/costs.md)), a month used to the last
+passages in Ireland ([docs/costs.md](../../docs/costs.md)), a month used to the last
 question is about 26 USD on `betrieb` and 65 USD on `firma`.
 
 **German time.** A month and a day are German calendar months and days: they
@@ -928,7 +937,7 @@ cap on reads for unknown workspaces is a `failed` line with status 503. A bug is
 start names the boto3 and botocore versions of the runtime.
 
 ```bash
-aws logs tail /aws/lambda/andur-answer --region eu-west-1 --follow
+aws logs tail /aws/lambda/andur-answer --region eu-central-1 --follow
 ```
 
 `cost_usd` in the `answered` line is the answer's cost at the prices of
@@ -972,7 +981,9 @@ from files.
 | `PRICE_GROUNDING_PER_1K_UNITS` | USD per 1,000 text units of the grounding check, `0.10`. |
 | `PRICE_DATE` | The day those prices were read, `2026-09-28`, as `YYYY-MM-DD`. |
 
-The prices are the eu-west-1 standard-tier prices of Amazon Bedrock, read
+The values shown are those of the stack in eu-west-1, with Nova Pro; the
+stack in eu-central-1 gets Qwen3 235B's from the same table, read 06.10.2026.
+The prices are the standard-tier prices of Amazon Bedrock, read
 28.09.2026 from the AWS Price List API, the source of the pricing page; the
 source is in a comment next to them in the stack. The token prices come
 from `taug/infra/answer_models.py`, looked up by the model id the stack deploys,

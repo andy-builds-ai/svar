@@ -1,6 +1,6 @@
 # Vard's scripts — measuring the models he works with
 
-Two commands, both run from the repository root. What the scripts need (install, AWS login, the deployed stack): [taug/scripts/README.md](../../taug/scripts/README.md#what-they-need).
+Two commands, both run from the repository root. What the scripts need (install, AWS login): [taug/scripts/README.md](../../taug/scripts/README.md#what-they-need); they call models only, no stack, in `eu-central-1` unless `--region` names another.
 
 | Command | Does |
 |---|---|

@@ -110,8 +110,8 @@ Every decision is written down with its date and reason in
   until it is spent; a leaked demo key is a leak of ten questions.
 - **In Frankfurt the function's URL is the address, without CloudFront**
   ([decisions.md, 07.10.2026](../docs/decisions.md#2026-10-07-frankfurt-function-url)): no setting keeps
-  CloudFront's edge locations inside Germany. The price: no domain of its own
-  and no WAF. What caps a flood is the number of executions Lambda allows at
+  CloudFront's edge locations inside Germany. The price: the stacks give the
+  function no domain of its own and no WAF. What caps a flood is the number of executions Lambda allows at
   once. The stack reserves 10 executions for the function there: 5 for
   questions and 5 more for loading the page, in one pool that questions may
   take whole, and that reservation is the cap
@@ -282,7 +282,7 @@ Prices, the counter, the page and how each number was taken:
   example value, not a tuned one. Every answer logs both scores, so the
   threshold can be moved on evidence.
 - **The cost of a withheld answer is not counted** (above).
-- **Frankfurt has no domain of its own and no WAF.** The page and `/ask` are
+- **The stacks give Frankfurt no domain of its own and no WAF.** The page and `/ask` are
   the function's URL, `https://<id>.lambda-url.eu-central-1.on.aws/`; the
   workspace key is the gate there.
 - **The demo corpus is small:** 37 Markdown documents of two fictional
