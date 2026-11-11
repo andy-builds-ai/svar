@@ -474,6 +474,12 @@ def test_the_tier_follows_the_region_unless_it_is_named() -> None:
         control_eval.parse_args(["--region", "eu-west-1", "--topics-tier", "model"])
 
 
+def test_retrieval_and_models_both_run_in_frankfurt_by_default() -> None:
+    """Svar runs in Frankfurt; a run without regions must not fetch its passages in Ireland."""
+    args = control_eval.parse_args([])
+    assert (args.region, args.retrieve_region) == ("eu-central-1", "eu-central-1")
+
+
 @pytest.mark.usefixtures("frankfurt_topic_model")
 def test_without_a_topic_probe_the_regions_topic_model_checks_at_its_price() -> None:
     base = config.load_settings(ENVIRONMENT)

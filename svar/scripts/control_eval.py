@@ -84,7 +84,7 @@ from taug.infra.answer_models import (
     region_models,
 )
 from taug.scripts import utf8_output
-from taug.scripts.aws import REGION, AwsProblem, client
+from taug.scripts.aws import AwsProblem, client
 
 QUESTIONS_FILE = Path(__file__).with_name("evaluation-questions-control.json")
 
@@ -107,7 +107,8 @@ TIERS = ("classic", "standard", "model")
 
 
 def default_tier(region: str) -> str:
-    """The way the stack in ``region`` checks the topics: its topic model, or else Classic."""
+    """The topic tier a run in ``region`` takes: the region's topic model, as its stack checks
+    the topics, or else Classic, which keeps every check in the region."""
     return "model" if REGIONS.get(region) and REGIONS[region].topic_model_id else "classic"
 
 
@@ -290,8 +291,8 @@ def run_model(
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    """The command line; the topic tier defaults to the way the stack in the region checks
-    the topics."""
+    """The command line; the topic tier defaults to the region's topic model, or to Classic
+    where the region has none, and both regions default to eu-central-1."""
     parser = argparse.ArgumentParser(
         prog="python -m svar.scripts.control_eval",
         description="Measure how well answer models stay with their sources.",
@@ -313,8 +314,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--retrieve-region",
-        default=REGION,
-        help=f"the deployed function and its knowledge base; default {REGION}",
+        default=DEFAULT_REGION,
+        help=f"the deployed function and its knowledge base; default {DEFAULT_REGION}",
     )
     parser.add_argument(
         "--topics-tier",

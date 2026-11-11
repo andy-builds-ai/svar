@@ -517,8 +517,8 @@ adds a third probe, the topic guardrail in the Classic tier and without a
 guardrail profile, the only way a topic guardrail stays in Frankfurt; the
 Standard tier needs a profile (AWS refused it without one on 06.10.2026:
 "Enable cross-Region inference for your guardrail to use Standard tier").
-Retrieval stays with the deployed knowledge base in `--retrieve-region`,
-once per question, and every model gets the same passages; they are saved
+Retrieval stays with the deployed knowledge base in `--retrieve-region`
+(default `eu-central-1` as well), once per question, and every model gets the same passages; they are saved
 with the run. Prices and their date come from the table of `--region` in
 `taug/infra/answer_models.py` (`REGIONS`): a run of Nova Pro with
 `--region eu-west-1` counts Ireland's token prices, one with
