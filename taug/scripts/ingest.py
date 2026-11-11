@@ -447,7 +447,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Check the folder, then upload, prune and sync; ``--check`` stops after the check."""
+    """Check the folder, then upload, list what the folder no longer holds and sync;
+    ``--check`` stops after the check, and only ``--delete`` removes what was listed."""
     utf8_output()
     args = parse_args(argv)
 
